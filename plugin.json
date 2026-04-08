@@ -1,0 +1,11 @@
+{
+    "id": "io.github.logsquirl.costume-footer",
+    "name": "Custom Footer",
+    "version": "0.1.0",
+    "type": "ui",
+    "library": "logsquirl_costume_footer",
+    "api_version": 1,
+    "description": "Extract key-value pairs from logs via regex and display in footer or sidebar",
+    "author": "LogSquirl Contributors",
+    "license": "GPL-3.0-or-later"
+}

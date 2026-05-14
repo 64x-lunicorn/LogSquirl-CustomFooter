@@ -38,17 +38,35 @@ QMap<QString, QString> FooterScanner::scan( const QString& filePath,
     // Build compiled regexes for enabled entries only.
     struct Rule {
         QString key;
-        QRegularExpression regex;
+        QRegularExpression lineRegex;
+        QRegularExpression valueRegex;   // empty pattern = not used
+        bool hasTwoStage = false;
+        QList<ValueMapping> mappings;
     };
     QList<Rule> rules;
     for ( const auto& entry : entries ) {
-        if ( !entry.enabled || entry.regexPattern.isEmpty() ) {
+        if ( !entry.enabled || entry.linePattern.isEmpty() ) {
             continue;
         }
-        QRegularExpression re( entry.regexPattern );
-        if ( re.isValid() ) {
-            rules.append( { entry.key, std::move( re ) } );
+        QRegularExpression lineRe( entry.linePattern );
+        if ( !lineRe.isValid() ) {
+            continue;
         }
+
+        Rule rule;
+        rule.key = entry.key;
+        rule.lineRegex = std::move( lineRe );
+        rule.mappings = entry.mappings;
+
+        if ( !entry.valuePattern.isEmpty() ) {
+            QRegularExpression valRe( entry.valuePattern );
+            if ( valRe.isValid() ) {
+                rule.valueRegex = std::move( valRe );
+                rule.hasTwoStage = true;
+            }
+        }
+
+        rules.append( std::move( rule ) );
     }
 
     if ( rules.isEmpty() ) {
@@ -67,25 +85,51 @@ QMap<QString, QString> FooterScanner::scan( const QString& filePath,
         const QString line = stream.readLine();
         ++lineCount;
 
-        // Try each rule that hasn't matched yet.
         for ( int i = rules.size() - 1; i >= 0; --i ) {
             const auto& rule = rules[ i ];
             if ( results.contains( rule.key ) ) {
-                continue; // Already matched this key.
+                continue;
             }
 
-            const auto match = rule.regex.match( line );
-            if ( match.hasMatch() ) {
-                // Use first capturing group if available, otherwise full match.
-                const QString value = ( match.lastCapturedIndex() >= 1 )
-                                          ? match.captured( 1 )
-                                          : match.captured( 0 );
-                results.insert( rule.key, value );
+            const auto lineMatch = rule.lineRegex.match( line );
+            if ( !lineMatch.hasMatch() ) {
+                continue;
+            }
 
-                // If all rules matched, stop early.
-                if ( results.size() == rules.size() ) {
-                    return results;
+            QString rawValue;
+
+            if ( rule.hasTwoStage ) {
+                // Two-stage: use valueRegex on the same line.
+                const auto valMatch = rule.valueRegex.match( line );
+                if ( valMatch.hasMatch() ) {
+                    rawValue = ( valMatch.lastCapturedIndex() >= 1 )
+                                   ? valMatch.captured( 1 )
+                                   : valMatch.captured( 0 );
                 }
+                else {
+                    continue; // Value pattern didn't match — skip this line.
+                }
+            }
+            else {
+                // Single-stage: extract from lineRegex capture group.
+                rawValue = ( lineMatch.lastCapturedIndex() >= 1 )
+                               ? lineMatch.captured( 1 )
+                               : lineMatch.captured( 0 );
+            }
+
+            // Apply value mappings (exact string match).
+            QString displayValue = rawValue;
+            for ( const auto& mapping : rule.mappings ) {
+                if ( rawValue == mapping.pattern ) {
+                    displayValue = mapping.displayValue;
+                    break;
+                }
+            }
+
+            results.insert( rule.key, displayValue );
+
+            if ( results.size() == rules.size() ) {
+                return results;
             }
         }
 

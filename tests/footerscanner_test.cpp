@@ -39,7 +39,9 @@ static QString writeTempFile( const QTemporaryDir& dir, const QStringList& lines
 {
     const QString path = dir.path() + "/test.log";
     QFile file( path );
-    file.open( QIODevice::WriteOnly | QIODevice::Text );
+    if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+        return {};
+    }
     QTextStream out( &file );
     for ( const auto& line : lines ) {
         out << line << "\n";
@@ -62,8 +64,8 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
         const auto filePath = writeTempFile( tmpDir, lines );
 
         QList<FooterEntry> entries;
-        entries.append( { "VIN", "VIN:\\s+(\\S+)", true } );
-        entries.append( { "Timestamp", "Timestamp:\\s+(\\d+)", true } );
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+        entries.append( { "Timestamp", "Timestamp:\\s+(\\d+)", "", true, {} } );
 
         WHEN( "scanning with both entries enabled" )
         {
@@ -98,7 +100,7 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
         const auto filePath = writeTempFile( tmpDir, lines );
 
         QList<FooterEntry> entries;
-        entries.append( { "Status", "^(ERROR|OK)", true } );
+        entries.append( { "Status", "^(ERROR|OK)", "", true, {} } );
 
         WHEN( "scanning" )
         {
@@ -136,7 +138,7 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
         const auto filePath = writeTempFile( tmpDir, lines );
 
         QList<FooterEntry> entries;
-        entries.append( { "VIN", "VIN:\\s+(\\S+)", true } );
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
 
         WHEN( "maxLines is 2 (match is on line 3)" )
         {
@@ -156,6 +158,130 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
             {
                 REQUIRE( results.size() == 1 );
                 REQUIRE( results[ "VIN" ] == "ABC123" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterScanner supports two-stage matching", "[footerscanner]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+
+    GIVEN( "a log line containing a key-value pair" )
+    {
+        const QStringList lines = { "config: isComponentProtectionEnabled: false",
+                                    "config: maxRetries: 5" };
+        const auto filePath = writeTempFile( tmpDir, lines );
+
+        WHEN( "using a value pattern to extract from the matched line" )
+        {
+            QList<FooterEntry> entries;
+            entries.append(
+                { "Component Protection", "isComponentProtectionEnabled",
+                  ":\\s+(\\S+)$", true, {} } );
+
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the value pattern extracts from the found line" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "Component Protection" ] == "false" );
+            }
+        }
+
+        WHEN( "using only a line pattern without a value pattern" )
+        {
+            QList<FooterEntry> entries;
+            entries.append(
+                { "Retries", "maxRetries:\\s+(\\d+)", "", true, {} } );
+
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the line pattern capturing group is used" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "Retries" ] == "5" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterScanner applies value mappings", "[footerscanner]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+
+    GIVEN( "a log line with a boolean value and mappings defined" )
+    {
+        const QStringList lines = { "isComponentProtectionEnabled: false" };
+        const auto filePath = writeTempFile( tmpDir, lines );
+
+        QList<ValueMapping> mappings;
+        mappings.append( ValueMapping{ "true", "Enabled" } );
+        mappings.append( ValueMapping{ "false", "Disabled" } );
+
+        QList<FooterEntry> entries;
+        entries.append( { "Protection", "isComponentProtectionEnabled:\\s+(\\S+)",
+                          "", true, mappings } );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the extracted value is mapped to the display value" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "Protection" ] == "Disabled" );
+            }
+        }
+    }
+
+    GIVEN( "a value that does not match any mapping" )
+    {
+        const QStringList lines = { "status: unknown" };
+        const auto filePath = writeTempFile( tmpDir, lines );
+
+        QList<ValueMapping> mappings;
+        mappings.append( ValueMapping{ "true", "Enabled" } );
+        mappings.append( ValueMapping{ "false", "Disabled" } );
+
+        QList<FooterEntry> entries;
+        entries.append( { "Status", "status:\\s+(\\S+)", "", true, mappings } );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the raw extracted value is returned" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "Status" ] == "unknown" );
+            }
+        }
+    }
+
+    GIVEN( "two-stage matching combined with value mappings" )
+    {
+        const QStringList lines = { "config isComponentProtectionEnabled: true" };
+        const auto filePath = writeTempFile( tmpDir, lines );
+
+        QList<ValueMapping> mappings;
+        mappings.append( ValueMapping{ "true", "Active" } );
+        mappings.append( ValueMapping{ "false", "Inactive" } );
+
+        QList<FooterEntry> entries;
+        entries.append( { "Protection", "isComponentProtectionEnabled",
+                          ":\\s+(\\S+)$", true, mappings } );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the value is extracted and mapped" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "Protection" ] == "Active" );
             }
         }
     }

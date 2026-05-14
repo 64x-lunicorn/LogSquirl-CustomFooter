@@ -182,6 +182,15 @@ typedef struct {
     /** Remove a previously registered sidebar tab. */
     void (*unregister_sidebar_tab)( void* handle, void* qwidget_ptr );
 
+    /**
+     * Register a QWidget* for the footer area (bottom of the window).
+     * The plugin creates and owns the widget; the host parents it.
+     */
+    void (*register_footer_widget)( void* handle, void* qwidget_ptr );
+
+    /** Remove a previously registered footer widget. */
+    void (*unregister_footer_widget)( void* handle, void* qwidget_ptr );
+
     /* ── Active file queries ───────────────────────────────────────── */
 
     /**

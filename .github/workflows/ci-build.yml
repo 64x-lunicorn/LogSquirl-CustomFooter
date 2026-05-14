@@ -1,0 +1,199 @@
+# ============================================================================
+# CI Build — Build and test the LogSquirl Custom Footer plugin on all platforms
+# ============================================================================
+name: CI Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            qt-arch: linux_gcc_64
+            artifact: plugin-linux-x64
+            lib-name: liblogsquirl_costume_footer.so
+            cmake-flags: ""
+
+          - name: macOS arm64
+            os: macos-15
+            qt-arch: clang_64
+            artifact: plugin-macos-arm64
+            lib-name: liblogsquirl_costume_footer.dylib
+            cmake-flags: ""
+
+          - name: Windows x64
+            os: windows-2025
+            qt-arch: win64_msvc2022_64
+            artifact: plugin-windows-x64
+            lib-name: logsquirl_costume_footer.dll
+            cmake-flags: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.10.3"
+          arch: ${{ matrix.qt-arch }}
+          cache: true
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v6
+
+      - name: Configure
+        run: >
+          cmake -B build -S .
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTS=ON
+          ${{ matrix.cmake-flags }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -C Release
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Verify exported symbols (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "=== Exported plugin symbols ==="
+          nm -gU build/${{ matrix.lib-name }} | grep logsquirl_plugin || true
+
+      # ── macOS rpath fix ─────────────────────────────────────────────────
+      - name: Fix macOS rpaths
+        if: runner.os == 'macOS'
+        run: |
+          DYLIB="build/${{ matrix.lib-name }}"
+          echo "=== Current rpaths ==="
+          otool -l "$DYLIB" | grep -A2 LC_RPATH || true
+
+          for rp in $(otool -l "$DYLIB" | awk '/cmd LC_RPATH/{found=1} found && /path /{print $2; found=0}'); do
+            case "$rp" in
+              /Users/runner/*|/home/runner/*|/opt/hostedtoolcache/*)
+                echo "Removing CI rpath: $rp"
+                install_name_tool -delete_rpath "$rp" "$DYLIB" || true
+                ;;
+            esac
+          done
+
+          install_name_tool -add_rpath @loader_path/../../../Frameworks "$DYLIB" 2>/dev/null || true
+          install_name_tool -add_rpath @loader_path "$DYLIB" 2>/dev/null || true
+
+          echo "=== Updated rpaths ==="
+          otool -l "$DYLIB" | grep -A2 LC_RPATH || true
+
+      - name: Verify exported symbols (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          echo === Exported plugin symbols ===
+          dumpbin /exports build\${{ matrix.lib-name }}
+          dumpbin /exports build\${{ matrix.lib-name }} | findstr logsquirl_plugin || ver >nul
+
+      # ── macOS Code Signing & Notarization ───────────────────────────────
+      - name: Import signing certificate
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call'
+        uses: apple-actions/import-codesign-certs@v6
+        with:
+          p12-file-base64: ${{ secrets.MACOS_P12_FILE }}
+          p12-password: ${{ secrets.MACOS_P12_PASSWORD }}
+
+      - name: Resolve signing identity
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call'
+        shell: bash
+        run: |
+          CODESIGN_ID=$(security find-identity -v -p codesigning \
+            | grep "Developer ID Application" | head -1 \
+            | sed 's/.*"\(.*\)".*/\1/' || true)
+          if [ -z "$CODESIGN_ID" ]; then
+            echo "::warning::No Developer ID Application identity found"
+          else
+            echo "Using codesign identity: $CODESIGN_ID"
+          fi
+          echo "CODESIGN_ID=$CODESIGN_ID" >> "$GITHUB_ENV"
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp build/${{ matrix.lib-name }} staging/
+          cp plugin.json staging/
+
+      - name: Sign plugin artifacts
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call' && env.CODESIGN_ID != ''
+        shell: bash
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_ID" \
+            "staging/${{ matrix.lib-name }}"
+          echo "=== Verify signature ==="
+          codesign --verify --strict --verbose=2 "staging/${{ matrix.lib-name }}"
+
+      - name: Notarize plugin
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call' && env.CODESIGN_ID != ''
+        shell: bash
+        run: |
+          cd staging && zip ../plugin-notarize.zip * && cd ..
+          xcrun notarytool submit --wait \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_PASSWORD }}" \
+            plugin-notarize.zip \
+            | tee notary.log
+
+          status=$(grep -i "status:" notary.log | tail -1 | awk '{print $NF}')
+          notary_id=$(awk '$1=="id:"{id=$2} END{print id}' notary.log)
+
+          xcrun notarytool log \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_PASSWORD }}" \
+            "$notary_id" notary_log.json || true
+          echo "=== Notarization log ==="
+          cat notary_log.json || true
+
+          if [ "$status" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $status"
+            exit 1
+          fi
+          rm -f plugin-notarize.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: staging/
+          if-no-files-found: error

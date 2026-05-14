@@ -25,8 +25,8 @@
 #include <catch2/catch.hpp>
 
 #include "footerconfig.h"
-#include "footerentry.h"
 
+#include <QFile>
 #include <QTemporaryDir>
 
 using namespace costume_footer;
@@ -36,11 +36,17 @@ SCENARIO( "FooterConfig persists entries to INI file", "[footerconfig]" )
     QTemporaryDir tmpDir;
     REQUIRE( tmpDir.isValid() );
 
-    GIVEN( "a list of footer entries" )
+    GIVEN( "a list of footer entries with value pattern and mappings" )
     {
         QList<FooterEntry> entries;
-        entries.append( { "VIN", "VIN:\\s+(\\S+)", true } );
-        entries.append( { "ECU", "ECU=([A-Z0-9]+)", false } );
+
+        QList<ValueMapping> mappings;
+        mappings.append( ValueMapping{ "true", "Enabled" } );
+        mappings.append( ValueMapping{ "false", "Disabled" } );
+
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+        entries.append( { "Protection", "isComponentProtection",
+                          ":\\s+(\\S+)$", false, mappings } );
 
         WHEN( "saving and loading entries" )
         {
@@ -52,12 +58,20 @@ SCENARIO( "FooterConfig persists entries to INI file", "[footerconfig]" )
                 REQUIRE( loaded.size() == 2 );
 
                 REQUIRE( loaded[ 0 ].key == "VIN" );
-                REQUIRE( loaded[ 0 ].regexPattern == "VIN:\\s+(\\S+)" );
+                REQUIRE( loaded[ 0 ].linePattern == "VIN:\\s+(\\S+)" );
+                REQUIRE( loaded[ 0 ].valuePattern.isEmpty() );
                 REQUIRE( loaded[ 0 ].enabled == true );
+                REQUIRE( loaded[ 0 ].mappings.isEmpty() );
 
-                REQUIRE( loaded[ 1 ].key == "ECU" );
-                REQUIRE( loaded[ 1 ].regexPattern == "ECU=([A-Z0-9]+)" );
+                REQUIRE( loaded[ 1 ].key == "Protection" );
+                REQUIRE( loaded[ 1 ].linePattern == "isComponentProtection" );
+                REQUIRE( loaded[ 1 ].valuePattern == ":\\s+(\\S+)$" );
                 REQUIRE( loaded[ 1 ].enabled == false );
+                REQUIRE( loaded[ 1 ].mappings.size() == 2 );
+                REQUIRE( loaded[ 1 ].mappings[ 0 ].pattern == "true" );
+                REQUIRE( loaded[ 1 ].mappings[ 0 ].displayValue == "Enabled" );
+                REQUIRE( loaded[ 1 ].mappings[ 1 ].pattern == "false" );
+                REQUIRE( loaded[ 1 ].mappings[ 1 ].displayValue == "Disabled" );
             }
         }
     }
@@ -76,32 +90,92 @@ SCENARIO( "FooterConfig persists entries to INI file", "[footerconfig]" )
     }
 }
 
-SCENARIO( "FooterConfig persists display mode", "[footerconfig]" )
+SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
 {
     QTemporaryDir tmpDir;
     REQUIRE( tmpDir.isValid() );
 
-    GIVEN( "a display mode setting" )
+    GIVEN( "a list of entries with mappings" )
     {
-        WHEN( "saving and loading DisplayMode::Both" )
-        {
-            FooterConfig::saveDisplayMode( tmpDir.path(), DisplayMode::Both );
-            const auto loaded = FooterConfig::loadDisplayMode( tmpDir.path() );
+        QList<ValueMapping> mappings;
+        mappings.append( ValueMapping{ "0", "Off" } );
+        mappings.append( ValueMapping{ "1", "On" } );
 
-            THEN( "the loaded mode matches" )
+        QList<FooterEntry> entries;
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+        entries.append( { "Feature", "feature_flag",
+                          "=\\s*(\\d+)", true, mappings } );
+
+        const QString jsonPath = tmpDir.path() + "/rules.json";
+
+        WHEN( "exporting to JSON and importing back" )
+        {
+            const bool ok = FooterConfig::exportToJson( jsonPath, entries );
+            REQUIRE( ok );
+
+            QString error;
+            const auto imported = FooterConfig::importFromJson( jsonPath, &error );
+
+            THEN( "the imported entries match" )
             {
-                REQUIRE( loaded == DisplayMode::Both );
+                REQUIRE( error.isEmpty() );
+                REQUIRE( imported.size() == 2 );
+
+                REQUIRE( imported[ 0 ].key == "VIN" );
+                REQUIRE( imported[ 0 ].linePattern == "VIN:\\s+(\\S+)" );
+                REQUIRE( imported[ 0 ].valuePattern.isEmpty() );
+                REQUIRE( imported[ 0 ].enabled == true );
+                REQUIRE( imported[ 0 ].mappings.isEmpty() );
+
+                REQUIRE( imported[ 1 ].key == "Feature" );
+                REQUIRE( imported[ 1 ].linePattern == "feature_flag" );
+                REQUIRE( imported[ 1 ].valuePattern == "=\\s*(\\d+)" );
+                REQUIRE( imported[ 1 ].enabled == true );
+                REQUIRE( imported[ 1 ].mappings.size() == 2 );
+                REQUIRE( imported[ 1 ].mappings[ 0 ].pattern == "0" );
+                REQUIRE( imported[ 1 ].mappings[ 0 ].displayValue == "Off" );
+                REQUIRE( imported[ 1 ].mappings[ 1 ].pattern == "1" );
+                REQUIRE( imported[ 1 ].mappings[ 1 ].displayValue == "On" );
             }
         }
+    }
 
-        WHEN( "loading from empty config" )
+    GIVEN( "a non-existent file" )
+    {
+        WHEN( "importing" )
         {
-            const auto loaded = FooterConfig::loadDisplayMode( tmpDir.path() );
+            QString error;
+            const auto imported
+                = FooterConfig::importFromJson( "/does/not/exist.json", &error );
 
-            THEN( "default is Footer" )
+            THEN( "an error is reported and result is empty" )
             {
-                REQUIRE( loaded == DisplayMode::Footer );
+                REQUIRE( imported.isEmpty() );
+                REQUIRE_FALSE( error.isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "an invalid JSON file" )
+    {
+        const QString badPath = tmpDir.path() + "/bad.json";
+        QFile f( badPath );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "{ not valid json" );
+        f.close();
+
+        WHEN( "importing" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( badPath, &error );
+
+            THEN( "a parse error is reported" )
+            {
+                REQUIRE( imported.isEmpty() );
+                REQUIRE( error.contains( "parse" ) );
             }
         }
     }
 }
+
+

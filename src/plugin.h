@@ -31,8 +31,7 @@ struct PluginState {
     void* handle = nullptr;
     bool initialised = false;
 
-    FooterDisplayWidget* statusWidget = nullptr;  ///< Registered in status bar.
-    FooterDisplayWidget* sidebarWidget = nullptr;  ///< Registered in sidebar tab.
+    FooterDisplayWidget* footerWidget = nullptr;  ///< Registered in footer bar.
 };
 
 extern PluginState g_state;

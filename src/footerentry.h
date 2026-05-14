@@ -19,22 +19,24 @@
 
 #pragma once
 
+#include <QList>
 #include <QString>
 
 namespace costume_footer {
 
-/// A single key-value extraction rule.
-struct FooterEntry {
-    QString key;          ///< Display label, e.g. "VIN".
-    QString regexPattern; ///< Regular expression to search for.
-    bool enabled = true;  ///< Whether this entry is active.
+/// Maps a raw extracted value to a human-readable display string.
+struct ValueMapping {
+    QString pattern;      ///< Raw value to match (exact string comparison).
+    QString displayValue; ///< What to show instead.
 };
 
-/// Where matched key-values are displayed.
-enum class DisplayMode {
-    Footer  = 0, ///< Status bar only.
-    Sidebar = 1, ///< Sidebar tab only.
-    Both    = 2  ///< Status bar and sidebar.
+/// A single key-value extraction rule.
+struct FooterEntry {
+    QString key;            ///< Display label, e.g. "Component Protection".
+    QString linePattern;    ///< Regex to find the target line.
+    QString valuePattern;   ///< Optional regex to extract value from found line.
+    bool enabled = true;    ///< Whether this entry is active.
+    QList<ValueMapping> mappings; ///< Value substitution rules.
 };
 
 } // namespace costume_footer

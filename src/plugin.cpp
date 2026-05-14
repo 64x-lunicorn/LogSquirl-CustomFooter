@@ -64,7 +64,7 @@ static const LogSquirlPluginInfo kPluginInfo = {
     /* id          */ "io.github.logsquirl.costume-footer",
     /* name        */ "Custom Footer",
     /* version     */ "0.1.0",
-    /* description */ "Extract key-value pairs from logs via regex and display in footer/sidebar",
+    /* description */ "Extract key-value pairs from logs via regex and display in footer",
     /* author      */ "LogSquirl Contributors",
     /* license     */ "GPL-3.0-or-later",
     /* type        */ LOGSQUIRL_PLUGIN_UI,
@@ -97,11 +97,8 @@ static void rescanActiveFile()
     const QString filePath = pathUtf8 ? QString::fromUtf8( pathUtf8 ) : QString();
 
     if ( filePath.isEmpty() ) {
-        if ( st.statusWidget ) {
-            st.statusWidget->clearValues();
-        }
-        if ( st.sidebarWidget ) {
-            st.sidebarWidget->clearValues();
+        if ( st.footerWidget ) {
+            st.footerWidget->clearValues();
         }
         return;
     }
@@ -109,28 +106,23 @@ static void rescanActiveFile()
     const auto dir = configDir();
     const auto entries = costume_footer::FooterConfig::loadEntries( dir );
     const int maxLines = costume_footer::FooterConfig::loadMaxLines( dir );
-    const auto mode = costume_footer::FooterConfig::loadDisplayMode( dir );
 
     const auto results = costume_footer::FooterScanner::scan( filePath, entries, maxLines );
 
-    // Update the appropriate widget(s) based on display mode.
-    if ( st.statusWidget ) {
-        if ( mode == costume_footer::DisplayMode::Footer
-             || mode == costume_footer::DisplayMode::Both ) {
-            st.statusWidget->updateValues( results );
+    // Build an ordered pair list following the entry definition order.
+    QList<QPair<QString, QString>> ordered;
+    for ( const auto& entry : entries ) {
+        if ( !entry.enabled ) {
+            continue;
         }
-        else {
-            st.statusWidget->clearValues();
+        auto it = results.find( entry.key );
+        if ( it != results.end() ) {
+            ordered.append( { entry.key, it.value() } );
         }
     }
-    if ( st.sidebarWidget ) {
-        if ( mode == costume_footer::DisplayMode::Sidebar
-             || mode == costume_footer::DisplayMode::Both ) {
-            st.sidebarWidget->updateValues( results );
-        }
-        else {
-            st.sidebarWidget->clearValues();
-        }
+
+    if ( st.footerWidget ) {
+        st.footerWidget->updateValues( ordered );
     }
 }
 
@@ -145,21 +137,18 @@ static void showEditorDialog( void* /* userData */ )
 {
     const auto dir = configDir();
     auto entries = costume_footer::FooterConfig::loadEntries( dir );
-    auto mode = costume_footer::FooterConfig::loadDisplayMode( dir );
 
-    costume_footer::FooterEditor editor( entries, mode, nullptr );
+    costume_footer::FooterEditor editor( entries, nullptr );
 
     // Apply button: save and rescan without closing the dialog.
     QObject::connect( &editor, &costume_footer::FooterEditor::applied, [&editor]() {
         const auto d = configDir();
         costume_footer::FooterConfig::saveEntries( d, editor.entries() );
-        costume_footer::FooterConfig::saveDisplayMode( d, editor.displayMode() );
         rescanActiveFile();
     } );
 
     if ( editor.exec() == QDialog::Accepted ) {
         costume_footer::FooterConfig::saveEntries( dir, editor.entries() );
-        costume_footer::FooterConfig::saveDisplayMode( dir, editor.displayMode() );
         rescanActiveFile();
     }
 }
@@ -167,6 +156,9 @@ static void showEditorDialog( void* /* userData */ )
 // ── Exported C entry points ──────────────────────────────────────────────
 
 extern "C" {
+
+LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( void );
+LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void );
 
 LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( void )
 {
@@ -179,6 +171,11 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
         return 1;
     }
 
+    // Guard against double-initialisation: clean up previous state.
+    if ( costume_footer::g_state.initialised ) {
+        logsquirl_plugin_shutdown();
+    }
+
     costume_footer::g_state.api = api;
     costume_footer::g_state.handle = handle;
     costume_footer::g_state.initialised = true;
@@ -189,14 +186,10 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     api->register_menu_action( handle, "Plugins", "Custom Footer\u2026",
                                &showEditorDialog, nullptr );
 
-    // Create display widgets.
-    costume_footer::g_state.statusWidget = new costume_footer::FooterDisplayWidget();
-    api->register_status_widget( handle,
-                                 static_cast<void*>( costume_footer::g_state.statusWidget ) );
-
-    costume_footer::g_state.sidebarWidget = new costume_footer::FooterDisplayWidget();
-    api->register_sidebar_tab( handle, "Custom Footer",
-                               static_cast<void*>( costume_footer::g_state.sidebarWidget ) );
+    // Create footer display widget.
+    costume_footer::g_state.footerWidget = new costume_footer::FooterDisplayWidget();
+    api->register_footer_widget( handle,
+                                 static_cast<void*>( costume_footer::g_state.footerWidget ) );
 
     // Register callback for active file changes.
     api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
@@ -212,20 +205,12 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
     costume_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
 
-    if ( costume_footer::g_state.sidebarWidget ) {
-        costume_footer::g_state.api->unregister_sidebar_tab(
+    if ( costume_footer::g_state.footerWidget ) {
+        costume_footer::g_state.api->unregister_footer_widget(
             costume_footer::g_state.handle,
-            static_cast<void*>( costume_footer::g_state.sidebarWidget ) );
-        delete costume_footer::g_state.sidebarWidget;
-        costume_footer::g_state.sidebarWidget = nullptr;
-    }
-
-    if ( costume_footer::g_state.statusWidget ) {
-        costume_footer::g_state.api->unregister_status_widget(
-            costume_footer::g_state.handle,
-            static_cast<void*>( costume_footer::g_state.statusWidget ) );
-        delete costume_footer::g_state.statusWidget;
-        costume_footer::g_state.statusWidget = nullptr;
+            static_cast<void*>( costume_footer::g_state.footerWidget ) );
+        delete costume_footer::g_state.footerWidget;
+        costume_footer::g_state.footerWidget = nullptr;
     }
 
     costume_footer::g_state.api = nullptr;

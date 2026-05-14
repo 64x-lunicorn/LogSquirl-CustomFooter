@@ -21,9 +21,10 @@
 
 #include "footerentry.h"
 
-#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QGroupBox>
+#include <QLabel>
 #include <QList>
 #include <QTableWidget>
 #include <QToolButton>
@@ -33,10 +34,10 @@ namespace costume_footer {
 /**
  * Modal dialog for editing footer extraction rules.
  *
- * Layout modelled after PredefinedFilterSetEdit:
- *   - QTableWidget with three columns: Enabled (checkbox), Key, Regex
- *   - Toolbar row with [+] [-] [↑] [↓] buttons
- *   - ComboBox for DisplayMode selection
+ * Layout:
+ *   - QTableWidget with five columns: Enabled, Key, Line Pattern, Value Pattern, Mappings
+ *   - Toolbar row with [+] [-] [↑] [↓] [Import] [Export] buttons
+ *   - Inline mapping editor panel below the table
  *   - QDialogButtonBox with OK / Cancel / Apply
  */
 class FooterEditor : public QDialog {
@@ -44,13 +45,10 @@ class FooterEditor : public QDialog {
 
   public:
     explicit FooterEditor( const QList<FooterEntry>& entries,
-                           DisplayMode mode, QWidget* parent = nullptr );
+                           QWidget* parent = nullptr );
 
     /// Return the edited list of entries.
-    QList<FooterEntry> entries() const;
-
-    /// Return the selected display mode.
-    DisplayMode displayMode() const;
+    QList<FooterEntry> entries();
 
   Q_SIGNALS:
     /// Emitted when the user clicks Apply.
@@ -62,18 +60,38 @@ class FooterEditor : public QDialog {
     void moveEntryUp();
     void moveEntryDown();
     void updateButtons();
+    void importRules();
+    void exportRules();
+    void onRuleSelectionChanged();
+    void addMapping();
+    void removeMapping();
+    void syncMappingsToEntry();
 
   private:
     void populateTable( const QList<FooterEntry>& entries );
     QList<FooterEntry> tableToEntries() const;
+    void loadMappingsForRow( int row );
+    void saveMappingsForRow( int row );
+    void updateMappingLabel( int row );
+
+    /// Stores the per-row mappings (not held in the table cells).
+    QList<QList<ValueMapping>> mappingsData_;
 
     QTableWidget* table_ = nullptr;
     QToolButton* addButton_ = nullptr;
     QToolButton* removeButton_ = nullptr;
     QToolButton* upButton_ = nullptr;
     QToolButton* downButton_ = nullptr;
-    QComboBox* modeCombo_ = nullptr;
+    QToolButton* importButton_ = nullptr;
+    QToolButton* exportButton_ = nullptr;
     QDialogButtonBox* buttonBox_ = nullptr;
+
+    // Mapping editor panel
+    QGroupBox* mappingGroup_ = nullptr;
+    QTableWidget* mappingTable_ = nullptr;
+    QToolButton* addMappingButton_ = nullptr;
+    QToolButton* removeMappingButton_ = nullptr;
+    int currentMappingRow_ = -1;
 };
 
 } // namespace costume_footer

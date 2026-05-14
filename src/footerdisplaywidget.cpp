@@ -35,7 +35,7 @@ FooterDisplayWidget::FooterDisplayWidget( QWidget* parent )
     layout->addWidget( label_ );
 }
 
-void FooterDisplayWidget::updateValues( const QMap<QString, QString>& values )
+void FooterDisplayWidget::updateValues( const QList<QPair<QString, QString>>& values )
 {
     if ( values.isEmpty() ) {
         clearValues();
@@ -43,10 +43,9 @@ void FooterDisplayWidget::updateValues( const QMap<QString, QString>& values )
     }
 
     QStringList parts;
-    // QMap iterates in key order, which gives consistent display.
-    for ( auto it = values.constBegin(); it != values.constEnd(); ++it ) {
-        parts.append( QString( "<b>%1:</b> %2" ).arg( it.key().toHtmlEscaped(),
-                                                       it.value().toHtmlEscaped() ) );
+    for ( const auto& [key, value] : values ) {
+        parts.append( QString( "<b>%1:</b> %2" ).arg( key.toHtmlEscaped(),
+                                                       value.toHtmlEscaped() ) );
     }
 
     label_->setText( parts.join( "  |  " ) );

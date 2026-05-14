@@ -19,6 +19,10 @@
 
 #include "footerconfig.h"
 
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSettings>
 
 namespace costume_footer {
@@ -38,8 +42,23 @@ QList<FooterEntry> FooterConfig::loadEntries( const QString& configDir )
         settings.setArrayIndex( i );
         FooterEntry entry;
         entry.key = settings.value( "key" ).toString();
-        entry.regexPattern = settings.value( "regex" ).toString();
+        // Read linePattern; fall back to "regex" for backward compatibility
+        entry.linePattern = settings.value( "linePattern",
+                                            settings.value( "regex" ) ).toString();
+        entry.valuePattern = settings.value( "valuePattern" ).toString();
         entry.enabled = settings.value( "enabled", true ).toBool();
+
+        // Read mappings sub-array
+        const int mapCount = settings.beginReadArray( "mappings" );
+        for ( int m = 0; m < mapCount; ++m ) {
+            settings.setArrayIndex( m );
+            ValueMapping mapping;
+            mapping.pattern = settings.value( "pattern" ).toString();
+            mapping.displayValue = settings.value( "display" ).toString();
+            entry.mappings.append( mapping );
+        }
+        settings.endArray();
+
         entries.append( entry );
     }
     settings.endArray();
@@ -56,24 +75,20 @@ void FooterConfig::saveEntries( const QString& configDir,
     for ( int i = 0; i < entries.size(); ++i ) {
         settings.setArrayIndex( i );
         settings.setValue( "key", entries[ i ].key );
-        settings.setValue( "regex", entries[ i ].regexPattern );
+        settings.setValue( "linePattern", entries[ i ].linePattern );
+        settings.setValue( "valuePattern", entries[ i ].valuePattern );
         settings.setValue( "enabled", entries[ i ].enabled );
+
+        // Write mappings sub-array
+        settings.beginWriteArray( "mappings", entries[ i ].mappings.size() );
+        for ( int m = 0; m < entries[ i ].mappings.size(); ++m ) {
+            settings.setArrayIndex( m );
+            settings.setValue( "pattern", entries[ i ].mappings[ m ].pattern );
+            settings.setValue( "display", entries[ i ].mappings[ m ].displayValue );
+        }
+        settings.endArray();
     }
     settings.endArray();
-}
-
-DisplayMode FooterConfig::loadDisplayMode( const QString& configDir )
-{
-    QSettings settings( configPath( configDir ), QSettings::IniFormat );
-    return static_cast<DisplayMode>(
-        settings.value( "display/mode", static_cast<int>( DisplayMode::Footer ) )
-            .toInt() );
-}
-
-void FooterConfig::saveDisplayMode( const QString& configDir, DisplayMode mode )
-{
-    QSettings settings( configPath( configDir ), QSettings::IniFormat );
-    settings.setValue( "display/mode", static_cast<int>( mode ) );
 }
 
 int FooterConfig::loadMaxLines( const QString& configDir )
@@ -86,6 +101,97 @@ void FooterConfig::saveMaxLines( const QString& configDir, int maxLines )
 {
     QSettings settings( configPath( configDir ), QSettings::IniFormat );
     settings.setValue( "scan/maxLines", maxLines );
+}
+
+bool FooterConfig::exportToJson( const QString& filePath,
+                                 const QList<FooterEntry>& entries )
+{
+    QJsonArray jsonEntries;
+    for ( const auto& entry : entries ) {
+        QJsonObject obj;
+        obj[ "key" ] = entry.key;
+        obj[ "linePattern" ] = entry.linePattern;
+        obj[ "valuePattern" ] = entry.valuePattern;
+        obj[ "enabled" ] = entry.enabled;
+
+        QJsonArray jsonMappings;
+        for ( const auto& mapping : entry.mappings ) {
+            QJsonObject mapObj;
+            mapObj[ "pattern" ] = mapping.pattern;
+            mapObj[ "display" ] = mapping.displayValue;
+            jsonMappings.append( mapObj );
+        }
+        obj[ "mappings" ] = jsonMappings;
+
+        jsonEntries.append( obj );
+    }
+
+    QJsonObject root;
+    root[ "version" ] = 1;
+    root[ "entries" ] = jsonEntries;
+
+    QFile file( filePath );
+    if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+        return false;
+    }
+    file.write( QJsonDocument( root ).toJson( QJsonDocument::Indented ) );
+    return true;
+}
+
+QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath,
+                                                 QString* errorOut )
+{
+    QList<FooterEntry> entries;
+
+    QFile file( filePath );
+    if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "Cannot open file: %1" ).arg( filePath );
+        }
+        return entries;
+    }
+
+    QJsonParseError parseError;
+    const auto doc = QJsonDocument::fromJson( file.readAll(), &parseError );
+    if ( doc.isNull() ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "JSON parse error: %1" )
+                            .arg( parseError.errorString() );
+        }
+        return entries;
+    }
+
+    const auto root = doc.object();
+    const int version = root[ "version" ].toInt( 0 );
+    if ( version < 1 ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "Unknown or missing version field" );
+        }
+        return entries;
+    }
+
+    const auto jsonEntries = root[ "entries" ].toArray();
+    for ( const auto& val : jsonEntries ) {
+        const auto obj = val.toObject();
+        FooterEntry entry;
+        entry.key = obj[ "key" ].toString();
+        entry.linePattern = obj[ "linePattern" ].toString();
+        entry.valuePattern = obj[ "valuePattern" ].toString();
+        entry.enabled = obj[ "enabled" ].toBool( true );
+
+        const auto jsonMappings = obj[ "mappings" ].toArray();
+        for ( const auto& mapVal : jsonMappings ) {
+            const auto mapObj = mapVal.toObject();
+            ValueMapping mapping;
+            mapping.pattern = mapObj[ "pattern" ].toString();
+            mapping.displayValue = mapObj[ "display" ].toString();
+            entry.mappings.append( mapping );
+        }
+
+        entries.append( entry );
+    }
+
+    return entries;
 }
 
 } // namespace costume_footer

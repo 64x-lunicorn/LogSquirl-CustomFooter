@@ -18,7 +18,10 @@ add_executable(logsquirl_costume_footer_tests
     tests_main.cpp
     plugininfo_test.cpp
     footerscanner_test.cpp
+    footerscanner_edge_test.cpp
     footerconfig_test.cpp
+    footerconfig_maxlines_test.cpp
+    footerdisplaywidget_test.cpp
 )
 
 set_target_properties(logsquirl_costume_footer_tests PROPERTIES

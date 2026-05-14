@@ -20,7 +20,8 @@
 #pragma once
 
 #include <QLabel>
-#include <QMap>
+#include <QList>
+#include <QPair>
 #include <QString>
 #include <QWidget>
 
@@ -29,7 +30,6 @@ namespace costume_footer {
 /**
  * Widget that displays matched key-value pairs.
  *
- * Used both as a status-bar widget (horizontal flow) and as a sidebar widget.
  * Contains a single QLabel that is updated via updateValues().
  */
 class FooterDisplayWidget : public QWidget {
@@ -38,8 +38,8 @@ class FooterDisplayWidget : public QWidget {
   public:
     explicit FooterDisplayWidget( QWidget* parent = nullptr );
 
-    /// Replace displayed values with a new set of key-value pairs.
-    void updateValues( const QMap<QString, QString>& values );
+    /// Replace displayed values with an ordered list of key-value pairs.
+    void updateValues( const QList<QPair<QString, QString>>& values );
 
     /// Clear all displayed values.
     void clearValues();

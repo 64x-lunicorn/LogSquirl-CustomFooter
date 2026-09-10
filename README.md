@@ -155,13 +155,13 @@ plugin search directories:
 
 | Platform | Plugin Directory |
 |----------|-----------------|
-| macOS    | `~/Library/Application Support/logsquirl/plugins/io.github.logsquirl.custom-footer/` |
-| Linux    | `~/.local/share/logsquirl/plugins/io.github.logsquirl.custom-footer/` |
-| Windows  | `%APPDATA%/logsquirl/plugins/io.github.logsquirl.custom-footer/` |
+| macOS    | `~/Library/Application Support/logsquirl/plugins/io.github.logsquirl.customfooter/` |
+| Linux    | `~/.local/share/logsquirl/plugins/io.github.logsquirl.customfooter/` |
+| Windows  | `%APPDATA%/logsquirl/plugins/io.github.logsquirl.customfooter/` |
 
 ```bash
 # Example for macOS:
-DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.custom-footer"
+DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.customfooter"
 mkdir -p "$DEST"
 cp build/liblogsquirl_custom_footer.dylib "$DEST/"
 cp plugin.json "$DEST/"

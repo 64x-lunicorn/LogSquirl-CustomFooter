@@ -59,7 +59,7 @@ target_link_libraries(logsquirl_custom_footer
 include(GNUInstallDirs)
 
 set(PLUGIN_INSTALL_DIR
-    "${CMAKE_INSTALL_DATADIR}/LogSquirl/plugins/io.github.logsquirl.custom-footer"
+    "${CMAKE_INSTALL_DATADIR}/LogSquirl/plugins/io.github.logsquirl.customfooter"
     CACHE PATH "Plugin installation directory"
 )
 

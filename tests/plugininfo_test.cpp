@@ -45,7 +45,7 @@ SCENARIO( "logsquirl_plugin_get_info returns valid metadata", "[plugininfo]" )
         {
             THEN( "it matches the expected reverse-domain identifier" )
             {
-                REQUIRE( std::strcmp( info->id, "io.github.logsquirl.custom-footer" ) == 0 );
+                REQUIRE( std::strcmp( info->id, "io.github.logsquirl.customfooter" ) == 0 );
             }
         }
 

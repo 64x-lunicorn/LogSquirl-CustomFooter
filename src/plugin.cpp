@@ -61,7 +61,7 @@ void hostLog( int level, const char* message )
 // ── Static plugin info ──────────────────────────────────────────────────
 
 static const LogSquirlPluginInfo kPluginInfo = {
-    /* id          */ "io.github.logsquirl.custom-footer",
+    /* id          */ "io.github.logsquirl.customfooter",
     /* name        */ "Custom Footer",
     /* version     */ "0.1.0",
     /* description */ "Extract key-value pairs from logs via regex and display in footer",

@@ -78,7 +78,7 @@ sequenceDiagram
 
 ## Configuration Storage
 
-Rules are stored in `costume_footer.ini` (QSettings INI format) inside the
+Rules are stored in `custom_footer.ini` (QSettings INI format) inside the
 plugin's config directory provided by the host.
 
 The JSON import/export uses a versioned format (`version: 1`) to allow

@@ -34,21 +34,21 @@ jobs:
             os: ubuntu-24.04
             qt-arch: linux_gcc_64
             artifact: plugin-linux-x64
-            lib-name: liblogsquirl_costume_footer.so
+            lib-name: liblogsquirl_custom_footer.so
             cmake-flags: ""
 
           - name: macOS arm64
             os: macos-15
             qt-arch: clang_64
             artifact: plugin-macos-arm64
-            lib-name: liblogsquirl_costume_footer.dylib
+            lib-name: liblogsquirl_custom_footer.dylib
             cmake-flags: ""
 
           - name: Windows x64
             os: windows-2025
             qt-arch: win64_msvc2022_64
             artifact: plugin-windows-x64
-            lib-name: logsquirl_costume_footer.dll
+            lib-name: logsquirl_custom_footer.dll
             cmake-flags: ""
 
     steps:

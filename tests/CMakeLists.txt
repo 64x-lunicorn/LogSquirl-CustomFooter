@@ -1,5 +1,5 @@
 # ============================================================================
-# Unit tests for logsquirl-costume-footer
+# Unit tests for logsquirl-custom-footer
 #
 # Uses Catch2 v2 (BDD style) to match the host project's test conventions.
 # ============================================================================
@@ -14,7 +14,7 @@ FetchContent_MakeAvailable(Catch2)
 
 # ── Test executable ───────────────────────────────────────────────────────
 
-add_executable(logsquirl_costume_footer_tests
+add_executable(logsquirl_custom_footer_tests
     tests_main.cpp
     plugininfo_test.cpp
     footerscanner_test.cpp
@@ -24,11 +24,11 @@ add_executable(logsquirl_costume_footer_tests
     footerdisplaywidget_test.cpp
 )
 
-set_target_properties(logsquirl_costume_footer_tests PROPERTIES
+set_target_properties(logsquirl_custom_footer_tests PROPERTIES
     AUTOMOC ON
 )
 
-target_include_directories(logsquirl_costume_footer_tests
+target_include_directories(logsquirl_custom_footer_tests
     PRIVATE
         "${CMAKE_SOURCE_DIR}/include"   # logsquirl_plugin_api.h
         "${CMAKE_SOURCE_DIR}/src"       # internal headers
@@ -36,7 +36,7 @@ target_include_directories(logsquirl_costume_footer_tests
 
 # Compile plugin sources into the test binary so we can test internal
 # functions without symbol-export gymnastics.
-target_sources(logsquirl_costume_footer_tests
+target_sources(logsquirl_custom_footer_tests
     PRIVATE
         "${CMAKE_SOURCE_DIR}/src/plugin.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerconfig.cpp"
@@ -45,7 +45,7 @@ target_sources(logsquirl_costume_footer_tests
         "${CMAKE_SOURCE_DIR}/src/footerdisplaywidget.cpp"
 )
 
-target_link_libraries(logsquirl_costume_footer_tests
+target_link_libraries(logsquirl_custom_footer_tests
     PRIVATE
         Catch2::Catch2
         Qt6::Core
@@ -53,4 +53,4 @@ target_link_libraries(logsquirl_costume_footer_tests
 )
 
 # ── Register with CTest ──────────────────────────────────────────────────
-add_test(NAME logsquirl_costume_footer_tests COMMAND logsquirl_costume_footer_tests)
+add_test(NAME logsquirl_custom_footer_tests COMMAND logsquirl_custom_footer_tests)

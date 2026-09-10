@@ -1,5 +1,5 @@
 # ============================================================================
-# logsquirl-costume-footer — Custom Footer plugin for LogSquirl
+# logsquirl-custom-footer — Custom Footer plugin for LogSquirl
 #
 # This is a standalone CMake project.  It does NOT depend on the LogSquirl
 # build tree — only on the vendored logsquirl_plugin_api.h header (MIT).
@@ -10,7 +10,7 @@
 # ============================================================================
 cmake_minimum_required(VERSION 3.16)
 
-project(logsquirl_costume_footer
+project(logsquirl_custom_footer
     VERSION   0.2.0
     LANGUAGES CXX
 )
@@ -26,7 +26,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
 qt_standard_project_setup()
 
 # ── Plugin shared library ─────────────────────────────────────────────────
-add_library(logsquirl_costume_footer SHARED
+add_library(logsquirl_custom_footer SHARED
     src/plugin.cpp
     src/footerconfig.cpp
     src/footerscanner.cpp
@@ -34,22 +34,22 @@ add_library(logsquirl_costume_footer SHARED
     src/footerdisplaywidget.cpp
 )
 
-set_target_properties(logsquirl_costume_footer PROPERTIES
+set_target_properties(logsquirl_custom_footer PROPERTIES
     AUTOMOC ON
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT WIN32)
-    target_compile_options(logsquirl_costume_footer PRIVATE -fvisibility=hidden)
+    target_compile_options(logsquirl_custom_footer PRIVATE -fvisibility=hidden)
 endif()
 
-target_include_directories(logsquirl_costume_footer
+target_include_directories(logsquirl_custom_footer
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-target_link_libraries(logsquirl_costume_footer
+target_link_libraries(logsquirl_custom_footer
     PRIVATE
         Qt6::Core
         Qt6::Widgets
@@ -59,11 +59,11 @@ target_link_libraries(logsquirl_costume_footer
 include(GNUInstallDirs)
 
 set(PLUGIN_INSTALL_DIR
-    "${CMAKE_INSTALL_DATADIR}/LogSquirl/plugins/io.github.logsquirl.costume-footer"
+    "${CMAKE_INSTALL_DATADIR}/LogSquirl/plugins/io.github.logsquirl.custom-footer"
     CACHE PATH "Plugin installation directory"
 )
 
-install(TARGETS logsquirl_costume_footer LIBRARY DESTINATION "${PLUGIN_INSTALL_DIR}")
+install(TARGETS logsquirl_custom_footer LIBRARY DESTINATION "${PLUGIN_INSTALL_DIR}")
 install(FILES   plugin.json                      DESTINATION "${PLUGIN_INSTALL_DIR}")
 
 # ── Tests (opt-in) ────────────────────────────────────────────────────────

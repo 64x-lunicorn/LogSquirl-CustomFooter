@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at the bottom of the LogSquirl main window.
 - **Rule editor dialog** — add, remove, reorder, enable/disable rules with
   OK / Cancel / Apply buttons.
-- **INI persistence** — rules saved to `costume_footer.ini` in the plugin
+- **INI persistence** — rules saved to `custom_footer.ini` in the plugin
   config directory.
 - **Active file callback** — automatically re-scans when the active log
   file changes.

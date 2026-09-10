@@ -1,9 +1,9 @@
 {
-    "id": "io.github.logsquirl.costume-footer",
+    "id": "io.github.logsquirl.customfooter",
     "name": "Custom Footer",
     "version": "0.2.0",
     "type": "ui",
-    "library": "logsquirl_costume_footer",
+    "library": "logsquirl_custom_footer",
     "api_version": 1,
     "description": "Extract key-value pairs from logs via regex with two-stage matching and value mapping, displayed in a footer bar",
     "author": "LogSquirl Contributors",

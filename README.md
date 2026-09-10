@@ -1,9 +1,9 @@
-# logsquirl-costume-footer — Custom Footer Plugin for LogSquirl
+# logsquirl-custom-footer — Custom Footer Plugin for LogSquirl
 
-[![CI Build](https://github.com/64x-lunicorn/LogSquirl-CostumeFooter/actions/workflows/ci-build.yml/badge.svg)](https://github.com/64x-lunicorn/LogSquirl-CostumeFooter/actions/workflows/ci-build.yml)
+[![CI Build](https://github.com/64x-lunicorn/LogSquirl-CustomFooter/actions/workflows/ci-build.yml/badge.svg)](https://github.com/64x-lunicorn/LogSquirl-CustomFooter/actions/workflows/ci-build.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/64x-lunicorn/LogSquirl-CostumeFooter/total)](https://github.com/64x-lunicorn/LogSquirl-CostumeFooter/releases)
-[![Commits since latest release](https://img.shields.io/github/commits-since/64x-lunicorn/LogSquirl-CostumeFooter/latest)](https://github.com/64x-lunicorn/LogSquirl-CostumeFooter/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/64x-lunicorn/LogSquirl-CustomFooter/total)](https://github.com/64x-lunicorn/LogSquirl-CustomFooter/releases)
+[![Commits since latest release](https://img.shields.io/github/commits-since/64x-lunicorn/LogSquirl-CustomFooter/latest)](https://github.com/64x-lunicorn/LogSquirl-CustomFooter/commits/main)
 [![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
 
 A [LogSquirl](https://github.com/64x-lunicorn/LogSquirl) plugin that extracts key-value pairs
@@ -67,7 +67,7 @@ flowchart TD
 
 ## Configuration
 
-Rules are persisted in `costume_footer.ini` inside the plugin's config directory.
+Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
 ### INI Format (internal)
 
@@ -121,8 +121,8 @@ Rules are persisted in `costume_footer.ini` inside the plugin's config directory
 
 ```bash
 # Clone
-git clone https://github.com/64x-lunicorn/LogSquirl-CostumeFooter.git
-cd LogSquirl-CostumeFooter
+git clone https://github.com/64x-lunicorn/LogSquirl-CustomFooter.git
+cd LogSquirl-CustomFooter
 
 # Configure
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -135,9 +135,9 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --parallel
 
 # The shared library is in build/:
-#   macOS:   build/liblogsquirl_costume_footer.dylib
-#   Linux:   build/liblogsquirl_costume_footer.so
-#   Windows: build/logsquirl_costume_footer.dll
+#   macOS:   build/liblogsquirl_custom_footer.dylib
+#   Linux:   build/liblogsquirl_custom_footer.so
+#   Windows: build/logsquirl_custom_footer.dll
 ```
 
 ### Running Tests
@@ -155,18 +155,22 @@ plugin search directories:
 
 | Platform | Plugin Directory |
 |----------|-----------------|
-| macOS    | `~/Library/Application Support/logsquirl/plugins/io.github.logsquirl.costume-footer/` |
-| Linux    | `~/.local/share/logsquirl/plugins/io.github.logsquirl.costume-footer/` |
-| Windows  | `%APPDATA%/logsquirl/plugins/io.github.logsquirl.costume-footer/` |
+| macOS    | `~/Library/Application Support/logsquirl/plugins/io.github.logsquirl.customfooter/` |
+| Linux    | `~/.local/share/logsquirl/plugins/io.github.logsquirl.customfooter/` |
+| Windows  | `%APPDATA%/logsquirl/plugins/io.github.logsquirl.customfooter/` |
 
 ```bash
 # Example for macOS:
-DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.costume-footer"
+DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.customfooter"
 mkdir -p "$DEST"
-cp build/liblogsquirl_costume_footer.dylib "$DEST/"
+cp build/liblogsquirl_custom_footer.dylib "$DEST/"
 cp plugin.json "$DEST/"
 ```
 
 ## License
 
-GPL-3.0-or-later — see [LICENSE](LICENSE).
+GPL-3.0-or-later — see [LICENSE](LICENSE) for the full license text.
+
+The vendored `include/logsquirl_plugin_api.h` header is MIT-licensed, so
+plugins of any license can build against the LogSquirl Plugin SDK without
+taking on GPL obligations. See [NOTICE](NOTICE) for details.

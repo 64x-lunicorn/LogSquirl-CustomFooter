@@ -85,15 +85,15 @@ jobs:
           mkdir -p release
 
           cd artifacts/linux
-          zip "../../release/logsquirl-costume-footer-${VERSION}-linux-x64.zip" *
+          zip "../../release/logsquirl-custom-footer-${VERSION}-linux-x64.zip" *
           cd ../..
 
           cd artifacts/macos
-          zip "../../release/logsquirl-costume-footer-${VERSION}-macos-arm64.zip" *
+          zip "../../release/logsquirl-custom-footer-${VERSION}-macos-arm64.zip" *
           cd ../..
 
           cd artifacts/windows
-          zip "../../release/logsquirl-costume-footer-${VERSION}-windows-x64.zip" *
+          zip "../../release/logsquirl-custom-footer-${VERSION}-windows-x64.zip" *
           cd ../..
 
       - name: Generate checksums

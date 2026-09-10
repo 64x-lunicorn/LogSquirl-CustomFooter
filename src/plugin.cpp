@@ -1,20 +1,20 @@
 /*
  * Copyright (C) 2026 LogSquirl Contributors
  *
- * This file is part of logsquirl-costume-footer.
+ * This file is part of logsquirl-custom-footer.
  *
- * logsquirl-costume-footer is free software: you can redistribute it and/or
+ * logsquirl-custom-footer is free software: you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
- * logsquirl-costume-footer is distributed in the hope that it will be useful,
+ * logsquirl-custom-footer is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with logsquirl-costume-footer.  If not, see <http://www.gnu.org/licenses/>.
+ * along with logsquirl-custom-footer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /**
@@ -47,7 +47,7 @@
 
 // ── Global state ─────────────────────────────────────────────────────────
 
-namespace costume_footer {
+namespace custom_footer {
 PluginState g_state;
 
 void hostLog( int level, const char* message )
@@ -56,12 +56,12 @@ void hostLog( int level, const char* message )
         g_state.api->log_message( g_state.handle, level, message );
     }
 }
-} // namespace costume_footer
+} // namespace custom_footer
 
 // ── Static plugin info ──────────────────────────────────────────────────
 
 static const LogSquirlPluginInfo kPluginInfo = {
-    /* id          */ "io.github.logsquirl.costume-footer",
+    /* id          */ "io.github.logsquirl.customfooter",
     /* name        */ "Custom Footer",
     /* version     */ "0.1.0",
     /* description */ "Extract key-value pairs from logs via regex and display in footer",
@@ -76,18 +76,18 @@ static const LogSquirlPluginInfo kPluginInfo = {
 /// Return the plugin config directory (from host API).
 static QString configDir()
 {
-    if ( !costume_footer::g_state.api || !costume_footer::g_state.handle ) {
+    if ( !custom_footer::g_state.api || !custom_footer::g_state.handle ) {
         return {};
     }
     const char* dir
-        = costume_footer::g_state.api->get_config_dir( costume_footer::g_state.handle );
+        = custom_footer::g_state.api->get_config_dir( custom_footer::g_state.handle );
     return dir ? QString::fromUtf8( dir ) : QString();
 }
 
 /// Re-scan the active file and update display widgets.
 static void rescanActiveFile()
 {
-    const auto& st = costume_footer::g_state;
+    const auto& st = custom_footer::g_state;
     if ( !st.api || !st.handle ) {
         return;
     }
@@ -104,10 +104,10 @@ static void rescanActiveFile()
     }
 
     const auto dir = configDir();
-    const auto entries = costume_footer::FooterConfig::loadEntries( dir );
-    const int maxLines = costume_footer::FooterConfig::loadMaxLines( dir );
+    const auto entries = custom_footer::FooterConfig::loadEntries( dir );
+    const int maxLines = custom_footer::FooterConfig::loadMaxLines( dir );
 
-    const auto results = costume_footer::FooterScanner::scan( filePath, entries, maxLines );
+    const auto results = custom_footer::FooterScanner::scan( filePath, entries, maxLines );
 
     // Build an ordered pair list following the entry definition order.
     QList<QPair<QString, QString>> ordered;
@@ -136,19 +136,19 @@ static void onActiveFileChanged( void* /* userData */, const char* /* filePath *
 static void showEditorDialog( void* /* userData */ )
 {
     const auto dir = configDir();
-    auto entries = costume_footer::FooterConfig::loadEntries( dir );
+    auto entries = custom_footer::FooterConfig::loadEntries( dir );
 
-    costume_footer::FooterEditor editor( entries, nullptr );
+    custom_footer::FooterEditor editor( entries, nullptr );
 
     // Apply button: save and rescan without closing the dialog.
-    QObject::connect( &editor, &costume_footer::FooterEditor::applied, [&editor]() {
+    QObject::connect( &editor, &custom_footer::FooterEditor::applied, [&editor]() {
         const auto d = configDir();
-        costume_footer::FooterConfig::saveEntries( d, editor.entries() );
+        custom_footer::FooterConfig::saveEntries( d, editor.entries() );
         rescanActiveFile();
     } );
 
     if ( editor.exec() == QDialog::Accepted ) {
-        costume_footer::FooterConfig::saveEntries( dir, editor.entries() );
+        custom_footer::FooterConfig::saveEntries( dir, editor.entries() );
         rescanActiveFile();
     }
 }
@@ -172,13 +172,13 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     }
 
     // Guard against double-initialisation: clean up previous state.
-    if ( costume_footer::g_state.initialised ) {
+    if ( custom_footer::g_state.initialised ) {
         logsquirl_plugin_shutdown();
     }
 
-    costume_footer::g_state.api = api;
-    costume_footer::g_state.handle = handle;
-    costume_footer::g_state.initialised = true;
+    custom_footer::g_state.api = api;
+    custom_footer::g_state.handle = handle;
+    custom_footer::g_state.initialised = true;
 
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin initialising…" );
 
@@ -187,9 +187,9 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
                                &showEditorDialog, nullptr );
 
     // Create footer display widget.
-    costume_footer::g_state.footerWidget = new costume_footer::FooterDisplayWidget();
+    custom_footer::g_state.footerWidget = new custom_footer::FooterDisplayWidget();
     api->register_footer_widget( handle,
-                                 static_cast<void*>( costume_footer::g_state.footerWidget ) );
+                                 static_cast<void*>( custom_footer::g_state.footerWidget ) );
 
     // Register callback for active file changes.
     api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
@@ -203,19 +203,19 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
-    costume_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
+    custom_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
 
-    if ( costume_footer::g_state.footerWidget ) {
-        costume_footer::g_state.api->unregister_footer_widget(
-            costume_footer::g_state.handle,
-            static_cast<void*>( costume_footer::g_state.footerWidget ) );
-        delete costume_footer::g_state.footerWidget;
-        costume_footer::g_state.footerWidget = nullptr;
+    if ( custom_footer::g_state.footerWidget ) {
+        custom_footer::g_state.api->unregister_footer_widget(
+            custom_footer::g_state.handle,
+            static_cast<void*>( custom_footer::g_state.footerWidget ) );
+        delete custom_footer::g_state.footerWidget;
+        custom_footer::g_state.footerWidget = nullptr;
     }
 
-    costume_footer::g_state.api = nullptr;
-    costume_footer::g_state.handle = nullptr;
-    costume_footer::g_state.initialised = false;
+    custom_footer::g_state.api = nullptr;
+    custom_footer::g_state.handle = nullptr;
+    custom_footer::g_state.initialised = false;
 }
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )

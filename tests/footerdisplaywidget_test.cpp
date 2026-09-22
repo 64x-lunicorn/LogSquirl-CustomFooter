@@ -98,8 +98,7 @@ SCENARIO( "FooterDisplayWidget shows key-value pairs", "[footerdisplaywidget]" )
     GIVEN( "values containing HTML special characters" )
     {
         QList<QPair<QString, QString>> values;
-        values.append( qMakePair( QString( "Tag" ),
-                                  QString( "<script>alert('xss')</script>" ) ) );
+        values.append( qMakePair( QString( "Tag" ), QString( "<script>alert('xss')</script>" ) ) );
 
         WHEN( "updateValues is called" )
         {

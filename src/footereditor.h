@@ -43,18 +43,17 @@ namespace custom_footer {
 class FooterEditor : public QDialog {
     Q_OBJECT
 
-  public:
-    explicit FooterEditor( const QList<FooterEntry>& entries,
-                           QWidget* parent = nullptr );
+public:
+    explicit FooterEditor( const QList<FooterEntry>& entries, QWidget* parent = nullptr );
 
     /// Return the edited list of entries.
     QList<FooterEntry> entries();
 
-  Q_SIGNALS:
+Q_SIGNALS:
     /// Emitted when the user clicks Apply.
     void applied();
 
-  private Q_SLOTS:
+private Q_SLOTS:
     void addEntry();
     void removeEntry();
     void moveEntryUp();
@@ -67,7 +66,7 @@ class FooterEditor : public QDialog {
     void removeMapping();
     void syncMappingsToEntry();
 
-  private:
+private:
     void populateTable( const QList<FooterEntry>& entries );
     QList<FooterEntry> tableToEntries() const;
     void loadMappingsForRow( int row );

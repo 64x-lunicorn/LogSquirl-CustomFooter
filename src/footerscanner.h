@@ -29,7 +29,7 @@ namespace custom_footer {
 
 /// Scans a log file and extracts the first match per enabled FooterEntry.
 class FooterScanner {
-  public:
+public:
     /**
      * Scan a log file for matching key-value pairs.
      *
@@ -42,8 +42,7 @@ class FooterScanner {
      * @param maxLines  Maximum number of lines to scan (0 = unlimited).
      * @return Map from entry key to matched value.
      */
-    static QMap<QString, QString> scan( const QString& filePath,
-                                        const QList<FooterEntry>& entries,
+    static QMap<QString, QString> scan( const QString& filePath, const QList<FooterEntry>& entries,
                                         int maxLines = 100000 );
 };
 

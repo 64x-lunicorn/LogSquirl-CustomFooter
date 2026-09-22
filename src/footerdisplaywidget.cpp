@@ -43,9 +43,9 @@ void FooterDisplayWidget::updateValues( const QList<QPair<QString, QString>>& va
     }
 
     QStringList parts;
-    for ( const auto& [key, value] : values ) {
-        parts.append( QString( "<b>%1:</b> %2" ).arg( key.toHtmlEscaped(),
-                                                       value.toHtmlEscaped() ) );
+    for ( const auto& [ key, value ] : values ) {
+        parts.append(
+            QString( "<b>%1:</b> %2" ).arg( key.toHtmlEscaped(), value.toHtmlEscaped() ) );
     }
 
     label_->setText( parts.join( "  |  " ) );

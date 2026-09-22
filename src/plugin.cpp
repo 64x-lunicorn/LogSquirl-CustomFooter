@@ -63,7 +63,7 @@ void hostLog( int level, const char* message )
 static const LogSquirlPluginInfo kPluginInfo = {
     /* id          */ "io.github.logsquirl.customfooter",
     /* name        */ "Custom Footer",
-    /* version     */ "0.1.0",
+    /* version     */ LOGSQUIRL_PLUGIN_VERSION,
     /* description */ "Extract key-value pairs from logs via regex and display in footer",
     /* author      */ "LogSquirl Contributors",
     /* license     */ "GPL-3.0-or-later",
@@ -79,8 +79,7 @@ static QString configDir()
     if ( !custom_footer::g_state.api || !custom_footer::g_state.handle ) {
         return {};
     }
-    const char* dir
-        = custom_footer::g_state.api->get_config_dir( custom_footer::g_state.handle );
+    const char* dir = custom_footer::g_state.api->get_config_dir( custom_footer::g_state.handle );
     return dir ? QString::fromUtf8( dir ) : QString();
 }
 
@@ -141,7 +140,7 @@ static void showEditorDialog( void* /* userData */ )
     custom_footer::FooterEditor editor( entries, nullptr );
 
     // Apply button: save and rescan without closing the dialog.
-    QObject::connect( &editor, &custom_footer::FooterEditor::applied, [&editor]() {
+    QObject::connect( &editor, &custom_footer::FooterEditor::applied, [ &editor ]() {
         const auto d = configDir();
         custom_footer::FooterConfig::saveEntries( d, editor.entries() );
         rescanActiveFile();
@@ -183,8 +182,8 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin initialising…" );
 
     // Register menu action to open the rule editor.
-    api->register_menu_action( handle, "Plugins", "Custom Footer\u2026",
-                               &showEditorDialog, nullptr );
+    api->register_menu_action( handle, "Plugins", "Custom Footer\u2026", &showEditorDialog,
+                               nullptr );
 
     // Create footer display widget.
     custom_footer::g_state.footerWidget = new custom_footer::FooterDisplayWidget();

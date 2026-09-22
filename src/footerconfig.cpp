@@ -43,8 +43,7 @@ QList<FooterEntry> FooterConfig::loadEntries( const QString& configDir )
         FooterEntry entry;
         entry.key = settings.value( "key" ).toString();
         // Read linePattern; fall back to "regex" for backward compatibility
-        entry.linePattern = settings.value( "linePattern",
-                                            settings.value( "regex" ) ).toString();
+        entry.linePattern = settings.value( "linePattern", settings.value( "regex" ) ).toString();
         entry.valuePattern = settings.value( "valuePattern" ).toString();
         entry.enabled = settings.value( "enabled", true ).toBool();
 
@@ -66,8 +65,7 @@ QList<FooterEntry> FooterConfig::loadEntries( const QString& configDir )
     return entries;
 }
 
-void FooterConfig::saveEntries( const QString& configDir,
-                                const QList<FooterEntry>& entries )
+void FooterConfig::saveEntries( const QString& configDir, const QList<FooterEntry>& entries )
 {
     QSettings settings( configPath( configDir ), QSettings::IniFormat );
 
@@ -103,8 +101,7 @@ void FooterConfig::saveMaxLines( const QString& configDir, int maxLines )
     settings.setValue( "scan/maxLines", maxLines );
 }
 
-bool FooterConfig::exportToJson( const QString& filePath,
-                                 const QList<FooterEntry>& entries )
+bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntry>& entries )
 {
     QJsonArray jsonEntries;
     for ( const auto& entry : entries ) {
@@ -138,8 +135,7 @@ bool FooterConfig::exportToJson( const QString& filePath,
     return true;
 }
 
-QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath,
-                                                 QString* errorOut )
+QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath, QString* errorOut )
 {
     QList<FooterEntry> entries;
 
@@ -155,8 +151,7 @@ QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath,
     const auto doc = QJsonDocument::fromJson( file.readAll(), &parseError );
     if ( doc.isNull() ) {
         if ( errorOut ) {
-            *errorOut = QStringLiteral( "JSON parse error: %1" )
-                            .arg( parseError.errorString() );
+            *errorOut = QStringLiteral( "JSON parse error: %1" ).arg( parseError.errorString() );
         }
         return entries;
     }

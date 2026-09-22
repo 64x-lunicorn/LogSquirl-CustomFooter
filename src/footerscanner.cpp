@@ -26,8 +26,7 @@
 namespace custom_footer {
 
 QMap<QString, QString> FooterScanner::scan( const QString& filePath,
-                                            const QList<FooterEntry>& entries,
-                                            int maxLines )
+                                            const QList<FooterEntry>& entries, int maxLines )
 {
     QMap<QString, QString> results;
 
@@ -39,7 +38,7 @@ QMap<QString, QString> FooterScanner::scan( const QString& filePath,
     struct Rule {
         QString key;
         QRegularExpression lineRegex;
-        QRegularExpression valueRegex;   // empty pattern = not used
+        QRegularExpression valueRegex; // empty pattern = not used
         bool hasTwoStage = false;
         QList<ValueMapping> mappings;
     };
@@ -102,9 +101,8 @@ QMap<QString, QString> FooterScanner::scan( const QString& filePath,
                 // Two-stage: use valueRegex on the same line.
                 const auto valMatch = rule.valueRegex.match( line );
                 if ( valMatch.hasMatch() ) {
-                    rawValue = ( valMatch.lastCapturedIndex() >= 1 )
-                                   ? valMatch.captured( 1 )
-                                   : valMatch.captured( 0 );
+                    rawValue = ( valMatch.lastCapturedIndex() >= 1 ) ? valMatch.captured( 1 )
+                                                                     : valMatch.captured( 0 );
                 }
                 else {
                     continue; // Value pattern didn't match — skip this line.
@@ -112,9 +110,8 @@ QMap<QString, QString> FooterScanner::scan( const QString& filePath,
             }
             else {
                 // Single-stage: extract from lineRegex capture group.
-                rawValue = ( lineMatch.lastCapturedIndex() >= 1 )
-                               ? lineMatch.captured( 1 )
-                               : lineMatch.captured( 0 );
+                rawValue = ( lineMatch.lastCapturedIndex() >= 1 ) ? lineMatch.captured( 1 )
+                                                                  : lineMatch.captured( 0 );
             }
 
             // Apply value mappings (exact string match).

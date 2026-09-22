@@ -35,7 +35,7 @@ namespace custom_footer {
 class FooterDisplayWidget : public QWidget {
     Q_OBJECT
 
-  public:
+public:
     explicit FooterDisplayWidget( QWidget* parent = nullptr );
 
     /// Replace displayed values with an ordered list of key-value pairs.
@@ -44,7 +44,7 @@ class FooterDisplayWidget : public QWidget {
     /// Clear all displayed values.
     void clearValues();
 
-  private:
+private:
     QLabel* label_ = nullptr;
 };
 

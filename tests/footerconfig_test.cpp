@@ -45,8 +45,8 @@ SCENARIO( "FooterConfig persists entries to INI file", "[footerconfig]" )
         mappings.append( ValueMapping{ "false", "Disabled" } );
 
         entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
-        entries.append( { "Protection", "isComponentProtection",
-                          ":\\s+(\\S+)$", false, mappings } );
+        entries.append(
+            { "Protection", "isComponentProtection", ":\\s+(\\S+)$", false, mappings } );
 
         WHEN( "saving and loading entries" )
         {
@@ -103,8 +103,7 @@ SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
 
         QList<FooterEntry> entries;
         entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
-        entries.append( { "Feature", "feature_flag",
-                          "=\\s*(\\d+)", true, mappings } );
+        entries.append( { "Feature", "feature_flag", "=\\s*(\\d+)", true, mappings } );
 
         const QString jsonPath = tmpDir.path() + "/rules.json";
 
@@ -145,8 +144,7 @@ SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
         WHEN( "importing" )
         {
             QString error;
-            const auto imported
-                = FooterConfig::importFromJson( "/does/not/exist.json", &error );
+            const auto imported = FooterConfig::importFromJson( "/does/not/exist.json", &error );
 
             THEN( "an error is reported and result is empty" )
             {
@@ -177,5 +175,3 @@ SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
         }
     }
 }
-
-

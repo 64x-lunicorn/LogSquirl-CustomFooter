@@ -32,10 +32,10 @@ struct ValueMapping {
 
 /// A single key-value extraction rule.
 struct FooterEntry {
-    QString key;            ///< Display label, e.g. "Component Protection".
-    QString linePattern;    ///< Regex to find the target line.
-    QString valuePattern;   ///< Optional regex to extract value from found line.
-    bool enabled = true;    ///< Whether this entry is active.
+    QString key;                  ///< Display label, e.g. "Component Protection".
+    QString linePattern;          ///< Regex to find the target line.
+    QString valuePattern;         ///< Optional regex to extract value from found line.
+    bool enabled = true;          ///< Whether this entry is active.
     QList<ValueMapping> mappings; ///< Value substitution rules.
 };
 

@@ -36,7 +36,7 @@ namespace {
 
 /// A QCheckBox centered in a container widget, for use in QTableWidget cells.
 class CenteredCheckbox : public QWidget {
-  public:
+public:
     explicit CenteredCheckbox( bool checked, QWidget* parent = nullptr )
         : QWidget( parent )
     {
@@ -48,10 +48,16 @@ class CenteredCheckbox : public QWidget {
         layout->addWidget( checkbox_ );
     }
 
-    bool isChecked() const { return checkbox_->isChecked(); }
-    void setChecked( bool checked ) { checkbox_->setChecked( checked ); }
+    bool isChecked() const
+    {
+        return checkbox_->isChecked();
+    }
+    void setChecked( bool checked )
+    {
+        checkbox_->setChecked( checked );
+    }
 
-  private:
+private:
     QCheckBox* checkbox_;
 };
 
@@ -59,8 +65,7 @@ class CenteredCheckbox : public QWidget {
 
 // ── FooterEditor ─────────────────────────────────────────────────────────
 
-FooterEditor::FooterEditor( const QList<FooterEntry>& entries,
-                            QWidget* parent )
+FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     : QDialog( parent )
 {
     setWindowTitle( tr( "Custom Footer — Edit Rules" ) );
@@ -70,9 +75,8 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries,
 
     // ── Rules table (5 columns) ──────────────────────────────────────────
     table_ = new QTableWidget( 0, 5, this );
-    table_->setHorizontalHeaderLabels(
-        { tr( "Enabled" ), tr( "Key" ), tr( "Line Pattern" ),
-          tr( "Value Pattern" ), tr( "Mappings" ) } );
+    table_->setHorizontalHeaderLabels( { tr( "Enabled" ), tr( "Key" ), tr( "Line Pattern" ),
+                                         tr( "Value Pattern" ), tr( "Mappings" ) } );
     table_->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
     table_->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Interactive );
     table_->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
@@ -163,29 +167,27 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries,
     connect( importButton_, &QToolButton::clicked, this, &FooterEditor::importRules );
     connect( exportButton_, &QToolButton::clicked, this, &FooterEditor::exportRules );
 
-    connect( table_, &QTableWidget::currentCellChanged, this,
-             [this]( int, int, int, int ) {
-                 onRuleSelectionChanged();
-                 updateButtons();
-             } );
+    connect( table_, &QTableWidget::currentCellChanged, this, [ this ]( int, int, int, int ) {
+        onRuleSelectionChanged();
+        updateButtons();
+    } );
 
     connect( addMappingButton_, &QToolButton::clicked, this, &FooterEditor::addMapping );
     connect( removeMappingButton_, &QToolButton::clicked, this, &FooterEditor::removeMapping );
 
     // Enable/disable remove-mapping button when mapping table selection changes.
     connect( mappingTable_, &QTableWidget::currentCellChanged, this,
-             [this]( int, int, int, int ) {
+             [ this ]( int, int, int, int ) {
                  removeMappingButton_->setEnabled( mappingTable_->currentRow() >= 0 );
              } );
 
     // Sync mapping edits back to mappingsData_ when cells change
-    connect( mappingTable_, &QTableWidget::cellChanged, this,
-             &FooterEditor::syncMappingsToEntry );
+    connect( mappingTable_, &QTableWidget::cellChanged, this, &FooterEditor::syncMappingsToEntry );
 
     connect( buttonBox_, &QDialogButtonBox::accepted, this, &QDialog::accept );
     connect( buttonBox_, &QDialogButtonBox::rejected, this, &QDialog::reject );
-    connect( buttonBox_->button( QDialogButtonBox::Apply ), &QPushButton::clicked,
-             this, &FooterEditor::applied );
+    connect( buttonBox_->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this,
+             &FooterEditor::applied );
 
     // ── Populate ─────────────────────────────────────────────────────────
     populateTable( entries );
@@ -297,8 +299,7 @@ void FooterEditor::updateButtons()
 void FooterEditor::importRules()
 {
     const auto filePath = QFileDialog::getOpenFileName(
-        this, tr( "Import Rules" ), QString(),
-        tr( "JSON Files (*.json);;All Files (*)" ) );
+        this, tr( "Import Rules" ), QString(), tr( "JSON Files (*.json);;All Files (*)" ) );
     if ( filePath.isEmpty() ) {
         return;
     }

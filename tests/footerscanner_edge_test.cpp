@@ -107,8 +107,7 @@ SCENARIO( "FooterScanner handles empty and missing files", "[footerscanner][edge
 
         WHEN( "scanning" )
         {
-            const auto results
-                = FooterScanner::scan( tmpDir.path() + "/nofile.log", entries );
+            const auto results = FooterScanner::scan( tmpDir.path() + "/nofile.log", entries );
 
             THEN( "result is empty" )
             {

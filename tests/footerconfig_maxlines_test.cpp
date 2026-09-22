@@ -145,8 +145,8 @@ SCENARIO( "FooterConfig export to unwritable path fails", "[footerconfig][json]"
 
         WHEN( "exporting to an impossible path" )
         {
-            const bool ok = FooterConfig::exportToJson(
-                "/nonexistent_dir_12345/rules.json", entries );
+            const bool ok
+                = FooterConfig::exportToJson( "/nonexistent_dir_12345/rules.json", entries );
 
             THEN( "it returns false" )
             {

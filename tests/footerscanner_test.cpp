@@ -56,10 +56,8 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
 
     GIVEN( "a log file with VIN and timestamp lines" )
     {
-        const QStringList lines = { "2024-01-01 INFO Starting up",
-                                    "VIN: WVWZZZ1JZWW123456",
-                                    "2024-01-01 WARN Low memory",
-                                    "Timestamp: 1704067200" };
+        const QStringList lines = { "2024-01-01 INFO Starting up", "VIN: WVWZZZ1JZWW123456",
+                                    "2024-01-01 WARN Low memory", "Timestamp: 1704067200" };
 
         const auto filePath = writeTempFile( tmpDir, lines );
 
@@ -95,8 +93,7 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
 
     GIVEN( "a log file where a pattern has no capturing group" )
     {
-        const QStringList lines = { "ERROR something went wrong",
-                                    "OK all clear" };
+        const QStringList lines = { "ERROR something went wrong", "OK all clear" };
         const auto filePath = writeTempFile( tmpDir, lines );
 
         QList<FooterEntry> entries;
@@ -132,9 +129,7 @@ SCENARIO( "FooterScanner extracts values from log lines", "[footerscanner]" )
 
     GIVEN( "a maxLines limit smaller than the file" )
     {
-        const QStringList lines = { "Line 1",
-                                    "Line 2",
-                                    "VIN: ABC123" };
+        const QStringList lines = { "Line 1", "Line 2", "VIN: ABC123" };
         const auto filePath = writeTempFile( tmpDir, lines );
 
         QList<FooterEntry> entries;
@@ -170,16 +165,18 @@ SCENARIO( "FooterScanner supports two-stage matching", "[footerscanner]" )
 
     GIVEN( "a log line containing a key-value pair" )
     {
-        const QStringList lines = { "config: isComponentProtectionEnabled: false",
-                                    "config: maxRetries: 5" };
+        const QStringList lines
+            = { "config: isComponentProtectionEnabled: false", "config: maxRetries: 5" };
         const auto filePath = writeTempFile( tmpDir, lines );
 
         WHEN( "using a value pattern to extract from the matched line" )
         {
             QList<FooterEntry> entries;
-            entries.append(
-                { "Component Protection", "isComponentProtectionEnabled",
-                  ":\\s+(\\S+)$", true, {} } );
+            entries.append( { "Component Protection",
+                              "isComponentProtectionEnabled",
+                              ":\\s+(\\S+)$",
+                              true,
+                              {} } );
 
             const auto results = FooterScanner::scan( filePath, entries );
 
@@ -193,8 +190,7 @@ SCENARIO( "FooterScanner supports two-stage matching", "[footerscanner]" )
         WHEN( "using only a line pattern without a value pattern" )
         {
             QList<FooterEntry> entries;
-            entries.append(
-                { "Retries", "maxRetries:\\s+(\\d+)", "", true, {} } );
+            entries.append( { "Retries", "maxRetries:\\s+(\\d+)", "", true, {} } );
 
             const auto results = FooterScanner::scan( filePath, entries );
 
@@ -222,8 +218,8 @@ SCENARIO( "FooterScanner applies value mappings", "[footerscanner]" )
         mappings.append( ValueMapping{ "false", "Disabled" } );
 
         QList<FooterEntry> entries;
-        entries.append( { "Protection", "isComponentProtectionEnabled:\\s+(\\S+)",
-                          "", true, mappings } );
+        entries.append(
+            { "Protection", "isComponentProtectionEnabled:\\s+(\\S+)", "", true, mappings } );
 
         WHEN( "scanning" )
         {
@@ -271,8 +267,8 @@ SCENARIO( "FooterScanner applies value mappings", "[footerscanner]" )
         mappings.append( ValueMapping{ "false", "Inactive" } );
 
         QList<FooterEntry> entries;
-        entries.append( { "Protection", "isComponentProtectionEnabled",
-                          ":\\s+(\\S+)$", true, mappings } );
+        entries.append(
+            { "Protection", "isComponentProtectionEnabled", ":\\s+(\\S+)$", true, mappings } );
 
         WHEN( "scanning" )
         {

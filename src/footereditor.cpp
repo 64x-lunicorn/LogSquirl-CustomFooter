@@ -306,7 +306,7 @@ void FooterEditor::showCurrentRule()
         panel_->showNoEntry();
     }
     else {
-        panel_->showEntry( model_->entry( row ) );
+        panel_->showEntry( model_->entry( row ), model_->unfinishedSimpleRule( row ) );
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
@@ -319,6 +319,7 @@ void FooterEditor::storePanelInCurrentRule()
         return;
     }
     model_->setEntry( row, panel_->entry() );
+    model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
     validateRow( row );
     showProblems();
 }
@@ -373,8 +374,8 @@ void FooterEditor::validateRow( int row )
         return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
     };
     // A simple rule without a usable end character has no patterns yet.
-    if ( entry.unfinishedSimpleRule ) {
-        problems.endCharacter = endCharacterProblem( *entry.unfinishedSimpleRule );
+    if ( const auto unfinished = model_->unfinishedSimpleRule( row ) ) {
+        problems.endCharacter = endCharacterProblem( *unfinished );
     }
     problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
     problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );

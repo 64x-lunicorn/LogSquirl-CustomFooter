@@ -108,6 +108,18 @@ bool RuleListModel::moveRule( int from, int to )
     return moveRows( QModelIndex(), from, 1, QModelIndex(), to > from ? to + 1 : to );
 }
 
+std::optional<SimpleRule> RuleListModel::unfinishedSimpleRule( int row ) const
+{
+    return row >= 0 && row < rules_.size() ? rules_.at( row ).unfinishedSimpleRule : std::nullopt;
+}
+
+void RuleListModel::setUnfinishedSimpleRule( int row, const std::optional<SimpleRule>& rule )
+{
+    if ( row >= 0 && row < rules_.size() ) {
+        rules_[ row ].unfinishedSimpleRule = rule;
+    }
+}
+
 RuleProblems RuleListModel::problems( int row ) const
 {
     return row >= 0 && row < rules_.size() ? rules_.at( row ).problems : RuleProblems();

@@ -218,7 +218,8 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     showNoEntry();
 }
 
-void RuleDetailPanel::showEntry( const FooterEntry& entry )
+void RuleDetailPanel::showEntry( const FooterEntry& entry,
+                                 const std::optional<SimpleRule>& unfinished )
 {
     {
         const QSignalBlocker enabledBlocker( enabledCheck_ );
@@ -232,8 +233,7 @@ void RuleDetailPanel::showEntry( const FooterEntry& entry )
         setMappings( entry.mappings );
     }
     // A simple rule still missing its end character has no patterns yet.
-    const auto simple
-        = entry.unfinishedSimpleRule ? entry.unfinishedSimpleRule : simpleRuleOf( entry );
+    const auto simple = unfinished ? unfinished : simpleRuleOf( entry );
     setSimpleFields( simple.value_or( SimpleRule() ) );
     setAdvanced( !simple );
     for ( auto field = revertText_.begin(); field != revertText_.end(); ++field ) {
@@ -265,12 +265,6 @@ FooterEntry RuleDetailPanel::entry() const
     entry.key = keyEdit_->text();
     entry.linePattern = linePatternEdit_->text();
     entry.valuePattern = valuePatternEdit_->text();
-    if ( !advanced_ ) {
-        const auto simple = simpleRule();
-        if ( !endCharacterProblem( simple ).isEmpty() ) {
-            entry.unfinishedSimpleRule = simple;
-        }
-    }
     for ( int row = 0; row < mappingTable_->rowCount(); ++row ) {
         const auto* pattern = mappingTable_->item( row, 0 );
         const auto* display = mappingTable_->item( row, 1 );
@@ -278,6 +272,18 @@ FooterEntry RuleDetailPanel::entry() const
             { pattern ? pattern->text() : QString(), display ? display->text() : QString() } );
     }
     return entry;
+}
+
+std::optional<SimpleRule> RuleDetailPanel::unfinishedSimpleRule() const
+{
+    if ( advanced_ ) {
+        return std::nullopt;
+    }
+    const auto simple = simpleRule();
+    if ( endCharacterProblem( simple ).isEmpty() ) {
+        return std::nullopt;
+    }
+    return simple;
 }
 
 void RuleDetailPanel::setProblems( const RuleProblems& problems )

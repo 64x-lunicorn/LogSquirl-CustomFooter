@@ -208,11 +208,14 @@ templates can build simple rules too:
 `RuleDetailPanel` shows a rule in simple mode exactly when `simpleRuleOf()`
 accepts it, or when it is an unfinished simple rule; the mode is not
 stored anywhere. A simple rule with an `endCharacterProblem()` has no
-patterns to keep its fields in, so `entry()` carries them in
-`FooterEntry::unfinishedSimpleRule`, which is never saved or scanned. It
-moves with the rule, the editor turns it into a problem at the end
-character field that blocks OK and Apply, and `showEntry()` shows it again,
-so switching rules loses nothing. In simple mode the simple
+patterns to keep its fields in: its `entry()` has empty patterns, and the
+panel hands the fields to the editor as `unfinishedSimpleRule()`. That is
+editor state, not part of the domain type `FooterEntry`: `RuleListModel`
+keeps it per row, next to the rule's problems, so it moves with the rule
+(also by drag & drop) and never reaches `entries()`, a save or an export.
+The editor turns it into a problem at the end character field that blocks
+OK and Apply, and passes it to `showEntry()` again, so switching rules loses
+nothing. In simple mode the simple
 fields regenerate the patterns on every edit and the pattern fields are
 read-only; `entry()` always reads the pattern fields. **Advanced** makes them
 editable and keeps their text. Switching back is enabled only while

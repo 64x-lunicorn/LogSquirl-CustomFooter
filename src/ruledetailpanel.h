@@ -26,6 +26,8 @@
 #include <QGroupBox>
 #include <QHash>
 
+#include <optional>
+
 class QCheckBox;
 class QComboBox;
 class QFormLayout;
@@ -63,7 +65,10 @@ public:
     explicit RuleDetailPanel( QWidget* parent = nullptr );
 
     /// Show @p entry for editing and enable the panel.
-    void showEntry( const FooterEntry& entry );
+    /// An @p unfinished simple rule is shown in its simple fields instead
+    /// of what the entry's patterns say.
+    void showEntry( const FooterEntry& entry,
+                    const std::optional<SimpleRule>& unfinished = std::nullopt );
 
     /// Show no rule: the panel is emptied and disabled.
     void showNoEntry();
@@ -74,6 +79,11 @@ public:
 
     /// The rule as edited in the panel.
     FooterEntry entry() const;
+
+    /// The simple rule being written, if its patterns cannot be generated
+    /// yet: its end character is missing or unusable. entry() then has
+    /// empty patterns.
+    std::optional<SimpleRule> unfinishedSimpleRule() const;
 
     /// Mark the fields of the shown rule that have problems.
     void setProblems( const RuleProblems& problems );

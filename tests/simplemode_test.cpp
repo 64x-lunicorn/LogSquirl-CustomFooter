@@ -39,10 +39,13 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMimeData>
 #include <QPushButton>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QToolButton>
+
+#include <memory>
 
 using namespace custom_footer;
 
@@ -754,6 +757,104 @@ SCENARIO( "FooterEditor keeps the dialog open for Return and Escape in the mode 
                 REQUIRE( closed.count == 0 );
                 REQUIRE( ui.inSimpleMode() );
                 REQUIRE( editor.entries()[ 0 ].linePattern == "VIN:\\s*(\\S+)" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps an unfinished simple rule out of the saved rules",
+          "[footereditor][simplemode]" )
+{
+    GIVEN( "a simple rule whose end character was removed, between two others" )
+    {
+        FooterEditor editor( {
+            { "User", "user=\\s*([^,]*[^,\\s])", "", true, { ValueMapping{ "a", "b" } } },
+            { "A", "a:\\s*(\\S+)", "", true, {} },
+            { "B", "b=(\\d+)", "", false, {} },
+        } );
+        SimpleUi ui( editor );
+        ui.endCharacter->setText( "" );
+        ui.textBefore->setText( "name=" );
+        REQUIRE( ui.endCharacterMarked() );
+        REQUIRE_FALSE( ui.canAccept() );
+
+        THEN( "the rules have nothing of it beyond their last valid patterns" )
+        {
+            const QList<FooterEntry> expected{
+                { "User", "", "", true, { ValueMapping{ "a", "b" } } },
+                { "A", "a:\\s*(\\S+)", "", true, {} },
+                { "B", "b=(\\d+)", "", false, {} },
+            };
+            const auto entries = editor.entries();
+            REQUIRE( entries.size() == expected.size() );
+            for ( int i = 0; i < entries.size(); ++i ) {
+                INFO( "rule " << i );
+                REQUIRE( entries[ i ].key == expected[ i ].key );
+                REQUIRE( entries[ i ].linePattern == expected[ i ].linePattern );
+                REQUIRE( entries[ i ].valuePattern == expected[ i ].valuePattern );
+                REQUIRE( entries[ i ].enabled == expected[ i ].enabled );
+                REQUIRE( entries[ i ].mappings.size() == expected[ i ].mappings.size() );
+            }
+
+            AND_THEN( "a save and an export made now are those of the rules alone" )
+            {
+                QTemporaryDir withDraft;
+                QTemporaryDir plain;
+                REQUIRE( withDraft.isValid() );
+                REQUIRE( plain.isValid() );
+                REQUIRE( FooterConfig::saveEntries( withDraft.path(), entries ) );
+                REQUIRE( FooterConfig::saveEntries( plain.path(), expected ) );
+                REQUIRE( FooterConfig::exportToJson( withDraft.path() + "/r.json", entries ) );
+                REQUIRE( FooterConfig::exportToJson( plain.path() + "/r.json", expected ) );
+                for ( const auto* name : { "/custom_footer.ini", "/r.json" } ) {
+                    QFile saved( withDraft.path() + name );
+                    QFile reference( plain.path() + name );
+                    REQUIRE( saved.open( QIODevice::ReadOnly ) );
+                    REQUIRE( reference.open( QIODevice::ReadOnly ) );
+                    const auto bytes = saved.readAll();
+                    REQUIRE( bytes == reference.readAll() );
+                    REQUIRE_FALSE( bytes.contains( "name=" ) );
+                }
+            }
+        }
+
+        WHEN( "the rule is dragged to the end of the list" )
+        {
+            auto* model = ui.model;
+            const std::unique_ptr<QMimeData> data(
+                model->mimeData( { model->index( 0, RuleListModel::KeyColumn ) } ) );
+            REQUIRE( data );
+            REQUIRE( model->dropMimeData( data.get(), Qt::MoveAction, 3, 0, QModelIndex() ) );
+            REQUIRE( model->entry( 2 ).key == "User" );
+
+            THEN( "the unfinished rule and its problem moved with it" )
+            {
+                REQUIRE( ui.list->currentIndex().row() == 2 );
+                REQUIRE( ui.textBefore->text() == "name=" );
+                REQUIRE( ui.endCharacterMarked() );
+                REQUIRE_FALSE( model->problems( 2 ).isEmpty() );
+                REQUIRE( model->problems( 0 ).isEmpty() );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+
+            AND_WHEN( "the rules now above it are selected, and it again" )
+            {
+                ui.select( 0 );
+                REQUIRE( ui.key->text() == "A" );
+                REQUIRE_FALSE( ui.endCharacterMarked() );
+                ui.select( 1 );
+                REQUIRE_FALSE( ui.endCharacterMarked() );
+                ui.select( 2 );
+
+                THEN( "it shows its typed fields and problem" )
+                {
+                    REQUIRE( ui.inSimpleMode() );
+                    REQUIRE( ui.key->text() == "User" );
+                    REQUIRE( ui.textBefore->text() == "name=" );
+                    REQUIRE( ui.shownValueEnd() == ValueEnd::Character );
+                    REQUIRE( ui.endCharacter->text().isEmpty() );
+                    REQUIRE( ui.endCharacterMarked() );
+                }
             }
         }
     }

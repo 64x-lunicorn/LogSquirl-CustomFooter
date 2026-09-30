@@ -19,12 +19,8 @@
 
 #pragma once
 
-#include "simplerule.h"
-
 #include <QList>
 #include <QString>
-
-#include <optional>
 
 namespace custom_footer {
 
@@ -41,12 +37,6 @@ struct FooterEntry {
     QString valuePattern;         ///< Optional regex to extract value from found line.
     bool enabled = true;          ///< Whether this entry is active.
     QList<ValueMapping> mappings; ///< Value substitution rules.
-
-    /// Editor only, never saved or scanned: a simple rule whose patterns
-    /// cannot be generated, as its end character is missing or unusable.
-    /// It keeps the rule's fields, and its problem, while other rules are
-    /// edited; the rule's patterns are empty meanwhile.
-    std::optional<SimpleRule> unfinishedSimpleRule = std::nullopt;
 };
 
 } // namespace custom_footer

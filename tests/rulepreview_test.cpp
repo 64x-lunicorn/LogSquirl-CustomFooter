@@ -569,3 +569,52 @@ SCENARIO( "The preview section counts matches in readable words", "[preview]" )
                     "limit." );
     }
 }
+
+SCENARIO( "The preview section cuts long lines between whole characters", "[preview]" )
+{
+    GIVEN( "a long line with an emoji right where each cut falls" )
+    {
+        const QString emoji = QString::fromUtf8( "\xF0\x9F\x98\x80" ); // two UTF-16 units
+        const auto before = QString( 100, 'a' ) + emoji + QString( 199, 'b' );
+        const auto after = QString( 199, 'c' ) + emoji + "tail";
+        const auto match = QStringLiteral( "VIN" );
+
+        Preview preview;
+        preview.status = Status::Scanned;
+        preview.filePath = "long.log";
+        preview.line = before + match + after;
+        preview.lineNumber = 1;
+        preview.lineMatchStart = before.size();
+        preview.lineMatchLength = match.size();
+        preview.valueStart = before.size();
+        preview.valueLength = match.size();
+        preview.value = FooterValue{ "VIN", match, match, 0 };
+        // The cuts fall kContextChars before and after the match: inside the emojis.
+        REQUIRE(
+            preview.line.at( before.size() - RulePreviewView::kContextChars ).isLowSurrogate() );
+        REQUIRE(
+            preview.line.at( before.size() + match.size() + RulePreviewView::kContextChars - 1 )
+                .isHighSurrogate() );
+
+        RulePreviewView view;
+        view.showPreview( preview );
+        const auto shown = child<QTextEdit>( view, "previewLine" )->toPlainText();
+
+        THEN( "both emojis are shown whole" )
+        {
+            const auto dropped = QString( 100, 'a' ).size();
+            REQUIRE( shown
+                     == "…" + preview.line.mid( dropped, preview.line.size() - dropped - 4 )
+                            + "…" );
+            bool paired = true;
+            for ( int i = 0; i < shown.size(); ++i ) {
+                paired = paired
+                         && ( shown.at( i ).isHighSurrogate()
+                                  ? i + 1 < shown.size() && shown.at( i + 1 ).isLowSurrogate()
+                                  : !shown.at( i ).isLowSurrogate()
+                                        || ( i > 0 && shown.at( i - 1 ).isHighSurrogate() ) );
+            }
+            REQUIRE( paired );
+        }
+    }
+}

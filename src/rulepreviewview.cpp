@@ -232,8 +232,16 @@ void RulePreviewView::showLine( const FooterScanner::Preview& preview )
         first = std::min( first, valueStart );
         last = std::max( last, valueEnd );
     }
-    const qsizetype from = std::max<qsizetype>( 0, first - kContextChars );
-    const qsizetype to = std::min<qsizetype>( line.size(), last + kContextChars );
+    qsizetype from = std::max<qsizetype>( 0, first - kContextChars );
+    qsizetype to = std::min<qsizetype>( line.size(), last + kContextChars );
+    // Never cut a character in two: move the cuts out to whole code points.
+    if ( from > 0 && line.at( from ).isLowSurrogate() && line.at( from - 1 ).isHighSurrogate() ) {
+        --from;
+    }
+    if ( to > 0 && to < line.size() && line.at( to - 1 ).isHighSurrogate()
+         && line.at( to ).isLowSurrogate() ) {
+        ++to;
+    }
 
     std::vector<qsizetype> bounds = { from, to, matchStart, matchEnd };
     if ( valueStart >= 0 ) {

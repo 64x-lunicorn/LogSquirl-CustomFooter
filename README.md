@@ -84,6 +84,12 @@ to add, remove, reorder, import and export them. The panel on the right shows
 the selected rule: its key, line pattern, value pattern and value mappings.
 Changes show up in the list as you type.
 
+Order matters: among rules sharing a key, the one higher in the list wins on
+the same line. Reorder rules by dragging them in the list, with the ↑/↓
+buttons, or with Ctrl+Shift+Up / Ctrl+Shift+Down (⇧⌘↑ / ⇧⌘↓ on macOS) while
+the list has the focus. A rule keeps its mappings, enabled state and
+validation marks wherever it is moved, and stays selected.
+
 Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
 ### How rules are applied

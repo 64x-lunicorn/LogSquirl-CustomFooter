@@ -39,7 +39,6 @@ class RuleDetailPanel;
 class RuleListModel;
 class RuleListView;
 class RuleTemplateDialog;
-class RulePreviewer;
 
 /**
  * Modal dialog for editing footer extraction rules.

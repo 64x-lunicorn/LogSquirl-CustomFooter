@@ -310,6 +310,32 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             }
         }
 
+        WHEN( "the plugin is shut down from the event loop while the template dialog is open" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            auto* fromTemplate = editor->findChild<QToolButton*>( "templateButton" );
+            REQUIRE( fromTemplate );
+            fromTemplate->click();
+            QPointer<QDialog> dialog = editor->findChild<QDialog*>( "ruleTemplateDialog" );
+            REQUIRE( dialog );
+            REQUIRE( dialog->isVisible() );
+
+            bool shutDown = false;
+            QTimer::singleShot( 0, [ &shutDown ] {
+                logsquirl_plugin_shutdown();
+                shutDown = true;
+            } );
+            REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
+
+            THEN( "the editor and the template dialog are gone" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( dialog );
+            }
+        }
+
         WHEN( "the plugin is shut down" )
         {
             QWidget* const footer = host().footerWidget;

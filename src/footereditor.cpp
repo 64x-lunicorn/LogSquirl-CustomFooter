@@ -23,10 +23,9 @@
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
-#include "ruletemplatedialog.h"
-#include "simplerule.h"
 #include "rulepreviewer.h"
 #include "rulepreviewview.h"
+#include "ruletemplatedialog.h"
 #include "simplerule.h"
 
 #include <QDialogButtonBox>
@@ -231,6 +230,9 @@ FooterEditor::~FooterEditor()
     disconnect( model_, nullptr, this, nullptr );
     disconnect( list_, nullptr, this, nullptr );
     disconnect( list_->selectionModel(), nullptr, this, nullptr );
+    if ( templateDialog_ ) {
+        disconnect( templateDialog_, nullptr, this, nullptr );
+    }
     // No preview may run on while, or after, the widgets are deleted.
     previewer_->stop();
 }

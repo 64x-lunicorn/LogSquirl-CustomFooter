@@ -91,6 +91,7 @@ through `guarded()`, which logs the failure instead.
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
+| **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
 
 ## Scanning Algorithm
 
@@ -145,8 +146,7 @@ in a detail panel on the right.
   take the focus (the tool buttons, OK and Apply) first call
   `commitPendingEdit()`, so a mapping cell still being typed is kept. The
   fields take patterns of any length. The panel is a column of sections
-  (fields, mappings), so a live preview or a simple mode for the patterns
-  can be added as further sections.
+  (fields, mappings), so a live preview can be added as a further section.
 - **Reordering**: ↑/↓, Ctrl+Shift+Up/Down in the list (`RuleListView`
   emits `moveUpRequested()` / `moveDownRequested()`; the keypad modifier,
   which macOS sets on every arrow key, is ignored) and drag & drop all
@@ -174,6 +174,38 @@ in a detail panel on the right.
   number; OK and Apply stay disabled while there are any. Each pattern is
   compiled once per dialog and its error cached
   (`FooterEditor::patternCompilations()`, `ruleValidations()`).
+
+### Simple mode
+
+`simplerule.h` holds free functions, independent of the editor, so rule
+templates can build simple rules too:
+
+- **`simpleLinePattern(SimpleRule)`** generates the line pattern:
+  `QRegularExpression::escape()` of the text before the value, `\s*`, and
+  the value as capture group 1 — `(\S+)` up to whitespace, `(.*\S)` up to
+  the end of the line, or `([^c]*[^c\s])` up to the character `c` (escaped),
+  so the value never starts or ends with whitespace. A simple rule has no
+  value pattern, so the scanner's single-stage path applies. Without a
+  text, or without the end character, the pattern is empty: the rule is
+  incomplete, like a new one. `applySimpleRule()` sets both patterns of a
+  `FooterEntry`.
+- **`simpleRuleOf()`** classifies: it parses the text and the end back out
+  of the line pattern, generates the patterns again, and accepts the rule
+  only if they are the stored ones byte for byte. Empty patterns are the
+  empty simple rule. Everything else is advanced, so nothing is ever
+  rewritten into another form.
+
+`RuleDetailPanel` shows a rule in simple mode exactly when `simpleRuleOf()`
+accepts it; the mode is not stored anywhere. In simple mode the simple
+fields regenerate the patterns on every edit and the pattern fields are
+read-only; `entry()` always reads the pattern fields. **Advanced** makes them
+editable and keeps their text. Switching back is enabled only while
+`simpleRuleOf()` accepts the current patterns, and keeps the simple fields
+if they still generate those patterns. Enabling or disabling the rule in
+the list updates only the panel's check box (`showEnabled()`), so the mode
+chosen for the selected rule is kept. Tests: `tests/simplerule_test.cpp`,
+`tests/simplemode_test.cpp`, and the simple rules in
+`tests/configroundtrip_test.cpp`.
 
 The editor never changes rules it only shows: a config saved by 0.3.0 is
 saved back byte for byte (`tests/configroundtrip_test.cpp`).

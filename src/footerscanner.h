@@ -63,7 +63,9 @@ public:
 
     /// How far a file has been scanned, to continue there once it has grown.
     struct Progress {
-        qint64 offset = 0;             ///< End of the last complete line scanned.
+        /// End of the last complete line scanned, or where the scan limit
+        /// stopped the scan inside a line.
+        qint64 offset = 0;
         int lines = 0;                 ///< Complete lines scanned.
         QMap<QString, QString> values; ///< Found in those lines.
         bool done = false;             ///< Every key has a value, or a limit was reached.

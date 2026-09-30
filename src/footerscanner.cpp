@@ -43,11 +43,20 @@ enum class ReadResult {
     Stopped, ///< Cancelled, or stopAt was passed inside a line.
 };
 
+/// A line without its line break, and at most maxBytes long.
+void trimLine( QByteArray& line, qint64 maxBytes )
+{
+    while ( line.endsWith( '\n' ) || line.endsWith( '\r' ) ) {
+        line.chop( 1 );
+    }
+    line.truncate( maxBytes );
+}
+
 /// Read one line of at most maxBytes, skipping the rest of a longer one.
 /// terminated tells whether the line ended with a line break, rather than
 /// with the end of the file. Skipping the rest of a line stops once the file
 /// position reaches stopAt, or when the scan is cancelled, so that a huge
-/// line is not read to its end.
+/// line is not read to its end; line then holds the start read so far.
 ReadResult readBoundedLine( QFile& file, qint64 maxBytes, qint64 stopAt,
                             const std::atomic_bool* cancelled, QByteArray& line, bool& terminated )
 {
@@ -60,6 +69,7 @@ ReadResult readBoundedLine( QFile& file, qint64 maxBytes, qint64 stopAt,
     bool complete = terminated || file.atEnd();
     while ( !complete ) {
         if ( file.pos() >= stopAt || isCancelled( cancelled ) ) {
+            trimLine( line, maxBytes );
             return ReadResult::Stopped;
         }
         const auto rest = file.readLine( maxBytes + 1 );
@@ -67,10 +77,7 @@ ReadResult readBoundedLine( QFile& file, qint64 maxBytes, qint64 stopAt,
         complete = rest.isEmpty() || terminated || file.atEnd();
     }
 
-    while ( line.endsWith( '\n' ) || line.endsWith( '\r' ) ) {
-        line.chop( 1 );
-    }
-    line.truncate( maxBytes );
+    trimLine( line, maxBytes );
     return ReadResult::Line;
 }
 
@@ -183,8 +190,10 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                 if ( isCancelled( cancelled ) ) {
                     return {};
                 }
+                // The start of the line was read: match it like that of any
+                // over-long line, then stop there.
                 stoppedInLine = true;
-                break;
+                terminated = true;
             }
 
             auto& values = terminated ? progress.values : unterminated;
@@ -202,6 +211,12 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                 }
             }
 
+            if ( stoppedInLine ) {
+                // Remember where the scan stopped, so that a rescan knows
+                // the file and does not read the line again.
+                progress.offset = file.pos();
+                break;
+            }
             if ( terminated ) {
                 ++progress.lines;
                 progress.offset = file.pos();

@@ -472,7 +472,21 @@ SCENARIO( "FooterScanner bounds what it reads", "[footerscanner][edge]" )
                 REQUIRE( scan.values.isEmpty() );
                 REQUIRE( scan.progress.done );
                 REQUIRE( scan.progress.lines == 0 );
-                REQUIRE( scan.progress.offset <= FooterScanner::kMaxScanBytes );
+                REQUIRE( scan.progress.offset >= FooterScanner::kMaxScanBytes );
+                REQUIRE( scan.progress.offset
+                         <= FooterScanner::kMaxScanBytes + FooterScanner::kMaxLineBytes + 1 );
+            }
+
+            AND_WHEN( "the file is scanned again" )
+            {
+                const auto again = FooterScanner( entries ).scanFrom( filePath, scan.progress, 0 );
+
+                THEN( "the scan continues as done, without reading the line again" )
+                {
+                    REQUIRE( again.resumed );
+                    REQUIRE( again.progress.done );
+                    REQUIRE( again.values.isEmpty() );
+                }
             }
         }
 
@@ -486,6 +500,39 @@ SCENARIO( "FooterScanner bounds what it reads", "[footerscanner][edge]" )
                 REQUIRE( scan.values.isEmpty() );
                 REQUIRE_FALSE( scan.progress.done );
                 REQUIRE( scan.progress.offset == 0 );
+            }
+        }
+    }
+
+    GIVEN( "a long line crossing the scan limit, with a match at its start" )
+    {
+        const auto filePath = tmpDir.path() + "/crossing.log";
+        QFile file( filePath );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        // Lines of 1 MiB up to just before the limit, then one that crosses it.
+        const QByteArray line = QByteArray( 1024 * 1024 - 1, 'x' ) + '\n';
+        for ( qint64 written = 0;
+              written + line.size() < FooterScanner::kMaxScanBytes - 4 * 1024 * 1024;
+              written += line.size() ) {
+            REQUIRE( file.write( line ) == line.size() );
+        }
+        file.write( "VIN: EARLY " );
+        const QByteArray chunk( 1024 * 1024, 'y' );
+        for ( int i = 0; i < 8; ++i ) {
+            REQUIRE( file.write( chunk ) == chunk.size() );
+        }
+        file.write( "\n" );
+        file.close();
+
+        WHEN( "scanning without a line limit" )
+        {
+            const auto scan = FooterScanner( entries ).scanFrom( filePath, {}, 0 );
+
+            THEN( "the start of the crossing line is still matched, and the scan is done" )
+            {
+                REQUIRE( scan.values[ "VIN" ] == "EARLY" );
+                REQUIRE( scan.progress.values[ "VIN" ] == "EARLY" );
+                REQUIRE( scan.progress.done );
             }
         }
     }

@@ -31,6 +31,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <utility>
 
 namespace custom_footer {
 
@@ -251,8 +252,12 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
 void FooterEditor::addEntry()
 {
     const int row = table_->rowCount();
-    table_->setRowCount( row + 1 );
-    setRow( row, FooterEntry() );
+    {
+        const QSignalBlocker blocker( table_ );
+        table_->setRowCount( row + 1 );
+        setRow( row, FooterEntry() );
+    }
+    validate();
 
     table_->scrollToItem( table_->item( row, 1 ) );
     table_->setCurrentCell( row, 1 );
@@ -407,6 +412,8 @@ void FooterEditor::storeMappingsOfCurrentRule()
 void FooterEditor::validate()
 {
     QStringList problems;
+    // Only the patterns in the table now are remembered for the next time.
+    QHash<QString, QString> patternErrors;
 
     // Marking a cell changes its item: do not validate again for that.
     const QSignalBlocker blocker( table_ );
@@ -416,8 +423,10 @@ void FooterEditor::validate()
             if ( !item ) {
                 return;
             }
-            item->setToolTip( problem );
-            item->setBackground( problem.isEmpty() ? QBrush() : QBrush( kProblemColor ) );
+            if ( item->toolTip() != problem ) {
+                item->setToolTip( problem );
+                item->setBackground( problem.isEmpty() ? QBrush() : QBrush( kProblemColor ) );
+            }
             if ( !problem.isEmpty() ) {
                 problems.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
             }
@@ -434,14 +443,16 @@ void FooterEditor::validate()
                                 && text( 1 ).trimmed().isEmpty();
         mark( 1, keyMissing ? tr( "a rule with a line pattern needs a key" ) : QString() );
 
-        const auto patternProblem = [ this, row ]( int column, const QString& what ) {
-            const auto* item = table_->item( row, column );
-            const auto error = FooterScanner::patternError( item ? item->text() : QString() );
-            return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
-        };
+        const auto patternProblem
+            = [ this, &text, &patternErrors ]( int column, const QString& what ) {
+                  const auto error = patternError( text( column ), patternErrors );
+                  return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
+              };
         mark( 2, patternProblem( 2, tr( "invalid line pattern" ) ) );
         mark( 3, patternProblem( 3, tr( "invalid value pattern" ) ) );
     }
+
+    patternErrors_ = std::move( patternErrors );
 
     problemLabel_->setText( problems.join( '\n' ) );
     problemLabel_->setVisible( !problems.isEmpty() );
@@ -453,9 +464,13 @@ void FooterEditor::validate()
 
 void FooterEditor::populateTable( const QList<FooterEntry>& entries )
 {
-    table_->setRowCount( entries.size() );
-    for ( int i = 0; i < entries.size(); ++i ) {
-        setRow( i, entries[ i ] );
+    {
+        // Every cell set would validate all rules again: validate once below.
+        const QSignalBlocker blocker( table_ );
+        table_->setRowCount( entries.size() );
+        for ( int i = 0; i < entries.size(); ++i ) {
+            setRow( i, entries[ i ] );
+        }
     }
 
     // The current cell may stay where it was while its rule is replaced.
@@ -487,6 +502,18 @@ void FooterEditor::moveEntry( int from, int to )
     entryList.move( from, to );
     populateTable( entryList );
     table_->setCurrentCell( to, 1 );
+}
+
+QString FooterEditor::patternError( const QString& pattern, QHash<QString, QString>& errors ) const
+{
+    auto it = errors.constFind( pattern );
+    if ( it == errors.constEnd() ) {
+        const auto known = patternErrors_.constFind( pattern );
+        it = errors.insert( pattern, known != patternErrors_.constEnd()
+                                         ? known.value()
+                                         : FooterScanner::patternError( pattern ) );
+    }
+    return it.value();
 }
 
 QList<ValueMapping> FooterEditor::mappingsOf( int row ) const

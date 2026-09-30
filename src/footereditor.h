@@ -24,6 +24,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGroupBox>
+#include <QHash>
 #include <QLabel>
 #include <QList>
 #include <QTableWidget>
@@ -83,6 +84,11 @@ private:
     /// the rule's row whichever way the table changes.
     QList<ValueMapping> mappingsOf( int row ) const;
     void setMappings( int row, const QList<ValueMapping>& mappings );
+
+    /// Why a pattern does not compile, remembered from the last validate(),
+    /// so that validating compiles only the patterns edited since.
+    QString patternError( const QString& pattern, QHash<QString, QString>& errors ) const;
+    QHash<QString, QString> patternErrors_;
 
     QTableWidget* table_ = nullptr;
     QToolButton* addButton_ = nullptr;

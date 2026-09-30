@@ -28,6 +28,7 @@
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
+#include <QElapsedTimer>
 #include <QGroupBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -347,6 +348,70 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
         THEN( "they cannot be saved until fixed" )
         {
             REQUIRE_FALSE( ui.canAccept() );
+        }
+    }
+}
+
+SCENARIO( "FooterEditor stays responsive with many rules", "[footereditor]" )
+{
+    // Patterns that take a while to compile, all of them distinct.
+    QList<FooterEntry> entries;
+    for ( int i = 0; i < 200; ++i ) {
+        const auto key = QString( "Key%1" ).arg( i );
+        entries.append(
+            { key,
+              QString( "^(?:\\d{4}-\\d{2}-\\d{2}|\\w+){1,3}\\s+%1:\\s+(\\S+)" ).arg( key ),
+              QString( "(?<=%1:)\\s*([A-Z0-9]{3,}|[a-z]+-\\d+)" ).arg( key ),
+              true,
+              { ValueMapping{ "0", "zero" } } } );
+    }
+
+    GIVEN( "an editor with 200 rules" )
+    {
+        QElapsedTimer timer;
+        timer.start();
+        FooterEditor editor( entries );
+        EditorUi ui( editor );
+
+        WHEN( "a rule is moved up many times" )
+        {
+            ui.rules->setCurrentCell( 199, 1 );
+            for ( int i = 0; i < 20; ++i ) {
+                ui.moveUp->click();
+            }
+
+            THEN( "the editor keeps up and the rules are unchanged but for the order" )
+            {
+                REQUIRE( timer.elapsed() < 3000 );
+                REQUIRE( ui.rules->item( 179, 1 )->text() == "Key199" );
+                REQUIRE( editor.entries().size() == 200 );
+                REQUIRE( ui.canAccept() );
+            }
+
+            AND_WHEN( "a pattern of the moved rule becomes invalid" )
+            {
+                ui.rules->item( 179, 3 )->setText( "(" );
+
+                THEN( "only that rule is marked" )
+                {
+                    REQUIRE_FALSE( ui.rules->item( 179, 3 )->toolTip().isEmpty() );
+                    REQUIRE( ui.rules->item( 178, 3 )->toolTip().isEmpty() );
+                    REQUIRE( ui.rules->item( 180, 3 )->toolTip().isEmpty() );
+                    REQUIRE_FALSE( ui.canAccept() );
+
+                    AND_WHEN( "the rule is moved again" )
+                    {
+                        ui.moveUp->click();
+
+                        THEN( "the mark moves with it" )
+                        {
+                            REQUIRE_FALSE( ui.rules->item( 178, 3 )->toolTip().isEmpty() );
+                            REQUIRE( ui.rules->item( 179, 3 )->toolTip().isEmpty() );
+                            REQUIRE_FALSE( ui.canAccept() );
+                        }
+                    }
+                }
+            }
         }
     }
 }

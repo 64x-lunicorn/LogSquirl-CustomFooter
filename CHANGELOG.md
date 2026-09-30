@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Duplicate keys** — when several enabled rules share a key, the first rule
+  in the list owns it; later ones are ignored and reported in the host log.
+  Previously the key was shown twice and the last rule won.
+
+### Fixed
+- **Invalid patterns** — a rule whose value pattern does not compile is now
+  skipped like one with an invalid line pattern, instead of silently falling
+  back to the line pattern and showing the wrong value. Skipped rules are
+  reported in the host log.
+- **Huge lines** — a file without line breaks was read into memory in one
+  piece; lines are now matched against their first 64 KiB, and a scan reads
+  at most 64 MiB.
+
 ## [0.2.0] — 2026-04-08
 
 ### Added

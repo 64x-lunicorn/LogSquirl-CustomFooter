@@ -23,6 +23,8 @@
 
 #include "footerdisplaywidget.h"
 
+#include <QString>
+
 namespace custom_footer {
 
 /// Global plugin state — bridges C ABI entry points to C++ implementation.
@@ -38,5 +40,8 @@ extern PluginState g_state;
 
 /// Convenience wrapper: log via host API.
 void hostLog( int level, const char* message );
+
+/// Log via host API, UTF-8 encoded.
+void hostLog( int level, const QString& message );
 
 } // namespace custom_footer

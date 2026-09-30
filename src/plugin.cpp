@@ -56,6 +56,11 @@ void hostLog( int level, const char* message )
         g_state.api->log_message( g_state.handle, level, message );
     }
 }
+
+void hostLog( int level, const QString& message )
+{
+    hostLog( level, message.toUtf8().constData() );
+}
 } // namespace custom_footer
 
 // ── Static plugin info ──────────────────────────────────────────────────
@@ -103,25 +108,15 @@ static void rescanActiveFile()
     }
 
     const auto dir = configDir();
-    const auto entries = custom_footer::FooterConfig::loadEntries( dir );
+    const custom_footer::FooterScanner scanner( custom_footer::FooterConfig::loadEntries( dir ) );
+    for ( const auto& problem : scanner.problems() ) {
+        custom_footer::hostLog( LOGSQUIRL_LOG_WARNING, problem );
+    }
     const int maxLines = custom_footer::FooterConfig::loadMaxLines( dir );
 
-    const auto results = custom_footer::FooterScanner::scan( filePath, entries, maxLines );
-
-    // Build an ordered pair list following the entry definition order.
-    QList<QPair<QString, QString>> ordered;
-    for ( const auto& entry : entries ) {
-        if ( !entry.enabled ) {
-            continue;
-        }
-        auto it = results.find( entry.key );
-        if ( it != results.end() ) {
-            ordered.append( { entry.key, it.value() } );
-        }
-    }
-
     if ( st.footerWidget ) {
-        st.footerWidget->updateValues( ordered );
+        st.footerWidget->updateValues(
+            scanner.inRuleOrder( scanner.scanFile( filePath, maxLines ) ) );
     }
 }
 

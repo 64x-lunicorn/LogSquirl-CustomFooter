@@ -85,11 +85,39 @@ SCENARIO( "FooterScanner handles invalid regex gracefully", "[footerscanner][edg
         {
             const auto results = FooterScanner::scan( filePath, entries );
 
-            THEN( "it falls back to using linePattern capture" )
+            THEN( "the entry is skipped instead of falling back to the line pattern" )
             {
+                REQUIRE( results.isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "rules with invalid patterns next to a valid one" )
+    {
+        const QStringList lines = { "VIN: ABC123" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        QList<FooterEntry> entries;
+        entries.append( { "Bad", "[unclosed bracket", "", true, {} } );
+        entries.append( { "Worse", "VIN:", "(", true, {} } );
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+
+        WHEN( "compiling the rules" )
+        {
+            const FooterScanner scanner( entries );
+
+            THEN( "each invalid rule is reported by key" )
+            {
+                REQUIRE( scanner.problems().size() == 2 );
+                REQUIRE( scanner.problems()[ 0 ].contains( "Bad" ) );
+                REQUIRE( scanner.problems()[ 1 ].contains( "Worse" ) );
+            }
+
+            THEN( "the valid rule still matches" )
+            {
+                const auto results = scanner.scanFile( filePath );
                 REQUIRE( results.size() == 1 );
-                // With no capture group in linePattern "VIN:", full match is used
-                REQUIRE( results[ "VIN" ] == "VIN:" );
+                REQUIRE( results[ "VIN" ] == "ABC123" );
             }
         }
     }
@@ -181,7 +209,7 @@ SCENARIO( "FooterScanner with maxLines=0 means unlimited", "[footerscanner][edge
     }
 }
 
-SCENARIO( "FooterScanner with duplicate keys uses first match", "[footerscanner][edge]" )
+SCENARIO( "FooterScanner uses the first matching line per rule", "[footerscanner][edge]" )
 {
     QTemporaryDir tmpDir;
     REQUIRE( tmpDir.isValid() );
@@ -202,6 +230,172 @@ SCENARIO( "FooterScanner with duplicate keys uses first match", "[footerscanner]
             {
                 REQUIRE( results.size() == 1 );
                 REQUIRE( results[ "VIN" ] == "FIRST" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterScanner with duplicate keys uses the first rule", "[footerscanner][edge]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+
+    GIVEN( "two enabled rules with the same key, the later one matching earlier in the file" )
+    {
+        const QStringList lines = { "id=from-second-rule", "VIN: from-first-rule" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        QList<FooterEntry> entries;
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+        entries.append( { "VIN", "id=(\\S+)", "", true, {} } );
+
+        WHEN( "scanning" )
+        {
+            const FooterScanner scanner( entries );
+            const auto results = scanner.scanFile( filePath );
+
+            THEN( "the first rule in list order owns the key" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "VIN" ] == "from-first-rule" );
+            }
+
+            THEN( "the ordered values show the key once" )
+            {
+                const auto ordered = scanner.inRuleOrder( results );
+                REQUIRE( ordered.size() == 1 );
+                REQUIRE( ordered[ 0 ].first == "VIN" );
+            }
+
+            THEN( "the ignored duplicate is reported" )
+            {
+                REQUIRE( scanner.problems().size() == 1 );
+                REQUIRE( scanner.problems()[ 0 ].contains( "VIN" ) );
+            }
+        }
+    }
+
+    GIVEN( "a disabled rule followed by an enabled one with the same key" )
+    {
+        const QStringList lines = { "id=42" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        QList<FooterEntry> entries;
+        entries.append( { "ID", "VIN:\\s+(\\S+)", "", false, {} } );
+        entries.append( { "ID", "id=(\\S+)", "", true, {} } );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the enabled rule provides the value" )
+            {
+                REQUIRE( results[ "ID" ] == "42" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterScanner orders values by rule definition", "[footerscanner][edge]" )
+{
+    GIVEN( "rules Zeta before Alpha and values for both" )
+    {
+        QList<FooterEntry> entries;
+        entries.append( { "Zeta", "z=(\\S+)", "", true, {} } );
+        entries.append( { "Alpha", "a=(\\S+)", "", true, {} } );
+        const FooterScanner scanner( entries );
+
+        WHEN( "ordering the values" )
+        {
+            const auto ordered = scanner.inRuleOrder( { { "Alpha", "1" }, { "Zeta", "2" } } );
+
+            THEN( "they follow the rule order, not the key order" )
+            {
+                REQUIRE( ordered.size() == 2 );
+                REQUIRE( ordered[ 0 ] == qMakePair( QString( "Zeta" ), QString( "2" ) ) );
+                REQUIRE( ordered[ 1 ] == qMakePair( QString( "Alpha" ), QString( "1" ) ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterScanner bounds what it reads", "[footerscanner][edge]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+
+    QList<FooterEntry> entries;
+    entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+
+    GIVEN( "a line far longer than the line length limit before the match" )
+    {
+        const QStringList lines
+            = { QString( FooterScanner::kMaxLineBytes * 4, QChar( 'x' ) ), "VIN: AFTER" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the next line is still found" )
+            {
+                REQUIRE( results[ "VIN" ] == "AFTER" );
+            }
+        }
+    }
+
+    GIVEN( "a match at the start of an over-long line" )
+    {
+        const QStringList lines
+            = { "VIN: EARLY " + QString( FooterScanner::kMaxLineBytes * 2, QChar( 'x' ) ) };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the truncated line still matches" )
+            {
+                REQUIRE( results[ "VIN" ] == "EARLY" );
+            }
+        }
+    }
+
+    GIVEN( "a file with Windows line endings" )
+    {
+        const auto filePath = tmpDir.path() + "/crlf.log";
+        QFile file( filePath );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        file.write( "VIN: CRLF\r\nother\r\n" );
+        file.close();
+
+        QList<FooterEntry> anchored;
+        anchored.append( { "VIN", "VIN:\\s+(\\S+)$", "", true, {} } );
+
+        WHEN( "scanning with a pattern anchored at the line end" )
+        {
+            const auto results = FooterScanner::scan( filePath, anchored );
+
+            THEN( "the line ending is not part of the line" )
+            {
+                REQUIRE( results[ "VIN" ] == "CRLF" );
+            }
+        }
+    }
+
+    GIVEN( "a scan that is cancelled" )
+    {
+        const auto filePath = writeTempLines( tmpDir, { "VIN: ABC" } );
+        const std::atomic_bool cancelled{ true };
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner( entries ).scanFile(
+                filePath, FooterScanner::kDefaultMaxLines, &cancelled );
+
+            THEN( "nothing is returned" )
+            {
+                REQUIRE( results.isEmpty() );
             }
         }
     }

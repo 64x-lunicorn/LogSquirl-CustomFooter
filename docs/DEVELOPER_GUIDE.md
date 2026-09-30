@@ -58,15 +58,18 @@ sequenceDiagram
 |--------|---------|----------------|
 | **Plugin entry** | `plugin.cpp`, `plugin.h` | C ABI exports, global state, lifecycle |
 | **FooterEntry** | `footerentry.h` | Data model: key, linePattern, valuePattern, mappings |
-| **FooterScanner** | `footerscanner.h/.cpp` | Stateless line-by-line scanning with two-stage matching |
+| **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |
 | **FooterConfig** | `footerconfig.h/.cpp` | INI persistence + JSON import/export |
 | **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog with inline mapping panel |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget showing key-value pairs |
 
 ## Scanning Algorithm
 
-1. Build compiled `QRegularExpression` objects for each enabled rule.
-2. Read the log file line by line (up to `maxLines`).
+1. Build compiled `QRegularExpression` objects for each enabled rule. A rule
+   is skipped, and reported in `FooterScanner::problems()`, if a pattern is
+   invalid or an earlier enabled rule already uses its key.
+2. Read the log file line by line (up to `maxLines`, at most 64 MiB; longer
+   lines than 64 KiB are matched against their start).
 3. For each line, check every unmatched rule:
    - **Stage 1 — Line Pattern**: If `linePattern` matches the line, proceed.
    - **Stage 2 — Value Pattern** (optional): If `valuePattern` is set, apply

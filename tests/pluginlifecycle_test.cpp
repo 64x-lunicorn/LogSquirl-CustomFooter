@@ -36,6 +36,7 @@
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLineEdit>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -232,6 +233,79 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
                     REQUIRE_FALSE( g_state.editor );
                 }
             }
+        }
+
+        WHEN( "the host's application-modal plugin dialog is open over the main window" )
+        {
+            // As in LogSquirl: configure() always gets the main window, even
+            // while the Plugins dialog blocks it.
+            QWidget mainWindow;
+            mainWindow.show();
+            auto* pluginDialog = new QDialog( &mainWindow );
+            QPointer<QDialog> pluginDialogAlive = pluginDialog;
+            pluginDialog->setWindowModality( Qt::ApplicationModal );
+            pluginDialog->show();
+            REQUIRE( QApplication::activeModalWidget() == pluginDialog );
+
+            logsquirl_plugin_configure( &mainWindow );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+
+            THEN( "the editor opens over the plugin dialog, where it is usable" )
+            {
+                REQUIRE( editor->parentWidget() == pluginDialog );
+                REQUIRE( editor->isWindow() );
+                REQUIRE( editor->isVisible() );
+            }
+
+            AND_WHEN( "the plugin dialog closes while the editor has unsaved edits" )
+            {
+                editor->findChild<QLineEdit*>( "keyEdit" )->setText( "Edited" );
+                pluginDialog->accept();
+
+                THEN( "the editor moves back over the main window, edits and all" )
+                {
+                    REQUIRE( editor );
+                    REQUIRE( editor->parentWidget() == &mainWindow );
+                    REQUIRE( editor->isVisible() );
+                    REQUIRE( editor->entries().at( 0 ).key == "Edited" );
+                }
+            }
+
+            AND_WHEN( "the plugin dialog is deleted while open" )
+            {
+                delete pluginDialog;
+
+                THEN( "the editor survives, over the main window" )
+                {
+                    REQUIRE( editor );
+                    REQUIRE( editor->parentWidget() == &mainWindow );
+                }
+            }
+            delete pluginDialogAlive.data();
+        }
+
+        WHEN( "the editor is open when the plugin dialog opens and opens it again" )
+        {
+            QWidget mainWindow;
+            mainWindow.show();
+            logsquirl_plugin_configure( &mainWindow );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            REQUIRE( editor->parentWidget() == &mainWindow );
+
+            QDialog pluginDialog( &mainWindow );
+            pluginDialog.setWindowModality( Qt::ApplicationModal );
+            pluginDialog.show();
+            logsquirl_plugin_configure( &mainWindow );
+
+            THEN( "the same editor moves over the plugin dialog" )
+            {
+                REQUIRE( g_state.editor == editor );
+                REQUIRE( editor->parentWidget() == &pluginDialog );
+                REQUIRE( editor->isVisible() );
+            }
+            pluginDialog.reject();
         }
 
         WHEN( "the rule editor is open while the host switches files" )

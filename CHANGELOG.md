@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-30
+
 ### Changed
+- **Requires LogSquirl 26.10.0 or later.** This release is built with the Qt of
+  LogSquirl 26.10.0 (Qt 6.11.3); an older LogSquirl cannot load it.
 - **Rules sharing a key** — rules with the same key are now alternatives,
   e.g. one pattern for old logs and one for new ones: the key's value comes
   from the first line that any of them matches, and if several match that

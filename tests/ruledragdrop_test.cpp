@@ -34,11 +34,14 @@
 
 #include <QApplication>
 #include <QDialogButtonBox>
+#include <QDrag>
+#include <QDropEvent>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QTableView>
 #include <QTableWidget>
@@ -103,20 +106,39 @@ struct DragUi {
         return model->dropMimeData( data.get(), action, before, 0, QModelIndex() );
     }
 
-    /// Drag the rule in @p from and drop it onto the rule in @p onto.
-    bool dragOnto( int from, int onto ) const
+    /// Press Ctrl+Shift and @p key in the list; @p extra adds e.g. the
+    /// keypad modifier that macOS sets on every arrow key.
+    void pressMove( int key, Qt::KeyboardModifiers extra = Qt::NoModifier ) const
+    {
+        QKeyEvent event( QEvent::KeyPress, key, Qt::ControlModifier | Qt::ShiftModifier | extra );
+        QApplication::sendEvent( list, &event );
+    }
+
+    /// A point in the list's viewport @p dy pixels below the top of @p row.
+    QPoint rowPoint( int row, int dy ) const
+    {
+        const auto rect = list->visualRect( model->index( row, RuleListModel::LinePatternColumn ) );
+        return { rect.center().x(), rect.top() + dy };
+    }
+
+    /// Drag the rule in @p from over the list's viewport and drop it at
+    /// @p point, through the view's drag enter, move and drop handlers.
+    /// Returns whether the view accepted the drop.
+    bool dropAt( int from, QPoint point ) const
     {
         const std::unique_ptr<QMimeData> data(
             model->mimeData( { model->index( from, RuleListModel::KeyColumn ) } ) );
-        const auto target = model->index( onto, RuleListModel::LinePatternColumn );
-        return model->canDropMimeData( data.get(), Qt::MoveAction, -1, -1, target )
-               && model->dropMimeData( data.get(), Qt::MoveAction, -1, -1, target );
-    }
-
-    void pressMove( int key ) const
-    {
-        QKeyEvent event( QEvent::KeyPress, key, Qt::ControlModifier | Qt::ShiftModifier );
-        QApplication::sendEvent( list, &event );
+        auto* viewport = list->viewport();
+        QDragEnterEvent enter( point, Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
+        QApplication::sendEvent( viewport, &enter );
+        QDragMoveEvent move( point, Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
+        QApplication::sendEvent( viewport, &move );
+        if ( !move.isAccepted() ) {
+            return false;
+        }
+        QDropEvent drop( point, Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
+        QApplication::sendEvent( viewport, &drop );
+        return drop.isAccepted() && drop.dropAction() == Qt::MoveAction;
     }
 
     QTableView* list;
@@ -303,15 +325,15 @@ SCENARIO( "FooterEditor reorders rules by drag and drop", "[footereditor][dragdr
             }
         }
 
-        WHEN( "dropping a rule onto another rule" )
+        WHEN( "dropping a rule without a row, as the view does below the last rule" )
         {
-            REQUIRE( ui.dragOnto( 1, 3 ) );
-            expectMove( expected, 1, 3 );
+            REQUIRE( ui.drag( 1, -1 ) );
+            expectMove( expected, 1, 4 );
 
-            THEN( "it takes that rule's place" )
+            THEN( "it becomes the last rule" )
             {
                 requireRules( ui, editor, expected );
-                REQUIRE( ui.currentRow() == 3 );
+                REQUIRE( ui.currentRow() == 4 );
             }
         }
 
@@ -329,17 +351,16 @@ SCENARIO( "FooterEditor reorders rules by drag and drop", "[footereditor][dragdr
             }
         }
 
-        WHEN( "the platform reports the drop as a copy" )
+        WHEN( "a drop asks for anything but a move" )
         {
-            // On macOS an internal move can arrive as a copy; a rule is
-            // never duplicated.
-            REQUIRE( ui.drag( 1, 4, Qt::CopyAction ) );
-            expectMove( expected, 1, 3 );
+            const bool copied = ui.drag( 1, 4, Qt::CopyAction );
+            const bool linked = ui.drag( 1, 4, Qt::LinkAction );
 
-            THEN( "the rule is moved, not copied" )
+            THEN( "it is refused, and no rule is copied" )
             {
+                REQUIRE_FALSE( copied );
+                REQUIRE_FALSE( linked );
                 requireRules( ui, editor, expected );
-                REQUIRE( ui.currentRow() == 3 );
             }
         }
 
@@ -522,6 +543,23 @@ SCENARIO( "FooterEditor moves the selected rule with the keyboard", "[footeredit
             }
         }
 
+        WHEN( "pressing Ctrl+Shift+Up and Down on arrow keys that report the keypad" )
+        {
+            // macOS sets the keypad modifier on every arrow key, as the
+            // numeric keypad's arrows do elsewhere.
+            ui.pressMove( Qt::Key_Down, Qt::KeypadModifier );
+            ui.pressMove( Qt::Key_Down, Qt::KeypadModifier );
+            ui.pressMove( Qt::Key_Up, Qt::KeypadModifier );
+            expectMove( expected, 1, 2 );
+
+            THEN( "the rule moves, and not just the selection" )
+            {
+                requireRules( ui, editor, expected );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.key->text() == "B" );
+            }
+        }
+
         WHEN( "pressing Ctrl+Shift+Down in the list until the end" )
         {
             for ( int i = 0; i < 5; ++i ) {
@@ -590,6 +628,147 @@ SCENARIO( "FooterEditor only renumbers the problems after a drag", "[footeredito
                 REQUIRE( ui.listKey( 0 ) == "R150" );
                 REQUIRE_FALSE( ui.model->problems( 0 ).isEmpty() );
                 REQUIRE( ui.problems->text().startsWith( "Rule 1:" ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor moves a rule dropped through the rule list's view",
+          "[footereditor][dragdrop]" )
+{
+    GIVEN( "a shown editor with rules, the second one selected" )
+    {
+        FooterEditor editor( distinctRules() );
+        DragUi ui( editor );
+        editor.resize( 800, 520 );
+        editor.show();
+        QApplication::processEvents();
+        auto expected = distinctRules();
+        ui.select( 1 );
+        const int rowHeight = ui.list->visualRect( ui.model->index( 0, 0 ) ).height();
+        REQUIRE( rowHeight > 4 );
+
+        // Offscreen, QDrag::exec() returns at once, so a synthetic drop has
+        // no source, and the InternalMove view ignores drops from anything
+        // but itself.
+        WHEN( "something without the list as its source is dropped" )
+        {
+            const bool dropped = ui.dropAt( 1, ui.rowPoint( 4, rowHeight - 1 ) );
+
+            THEN( "the view ignores it" )
+            {
+                REQUIRE_FALSE( dropped );
+                requireRules( ui, editor, expected );
+            }
+        }
+
+        // Past the source check, a view in DragDrop mode handles the drop
+        // as the InternalMove one does, with the row the view computes
+        // from the drop position.
+        AND_GIVEN( "the view past its source check" )
+        {
+            ui.list->setDragDropMode( QAbstractItemView::DragDrop );
+
+            WHEN( "dropping it at the top edge of the fourth rule" )
+            {
+                REQUIRE( ui.dropAt( 1, ui.rowPoint( 3, 1 ) ) );
+                expectMove( expected, 1, 2 );
+
+                THEN( "it lands above that rule, and stays selected" )
+                {
+                    requireRules( ui, editor, expected );
+                    REQUIRE( ui.currentRow() == 2 );
+                    REQUIRE( ui.key->text() == "B" );
+                }
+            }
+
+            WHEN( "dropping it at the bottom edge of the fourth rule" )
+            {
+                REQUIRE( ui.dropAt( 1, ui.rowPoint( 3, rowHeight - 1 ) ) );
+                expectMove( expected, 1, 3 );
+
+                THEN( "it lands below that rule" )
+                {
+                    requireRules( ui, editor, expected );
+                    REQUIRE( ui.currentRow() == 3 );
+                }
+            }
+
+            WHEN( "dropping it onto the middle of a rule" )
+            {
+                REQUIRE( ui.dropAt( 1, ui.rowPoint( 3, rowHeight / 2 + 1 ) ) );
+                expectMove( expected, 1, 3 );
+
+                THEN( "it lands next to that rule, not onto it" )
+                {
+                    requireRules( ui, editor, expected );
+                }
+            }
+
+            WHEN( "dropping the last rule at the top edge of the first" )
+            {
+                ui.select( 4 );
+                REQUIRE( ui.dropAt( 4, ui.rowPoint( 0, 1 ) ) );
+                expectMove( expected, 4, 0 );
+
+                THEN( "it becomes the first rule" )
+                {
+                    requireRules( ui, editor, expected );
+                    REQUIRE( ui.currentRow() == 0 );
+                }
+            }
+
+            WHEN( "dropping it at the bottom edge of the last rule" )
+            {
+                REQUIRE( ui.dropAt( 1, ui.rowPoint( 4, rowHeight - 1 ) ) );
+                expectMove( expected, 1, 4 );
+
+                THEN( "it becomes the last rule" )
+                {
+                    requireRules( ui, editor, expected );
+                    REQUIRE( ui.currentRow() == 4 );
+                }
+            }
+
+            WHEN( "dropping it on the empty list below the last rule" )
+            {
+                const auto point = ui.rowPoint( 4, rowHeight * 3 );
+                REQUIRE( ui.list->viewport()->rect().contains( point ) );
+                REQUIRE_FALSE( ui.list->indexAt( point ).isValid() );
+                REQUIRE( ui.dropAt( 1, point ) );
+                expectMove( expected, 1, 4 );
+
+                THEN( "it becomes the last rule" )
+                {
+                    requireRules( ui, editor, expected );
+                    REQUIRE( ui.currentRow() == 4 );
+                }
+            }
+        }
+
+        WHEN( "the selected rule is dragged with the mouse" )
+        {
+            const auto start = ui.rowPoint( 1, rowHeight / 2 );
+            const auto global = ui.list->viewport()->mapToGlobal( start );
+            QMouseEvent press( QEvent::MouseButtonPress, start, global, Qt::LeftButton,
+                               Qt::LeftButton, Qt::NoModifier );
+            QApplication::sendEvent( ui.list->viewport(), &press );
+            const auto end = start + QPoint( 0, 3 * rowHeight );
+            QMouseEvent move( QEvent::MouseMove, end, ui.list->viewport()->mapToGlobal( end ),
+                              Qt::NoButton, Qt::LeftButton, Qt::NoModifier );
+            QApplication::sendEvent( ui.list->viewport(), &move );
+            // The drag, which Qt deletes later, shows that one was started.
+            const bool dragStarted = ui.list->findChild<QDrag*>() != nullptr;
+            QMouseEvent release( QEvent::MouseButtonRelease, end,
+                                 ui.list->viewport()->mapToGlobal( end ), Qt::LeftButton,
+                                 Qt::NoButton, Qt::NoModifier );
+            QApplication::sendEvent( ui.list->viewport(), &release );
+
+            THEN( "the drag ends without removing or changing any rule" )
+            {
+                requireRules( ui, editor, expected );
+                REQUIRE( ui.currentRow() == 1 );
+                REQUIRE( dragStarted );
             }
         }
     }

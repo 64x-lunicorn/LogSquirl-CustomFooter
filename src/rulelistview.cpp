@@ -19,10 +19,10 @@
 
 #include "rulelistview.h"
 
-#include <QCursor>
 #include <QDrag>
 #include <QKeyEvent>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPixmap>
 
 namespace custom_footer {
@@ -41,8 +41,11 @@ RuleListView::RuleListView( QWidget* parent )
 
 void RuleListView::keyPressEvent( QKeyEvent* event )
 {
-    // Ctrl is Cmd on macOS, as for every Qt shortcut.
-    if ( event->modifiers() == ( Qt::ControlModifier | Qt::ShiftModifier ) ) {
+    // Ctrl is Cmd on macOS, as for every Qt shortcut. macOS adds the keypad
+    // modifier to every arrow key, as the numeric keypad's arrows do
+    // elsewhere, so it is ignored.
+    const auto modifiers = event->modifiers() & ~Qt::KeypadModifier;
+    if ( modifiers == ( Qt::ControlModifier | Qt::ShiftModifier ) ) {
         if ( event->key() == Qt::Key_Up ) {
             Q_EMIT moveUpRequested();
             event->accept();
@@ -57,39 +60,57 @@ void RuleListView::keyPressEvent( QKeyEvent* event )
     QTableView::keyPressEvent( event );
 }
 
-void RuleListView::startDrag( Qt::DropActions /*supportedActions*/ )
+void RuleListView::mousePressEvent( QMouseEvent* event )
 {
-    if ( !model() || !selectionModel() ) {
+    pressPosition_ = event->position().toPoint();
+    QTableView::mousePressEvent( event );
+}
+
+void RuleListView::startDrag( Qt::DropActions supportedActions )
+{
+    // Rules are only moved.
+    if ( !model() || !( supportedActions & Qt::MoveAction ) ) {
         return;
     }
-    const auto rows = selectionModel()->selectedRows();
-    if ( rows.isEmpty() ) {
+    QModelIndexList indexes;
+    for ( const auto& index : selectedIndexes() ) {
+        if ( model()->flags( index ) & Qt::ItemIsDragEnabled ) {
+            indexes.append( index );
+        }
+    }
+    if ( indexes.isEmpty() ) {
         return;
     }
-    auto* data = model()->mimeData( rows );
+    auto* data = model()->mimeData( indexes );
     if ( !data ) {
         return;
     }
 
     auto* drag = new QDrag( this );
     drag->setMimeData( data );
-    // The dragged row as it looks in the list.
-    QRect rowRect;
-    for ( const auto& row : rows ) {
-        rowRect
-            |= visualRect( row ) | visualRect( row.siblingAtColumn( model()->columnCount() - 1 ) );
+    // The dragged cells as they look in the list, held where they were
+    // pressed.
+    QRect rect;
+    for ( const auto& index : std::as_const( indexes ) ) {
+        rect |= visualRect( index );
     }
-    rowRect &= viewport()->rect();
-    if ( !rowRect.isEmpty() ) {
-        drag->setPixmap( viewport()->grab( rowRect ) );
-        drag->setHotSpot( viewport()->mapFromGlobal( QCursor::pos() ) - rowRect.topLeft() );
+    rect &= viewport()->rect();
+    if ( !rect.isEmpty() ) {
+        drag->setPixmap( viewport()->grab( rect ) );
+        drag->setHotSpot( pressPosition_ - rect.topLeft() );
     }
 
-    // The drop has already moved the rules in the model. Unlike
-    // QAbstractItemView::startDrag(), nothing is removed here: on macOS an
-    // internal move can be reported as a copy, or a move could remove the
-    // rule that now sits where the dragged one was.
+    // The drop has already moved the rules in the model
+    // (RuleListModel::dropMimeData()). Unlike QAbstractItemView::startDrag(),
+    // nothing is removed after a drag that ends in a move: the selected row
+    // is then the moved rule itself.
     drag->exec( Qt::MoveAction, Qt::MoveAction );
+
+    // What the base class resets after a drag: no drop indicator, no
+    // scrolling, no drag state.
+    stopAutoScroll();
+    setState( NoState );
+    viewport()->update();
 }
 
 } // namespace custom_footer

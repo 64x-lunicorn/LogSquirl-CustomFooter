@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <QPoint>
 #include <QTableView>
 
 namespace custom_footer {
@@ -27,10 +28,11 @@ namespace custom_footer {
  * The rule list: a table view whose rules are reordered by dragging them,
  * or with Ctrl+Shift+Up / Ctrl+Shift+Down (⇧⌘↑ / ⇧⌘↓ on macOS).
  *
- * The drop moves the rules in the model (RuleListModel::dropMimeData()).
- * The view never removes the dragged rows after the drag, whatever drop
- * action the platform reports, so a drag can neither copy nor delete a
- * rule.
+ * The drop moves the rules in the model (RuleListModel::dropMimeData()),
+ * which accepts only moves. The view never removes the dragged rows after
+ * the drag, as QAbstractItemView would once the drop reports a move: the
+ * selected row is then the moved rule itself. So a drag can neither copy
+ * nor delete a rule.
  */
 class RuleListView : public QTableView {
     Q_OBJECT
@@ -46,7 +48,13 @@ Q_SIGNALS:
 
 protected:
     void keyPressEvent( QKeyEvent* event ) override;
+    void mousePressEvent( QMouseEvent* event ) override;
     void startDrag( Qt::DropActions supportedActions ) override;
+
+private:
+    /// Where the drag started, in viewport coordinates: the drag image is
+    /// held there.
+    QPoint pressPosition_;
 };
 
 } // namespace custom_footer

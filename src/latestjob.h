@@ -73,7 +73,6 @@ public:
         const auto generation = generation_;
         auto cancelled = std::make_shared<std::atomic_bool>( false );
         cancel_ = cancelled;
-        running_ = true;
         ++started_;
 
         auto* watcher = new QFutureWatcher<Result>( context_ );
@@ -86,7 +85,6 @@ public:
                               if ( generation != generation_ ) {
                                   return;
                               }
-                              running_ = false;
                               cancel_.reset();
                               onResult( watcher->result() );
                           } );
@@ -98,7 +96,6 @@ public:
     void drop()
     {
         ++generation_;
-        running_ = false;
         if ( cancel_ ) {
             cancel_->store( true );
             cancel_.reset();
@@ -119,7 +116,7 @@ public:
     /// A job runs whose result is still wanted.
     bool isRunning() const
     {
-        return running_;
+        return cancel_ != nullptr;
     }
 
     /// How many jobs were started, and how many finished, handed over or
@@ -137,7 +134,7 @@ private:
     QObject* context_;
     QThreadPool pool_;
     quint64 generation_ = 0;
-    bool running_ = false;
+    /// The running job's cancel flag, while its result is still wanted.
     std::shared_ptr<std::atomic_bool> cancel_;
     QList<QPointer<QFutureWatcher<Result>>> watchers_;
     int started_ = 0;

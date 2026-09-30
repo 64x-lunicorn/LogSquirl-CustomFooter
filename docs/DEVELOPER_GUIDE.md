@@ -41,7 +41,7 @@ sequenceDiagram
 
     Host->>Plugin: onActiveFileChanged(filePath)
     Plugin->>Plugin: FooterController::setActiveFile(filePath)
-    Plugin->>Plugin: FooterScanner::scanFile() on a worker thread
+    Plugin->>Plugin: FooterScanner::scanFrom() on a worker thread
     Plugin->>Plugin: FooterDisplayWidget::updateValues(ordered), if still current
 
     Note over Host,Plugin: User clicks "Custom Footer…" in Plugins menu
@@ -61,11 +61,15 @@ sequenceDiagram
 
 ## Threading
 
-Scans run on a single worker thread owned by `FooterController`. Every scan
-request increments a generation counter; a finished scan is shown only if no
-newer one was requested, so switching files quickly never shows stale
-values. The result reaches the widget through a `QFutureWatcher` on the GUI
-thread. `logsquirl_plugin_shutdown()` deletes the controller first, which
+Scans run on a single worker thread owned by `FooterController`. Every
+started scan increments a generation counter; a finished scan is shown only
+if no newer one was started, so switching files quickly never shows stale
+values. Another active file, or reloaded rules, cancel the running scan. A
+change of the active file does not: the running scan finishes, and one
+follow-up scan then covers every change made meanwhile, however many there
+were. Otherwise a log that changes more often than it can be scanned would
+never show values. The result reaches the widget through a `QFutureWatcher`
+on the GUI thread. `logsquirl_plugin_shutdown()` deletes the controller first, which
 cancels the running scan and waits for the worker: after it returns, no code
 of the plugin runs, and the host may unload the library.
 
@@ -86,19 +90,34 @@ through `guarded()`, which logs the failure instead.
 
 ## Scanning Algorithm
 
-1. Build compiled `QRegularExpression` objects for each enabled rule. A rule
-   is skipped, and reported in `FooterScanner::problems()`, if a pattern is
-   invalid or an earlier enabled rule already uses its key.
-2. Read the log file line by line (up to `maxLines`, at most 64 MiB; longer
-   lines than 64 KiB are matched against their start).
-3. For each line, check every unmatched rule:
+1. Build compiled `QRegularExpression` objects for each enabled rule, once
+   per set of rules. A rule without a line pattern is incomplete and
+   ignored; one without a key, or with an invalid line or value pattern, is
+   skipped and reported in `FooterScanner::problems()`.
+2. Rules sharing a key are **alternatives**: the key's value comes from the
+   first line that any of them matches; if several match that line, the
+   rule higher in the list wins. The key is shown once, at the position of
+   its first rule (`FooterScanner::inRuleOrder()`).
+3. Read the log file line by line, up to `maxLines` lines and at most
+   64 MiB, even inside a single huge line. Lines longer than 64 KiB are
+   matched against their first 64 KiB.
+4. For each line, check every rule whose key has no value yet:
    - **Stage 1 — Line Pattern**: If `linePattern` matches the line, proceed.
    - **Stage 2 — Value Pattern** (optional): If `valuePattern` is set, apply
      it to the same line and extract capture group 1.  If not set, extract
-     capture group 1 from the line pattern match.
+     capture group 1 from the line pattern match. Without a capture group,
+     the whole match is the value.
    - **Value Mapping**: If mappings are defined for the rule, substitute the
      raw value with the matching display value (exact string comparison).
-4. Early termination when all rules have matched.
+5. Stop early once every key has a value.
+6. **Incremental rescans**: `scanFrom()` returns the scan's progress (offset
+   and count of the complete lines scanned, the values found, and bytes
+   identifying the file). When the watched file changes, the next scan
+   continues from there if the file only grew, and reads nothing once every
+   key has a value or a limit was reached. A file that shrank, whose start
+   or scanned end differs, or with another birth time, is scanned from its
+   start. A last line without a line break is matched but not remembered,
+   as it may still be being written.
 
 ## Configuration Storage
 
@@ -111,7 +130,7 @@ forward-compatible changes.  See the README for format examples.
 ## Adding a New Feature
 
 1. Extend `FooterEntry` in `footerentry.h` if new per-rule data is needed.
-2. Update `FooterScanner` (compiling and `scanFile()`) to use the new data.
+2. Update `FooterScanner` (compiling and `scanFrom()`) to use the new data.
 3. Update `FooterConfig` to persist/load the new field (both INI and JSON).
 4. Update `FooterEditor` to expose the field in the UI.
 5. Add test scenarios in `tests/`.

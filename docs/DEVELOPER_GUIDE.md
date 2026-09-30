@@ -92,8 +92,12 @@ follows, so removing the selected rule previews once, on the remaining
 rules. The active file is watched like the footer's: a change on disk
 previews it again after `kRescanDelayMs`, and a rotated file once it is
 recreated. A running preview of the file is not cancelled for a change
-but followed by one more, which also waits for `kRescanDelayMs` after the
-running one finished, so a busy log is never scanned back to back. The
+but followed by one more. A preview for a change starts no sooner than
+`kRescanDelayMs` after the last one finished (`RulePreviewer::setClock()`
+lets tests set the time), so a busy log is never scanned back to back,
+and not at all when the change cannot alter it: lines appended beyond
+the limit the last preview stopped at, or a file left as it was
+(`FooterScanner::fileUnchangedFor()`, with the footer's identity checks). The
 preview always scans the file from its start, unlike the footer, which
 continues where it stopped. Setting the same active file again counts as
 a change.
@@ -103,9 +107,11 @@ frames on the stack, and the host may shut the plugin down, and unload
 it, from within that loop. `openEditor()` in `plugin.cpp` creates it on
 the heap, parented to the host's window, opens it with `open()`, and
 handles OK and Apply through `finished()` and `applied()`; a closed
-editor is deleted later. Opened again from another window, such as the
-host's application-modal plugin dialog, the editor is moved over that
-window. Its Import and Export file dialogs, error messages and the
+editor is deleted later. The host always passes its main window, even while its
+application-modal Plugins dialog is open; the editor then goes over the
+application-modal window that blocks its own (`placeEditor()`), and back
+over its own window, content and all, when that one is hidden or
+deleted (`ModalGuest`). Its Import and Export file dialogs, error messages and the
 rule template dialog are opened with `open()` too, parented to the editor, never with the static
 `QFileDialog` and `QMessageBox` functions, which run nested loops. The
 one nested loop left is a drag in the rule list (`QDrag::exec()`); a

@@ -28,9 +28,29 @@
 #include <QMenu>
 #include <QToolTip>
 
+#include <algorithm>
+
 namespace custom_footer {
 
 namespace {
+
+QString keyAndValue( const FooterValue& value )
+{
+    return QStringLiteral( "%1: %2" ).arg( value.key, value.value );
+}
+
+/// Keys a focused value handles itself, before the window's shortcuts.
+bool isCopyKey( const QKeyEvent* event )
+{
+    if ( event->matches( QKeySequence::Copy ) ) {
+        return true;
+    }
+    if ( ( event->modifiers() & ~Qt::KeypadModifier ) != Qt::NoModifier ) {
+        return false;
+    }
+    return event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter
+           || event->key() == Qt::Key_Space;
+}
 
 /// Button text shows "&" as a mnemonic marker unless it is doubled.
 QString withoutMnemonics( QString text )
@@ -82,7 +102,12 @@ FooterValueItem::FooterValueItem( const FooterValue& value, QWidget* parent )
 
     // A menu of the button itself would make it a menu button; this one is
     // only shown on request.
-    contextMenu_->addAction( tr( "Copy Value" ), this, &FooterValueItem::copyToClipboard );
+    contextMenu_->addAction( tr( "Copy Value" ), this, &FooterValueItem::copyToClipboard )
+        ->setObjectName( QStringLiteral( "copyValue" ) );
+    contextMenu_
+        ->addAction( tr( "Copy Key and Value" ), this,
+                     [ this ] { copyText( keyAndValue( value_ ) ); } )
+        ->setObjectName( QStringLiteral( "copyKeyAndValue" ) );
     setContextMenuPolicy( Qt::CustomContextMenu );
     connect( this, &QWidget::customContextMenuRequested, this,
              [ this ]( const QPoint& pos ) { contextMenu_->popup( mapToGlobal( pos ) ); } );
@@ -90,32 +115,30 @@ FooterValueItem::FooterValueItem( const FooterValue& value, QWidget* parent )
     setValue( value );
 }
 
-FooterValueItem::~FooterValueItem()
-{
-    // The confirmation must not outlive the item it points at.
-    if ( confirmed_ && QToolTip::isVisible() ) {
-        QToolTip::hideText();
-    }
-}
-
 void FooterValueItem::setValue( const FooterValue& value )
 {
     value_ = value;
     setText( withoutMnemonics( value.value ) );
     setToolTip( toolTipOf( value ) );
-    setAccessibleName( QStringLiteral( "%1: %2" ).arg( value.key, value.value ) );
+    setAccessibleName( keyAndValue( value ) );
     setAccessibleDescription( descriptionOf( value ) );
 }
 
 void FooterValueItem::copyToClipboard()
 {
-    QGuiApplication::clipboard()->setText( value_.value );
+    copyText( value_.value );
+}
 
-    // Confirm at the value, until the mouse leaves it or the time is up.
+void FooterValueItem::copyText( const QString& text )
+{
+    QGuiApplication::clipboard()->setText( text );
+
+    // Confirm at the value for a moment. The tooltip is not given this item:
+    // it would become the item's child, and go away with the item even when
+    // it shows another widget's tooltip by then, e.g. one of the host.
     const auto confirmation = tr( "Copied" );
-    QToolTip::showText( mapToGlobal( rect().center() ), confirmation, this, rect(),
+    QToolTip::showText( mapToGlobal( rect().center() ), confirmation, nullptr, {},
                         kConfirmationMs );
-    confirmed_ = true;
 
 #if QT_VERSION >= QT_VERSION_CHECK( 6, 8, 0 )
     QAccessibleAnnouncementEvent announcement( this, confirmation );
@@ -123,10 +146,21 @@ void FooterValueItem::copyToClipboard()
 #endif
 }
 
+bool FooterValueItem::event( QEvent* event )
+{
+    // Claim the copy keys before a window shortcut, e.g. the host's Edit >
+    // Copy, takes them; they then arrive in keyPressEvent().
+    if ( event->type() == QEvent::ShortcutOverride
+         && isCopyKey( static_cast<QKeyEvent*>( event ) ) ) {
+        event->accept();
+        return true;
+    }
+    return QToolButton::event( event );
+}
+
 void FooterValueItem::keyPressEvent( QKeyEvent* event )
 {
-    if ( event->matches( QKeySequence::Copy ) || event->key() == Qt::Key_Return
-         || event->key() == Qt::Key_Enter ) {
+    if ( event->key() != Qt::Key_Space && isCopyKey( event ) ) {
         copyToClipboard();
         event->accept();
         return;
@@ -140,70 +174,102 @@ FooterDisplayWidget::FooterDisplayWidget( QWidget* parent )
     , layout_( new QHBoxLayout( this ) )
 {
     layout_->setContentsMargins( 4, 0, 4, 0 );
+    layout_->setSpacing( 0 );
+    layout_->addStretch();
+}
+
+FooterDisplayWidget::Entry FooterDisplayWidget::createEntry( const FooterValue& value )
+{
+    Entry entry;
+    entry.box = new QWidget( this );
+    auto* row = new QHBoxLayout( entry.box );
+    row->setContentsMargins( 0, 0, 0, 0 );
+    row->setSpacing( 2 );
+
+    // No buddy: it would make an "&" in the key a mnemonic.
+    entry.key = new QLabel( entry.box );
+    entry.key->setTextFormat( Qt::RichText );
+    entry.key->setText( QStringLiteral( "<b>%1:</b>" ).arg( value.key.toHtmlEscaped() ) );
+    row->addWidget( entry.key );
+
+    entry.item = new FooterValueItem( value, entry.box );
+    entry.item->contextMenu()
+        ->addAction( tr( "Copy All" ), entry.item,
+                     [ this, item = entry.item ] { item->copyText( allValuesText() ); } )
+        ->setObjectName( QStringLiteral( "copyAll" ) );
+    row->addWidget( entry.item );
+    return entry;
 }
 
 void FooterDisplayWidget::updateValues( const QList<FooterValue>& values )
 {
-    const auto sameKeys = [ this, &values ] {
-        if ( values.size() != values_.size() ) {
-            return false;
-        }
-        for ( int i = 0; i < values.size(); ++i ) {
-            if ( values[ i ].key != values_[ i ].key ) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    if ( content_ && sameKeys() ) {
-        // Keep the items, and with them the keyboard focus and a tooltip.
-        for ( int i = 0; i < values.size(); ++i ) {
-            if ( values[ i ] != values_[ i ] ) {
-                items_[ i ]->setValue( values[ i ] );
-            }
-        }
-        values_ = values;
-        return;
-    }
-
-    clearValues();
-    if ( values.isEmpty() ) {
-        return;
-    }
-
-    content_ = new QWidget( this );
-    auto* row = new QHBoxLayout( content_ );
-    row->setContentsMargins( 0, 0, 0, 0 );
-    row->setSpacing( 2 );
+    // Keep the entry of every key still shown, with its focus, confirmation
+    // and context menu.
+    auto old = entries_;
+    QList<Entry> entries;
     for ( const auto& value : values ) {
-        if ( !items_.isEmpty() ) {
-            auto* separator = new QLabel( QStringLiteral( "|" ), content_ );
-            separator->setContentsMargins( 6, 0, 6, 0 );
-            row->addWidget( separator );
+        const auto same = std::find_if( old.begin(), old.end(), [ &value ]( const Entry& entry ) {
+            return entry.item->value().key == value.key;
+        } );
+        if ( same == old.end() ) {
+            entries.append( createEntry( value ) );
+            continue;
         }
-
-        auto* key = new QLabel( content_ );
-        key->setTextFormat( Qt::RichText );
-        key->setText( QStringLiteral( "<b>%1:</b>" ).arg( value.key.toHtmlEscaped() ) );
-        row->addWidget( key );
-
-        auto* item = new FooterValueItem( value, content_ );
-        key->setBuddy( item );
-        row->addWidget( item );
-        items_.append( item );
+        if ( same->item->value() != value ) {
+            same->item->setValue( value );
+        }
+        entries.append( *same );
+        old.erase( same );
     }
-    row->addStretch();
-    layout_->addWidget( content_ );
-    values_ = values;
+    for ( const auto& gone : old ) {
+        delete gone.box;
+    }
+    entries_ = entries;
+
+    // Lay the entries out again in the new order, with separators between.
+    qDeleteAll( separators_ );
+    separators_.clear();
+    for ( const auto& entry : entries_ ) {
+        layout_->removeWidget( entry.box );
+    }
+    int position = 0;
+    for ( const auto& entry : entries_ ) {
+        if ( position > 0 ) {
+            auto* separator = new QLabel( QStringLiteral( "|" ), this );
+            separator->setContentsMargins( 6, 0, 6, 0 );
+            separators_.append( separator );
+            layout_->insertWidget( position++, separator );
+        }
+        layout_->insertWidget( position++, entry.box );
+    }
+
+    // Tab follows the order shown, not the order the items were made in.
+    for ( int i = 1; i < entries_.size(); ++i ) {
+        setTabOrder( entries_[ i - 1 ].item, entries_[ i ].item );
+    }
 }
 
 void FooterDisplayWidget::clearValues()
 {
-    delete content_;
-    content_ = nullptr;
-    items_.clear();
-    values_.clear();
+    updateValues( {} );
+}
+
+QList<FooterValue> FooterDisplayWidget::values() const
+{
+    QList<FooterValue> shown;
+    for ( const auto& entry : entries_ ) {
+        shown.append( entry.item->value() );
+    }
+    return shown;
+}
+
+QString FooterDisplayWidget::allValuesText() const
+{
+    QStringList lines;
+    for ( const auto& entry : entries_ ) {
+        lines.append( keyAndValue( entry.item->value() ) );
+    }
+    return lines.join( QLatin1Char( '\n' ) );
 }
 
 } // namespace custom_footer

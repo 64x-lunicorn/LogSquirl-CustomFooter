@@ -12,6 +12,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Catch2)
 
+find_package(Qt6 REQUIRED COMPONENTS Test)
+
 # ── Test executable ───────────────────────────────────────────────────────
 
 add_executable(logsquirl_custom_footer_tests
@@ -60,6 +62,7 @@ target_link_libraries(logsquirl_custom_footer_tests
         Qt6::Core
         Qt6::Concurrent
         Qt6::Widgets
+        Qt6::Test
 )
 
 # ── Register with CTest ──────────────────────────────────────────────────

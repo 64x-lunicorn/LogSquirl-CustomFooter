@@ -110,7 +110,8 @@ Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
   not its key, and a short "Copied" tooltip confirms it. Hover a value to see
   which rule supplied it and, for a mapped value, the raw value it replaced.
   With the keyboard, Tab to a value and press Space, Return or the copy
-  shortcut; the context menu offers "Copy Value" too.
+  shortcut. The context menu of a value offers "Copy Value", "Copy Key and
+  Value", and "Copy All" for every key and value shown, one per line.
 - A scan stops after `scan/maxLines` lines (default 100000, `0` for no
   limit) and never reads more than 64 MiB; lines longer than 64 KiB are
   matched against their start.
@@ -166,7 +167,8 @@ Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 ## Prerequisites
 
 - **LogSquirl** ≥ 26.03 with the plugin system enabled
-- **Qt6** (Core + Widgets) — same version LogSquirl was built with
+- **Qt6** (Core + Widgets) — same version LogSquirl was built with; the
+  tests also need Qt Test
 - **CMake** ≥ 3.16
 - A C++17-capable compiler (GCC ≥ 9, Clang ≥ 14, MSVC ≥ 19.29)
 

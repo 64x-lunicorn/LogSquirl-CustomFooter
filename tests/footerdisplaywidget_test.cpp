@@ -32,8 +32,11 @@
 #include <QClipboard>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMainWindow>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPointer>
+#include <QTest>
 #include <QToolTip>
 
 using namespace custom_footer;
@@ -73,6 +76,16 @@ void pressKey( QWidget* widget, int key, Qt::KeyboardModifiers modifiers = Qt::N
     QApplication::sendEvent( widget, &press );
     QKeyEvent release( QEvent::KeyRelease, key, modifiers );
     QApplication::sendEvent( widget, &release );
+}
+
+QAction* action( const QMenu* menu, const char* name )
+{
+    for ( auto* candidate : menu->actions() ) {
+        if ( candidate->objectName() == QLatin1String( name ) ) {
+            return candidate;
+        }
+    }
+    return nullptr;
 }
 
 QString clipboardText()
@@ -273,14 +286,48 @@ SCENARIO( "A footer value is copied with a click", "[footerdisplaywidget][copy]"
 
     WHEN( "the value's context menu is asked for" )
     {
-        THEN( "it offers to copy the value" )
+        REQUIRE( shown[ 0 ]->contextMenuPolicy() == Qt::CustomContextMenu );
+        const auto* menu = shown[ 0 ]->contextMenu();
+        REQUIRE( menu != nullptr );
+
+        THEN( "it offers to copy the value, key and value, or all values" )
         {
-            REQUIRE( shown[ 0 ]->contextMenuPolicy() == Qt::CustomContextMenu );
-            REQUIRE( shown[ 0 ]->contextMenu() != nullptr );
-            const auto actions = shown[ 0 ]->contextMenu()->actions();
-            REQUIRE( actions.size() == 1 );
-            actions[ 0 ]->trigger();
+            REQUIRE( action( menu, "copyValue" ) != nullptr );
+            REQUIRE( action( menu, "copyKeyAndValue" ) != nullptr );
+            REQUIRE( action( menu, "copyAll" ) != nullptr );
+        }
+
+        THEN( "\"Copy Value\" copies the value" )
+        {
+            action( menu, "copyValue" )->trigger();
             REQUIRE( clipboardText() == "Enabled" );
+        }
+
+        THEN( "\"Copy Key and Value\" copies both, as shown" )
+        {
+            action( menu, "copyKeyAndValue" )->trigger();
+            REQUIRE( clipboardText() == "Component Protection: Enabled" );
+            REQUIRE( QToolTip::text().contains( "Copied" ) );
+        }
+
+        THEN( "\"Copy All\" copies every key and value, one per line" )
+        {
+            action( menu, "copyAll" )->trigger();
+            REQUIRE( clipboardText() == "Component Protection: Enabled\nNote: a & b" );
+            REQUIRE( QToolTip::text().contains( "Copied" ) );
+        }
+    }
+
+    WHEN( "a new key appears after the values were shown" )
+    {
+        widget.updateValues( { { "Component Protection", "Enabled", "true", 1 },
+                               { "Late", "x", "x", 3 },
+                               { "Note", "a & b", "a & b", 2 } } );
+
+        THEN( "\"Copy All\" of an old item copies the new values too" )
+        {
+            action( shown[ 0 ]->contextMenu(), "copyAll" )->trigger();
+            REQUIRE( clipboardText() == "Component Protection: Enabled\nLate: x\nNote: a & b" );
         }
     }
 
@@ -369,5 +416,194 @@ SCENARIO( "Footer values are reachable with the keyboard and a screen reader",
         REQUIRE( second->text( QAccessible::Name ) == "Mode: Production" );
         REQUIRE( second->text( QAccessible::Description ).contains( "0x04" ) );
         REQUIRE_FALSE( second->text( QAccessible::Description ).contains( "<" ) );
+    }
+}
+
+SCENARIO( "The copy shortcut on a focused value is not taken by the window",
+          "[footerdisplaywidget][copy]" )
+{
+    QMainWindow window;
+    int hostCopies = 0;
+    auto* hostCopy = new QAction( "Copy", &window );
+    hostCopy->setShortcut( QKeySequence::Copy );
+    window.addAction( hostCopy );
+    QObject::connect( hostCopy, &QAction::triggered, [ &hostCopies ] { ++hostCopies; } );
+
+    auto* widget = new FooterDisplayWidget;
+    window.setCentralWidget( widget );
+    widget->updateValues( { { "VIN", "ABC123", "ABC123", 0 } } );
+    window.show();
+    window.activateWindow();
+    REQUIRE( QTest::qWaitForWindowActive( &window ) );
+    QApplication::clipboard()->setText( "before" );
+
+    GIVEN( "a value with the keyboard focus" )
+    {
+        auto* item = items( *widget ).value( 0 );
+        REQUIRE( item != nullptr );
+        item->setFocus();
+        REQUIRE( item->hasFocus() );
+
+        WHEN( "the copy shortcut is pressed" )
+        {
+            const auto copy = QKeySequence( QKeySequence::Copy )[ 0 ];
+            QTest::keyClick( item, copy.key(), copy.keyboardModifiers() );
+
+            THEN( "the value copies it, not the window's Copy action" )
+            {
+                REQUIRE( clipboardText() == "ABC123" );
+                REQUIRE( hostCopies == 0 );
+            }
+        }
+
+        WHEN( "Return is pressed" )
+        {
+            QTest::keyClick( item, Qt::Key_Return );
+
+            THEN( "the value is copied" )
+            {
+                REQUIRE( clipboardText() == "ABC123" );
+            }
+        }
+    }
+
+    GIVEN( "no value has the keyboard focus" )
+    {
+        window.setFocus();
+
+        WHEN( "the copy shortcut is pressed" )
+        {
+            const auto copy = QKeySequence( QKeySequence::Copy )[ 0 ];
+            QTest::keyClick( &window, copy.key(), copy.keyboardModifiers() );
+
+            THEN( "the window's Copy action gets it" )
+            {
+                REQUIRE( hostCopies == 1 );
+            }
+        }
+    }
+}
+
+SCENARIO( "Footer values stay in place while new keys appear", "[footerdisplaywidget]" )
+{
+    FooterDisplayWidget widget;
+    widget.updateValues( { { "VIN", "ABC123", "ABC123", 1 } } );
+    QPointer<FooterValueItem> vin = items( widget ).value( 0 );
+    REQUIRE( vin );
+    vin->setFocus();
+    REQUIRE( widget.focusWidget() == vin );
+
+    WHEN( "a key appears before it" )
+    {
+        widget.updateValues(
+            { { "Mode", "Production", "0x04", 0 }, { "VIN", "ABC123", "ABC123", 1 } } );
+
+        THEN( "the value keeps its item and the keyboard focus" )
+        {
+            REQUIRE( vin );
+            REQUIRE( widget.focusWidget() == vin );
+            const auto shown = items( widget );
+            REQUIRE( shown.contains( vin ) );
+            REQUIRE( widget.values().size() == 2 );
+            REQUIRE( widget.values()[ 0 ].key == "Mode" );
+            REQUIRE( widget.values()[ 1 ].key == "VIN" );
+        }
+
+        THEN( "Tab goes through the values in the order they are shown" )
+        {
+            FooterValueItem* mode = nullptr;
+            for ( auto* item : items( widget ) ) {
+                if ( item->value().key == "Mode" ) {
+                    mode = item;
+                }
+            }
+            REQUIRE( mode != nullptr );
+            auto* next = mode->nextInFocusChain();
+            while ( next && !qobject_cast<FooterValueItem*>( next ) ) {
+                next = next->nextInFocusChain();
+            }
+            REQUIRE( next == vin );
+        }
+
+        AND_WHEN( "it disappears again" )
+        {
+            widget.updateValues( { { "VIN", "ABC123", "ABC123", 1 } } );
+
+            THEN( "the value still keeps its item" )
+            {
+                REQUIRE( vin );
+                REQUIRE( items( widget ).size() == 1 );
+                REQUIRE( labelText( widget ).count( "|" ) == 0 );
+            }
+        }
+    }
+}
+
+SCENARIO( "A key with an ampersand is shown as it is", "[footerdisplaywidget]" )
+{
+    FooterDisplayWidget widget;
+    widget.updateValues( { { "R&D", "on", "on", 0 } } );
+
+    THEN( "the key's ampersand is no mnemonic" )
+    {
+        QLabel* key = nullptr;
+        for ( auto* label : widget.findChildren<QLabel*>() ) {
+            if ( label->text().contains( "R&amp;D" ) ) {
+                key = label;
+            }
+        }
+        REQUIRE( key != nullptr );
+        REQUIRE( key->buddy() == nullptr );
+        auto* accessible = QAccessible::queryAccessibleInterface( key );
+        REQUIRE( accessible != nullptr );
+        REQUIRE( accessible->text( QAccessible::Name ).contains( "R&D" ) );
+        REQUIRE( items( widget ).value( 0 )->accessibleName() == "R&D: on" );
+    }
+}
+
+SCENARIO( "Removing a copied value leaves other tooltips alone", "[footerdisplaywidget][copy]" )
+{
+    FooterDisplayWidget widget;
+    QWidget other;
+    other.show();
+    widget.updateValues( { { "VIN", "ABC123", "ABC123", 0 } } );
+    widget.show();
+    click( items( widget ).value( 0 ) );
+    REQUIRE( QToolTip::text().contains( "Copied" ) );
+
+    GIVEN( "another widget's tooltip shown after the confirmation" )
+    {
+        // Qt hides any tooltip on a change of focus, as when the focused
+        // value of a shown footer goes away; this is about what the item owns.
+        widget.hide();
+        QToolTip::showText( other.mapToGlobal( QPoint( 1, 1 ) ), "Other tip", &other );
+        REQUIRE( QToolTip::text() == "Other tip" );
+
+        WHEN( "the copied value goes away" )
+        {
+            widget.clearValues();
+
+            THEN( "the other tooltip stays" )
+            {
+                REQUIRE( QToolTip::isVisible() );
+                REQUIRE( QToolTip::text() == "Other tip" );
+            }
+        }
+    }
+
+    GIVEN( "the confirmation still shown" )
+    {
+        widget.hide();
+
+        WHEN( "the copied value goes away" )
+        {
+            widget.clearValues();
+
+            THEN( "the confirmation expires by itself, as it is not tied to the item" )
+            {
+                REQUIRE( QToolTip::isVisible() );
+                REQUIRE( QToolTip::text() == "Copied" );
+            }
+        }
     }
 }

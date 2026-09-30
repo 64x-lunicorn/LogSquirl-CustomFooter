@@ -26,6 +26,7 @@
 #include <QWidget>
 
 class QHBoxLayout;
+class QLabel;
 class QMenu;
 
 namespace custom_footer {
@@ -34,9 +35,10 @@ namespace custom_footer {
  * One value in the footer: a flat button that copies the value on a click.
  *
  * It takes the keyboard focus with Tab and copies on Space, Return or the
- * copy shortcut too. Its tooltip tells which rule supplied the value, and
- * the raw value a mapping replaced. Its context menu offers "Copy"; more
- * actions on the value can be added to contextMenu().
+ * copy shortcut too, before any shortcut of the window. Its tooltip tells
+ * which rule supplied the value, and the raw value a mapping replaced. Its
+ * context menu offers copying the value, or key and value; more actions on
+ * the value can be added to contextMenu().
  */
 class FooterValueItem : public QToolButton {
     Q_OBJECT
@@ -46,7 +48,6 @@ public:
     static constexpr int kConfirmationMs = 1500;
 
     explicit FooterValueItem( const FooterValue& value, QWidget* parent = nullptr );
-    ~FooterValueItem() override;
 
     const FooterValue& value() const
     {
@@ -65,19 +66,24 @@ public:
     /// Put the value on the clipboard and confirm it briefly.
     void copyToClipboard();
 
+    /// Put some text on the clipboard and confirm it briefly at this item.
+    void copyText( const QString& text );
+
 protected:
+    bool event( QEvent* event ) override;
     void keyPressEvent( QKeyEvent* event ) override;
 
 private:
     FooterValue value_;
     QMenu* contextMenu_ = nullptr;
-    /// Whether this item showed the confirmation tooltip.
-    bool confirmed_ = false;
 };
 
 /**
  * Widget that displays matched key-value pairs, one FooterValueItem per
  * value after its key.
+ *
+ * The item of a key is kept while the key is shown, so that the keyboard
+ * focus, a confirmation or an open context menu survive new values.
  */
 class FooterDisplayWidget : public QWidget {
     Q_OBJECT
@@ -92,17 +98,24 @@ public:
     void clearValues();
 
     /// The values shown, in order.
-    const QList<FooterValue>& values() const
-    {
-        return values_;
-    }
+    QList<FooterValue> values() const;
+
+    /// Every shown key and value as "key: value", one per line.
+    QString allValuesText() const;
 
 private:
+    /// A key and its value item, laid out together.
+    struct Entry {
+        QWidget* box = nullptr;
+        QLabel* key = nullptr;
+        FooterValueItem* item = nullptr;
+    };
+
+    Entry createEntry( const FooterValue& value );
+
     QHBoxLayout* layout_ = nullptr;
-    /// Holds the keys, values and separators, replaced when the keys change.
-    QWidget* content_ = nullptr;
-    QList<FooterValueItem*> items_;
-    QList<FooterValue> values_;
+    QList<Entry> entries_;      ///< In the order shown.
+    QList<QLabel*> separators_; ///< Between the entries.
 };
 
 } // namespace custom_footer

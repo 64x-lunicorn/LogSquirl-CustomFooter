@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Huge lines** — a file without line breaks was read into memory in one
   piece; lines are now matched against their first 64 KiB, and a scan reads
   at most 64 MiB.
+- **Missing config directory** — without a config directory from the host,
+  rules were read from and written to `/custom_footer.ini`; they are now
+  neither loaded nor saved, and a warning is logged. A failed save is logged
+  too.
 
 ## [0.2.0] — 2026-04-08
 

@@ -126,24 +126,28 @@ static void onActiveFileChanged( void* /* userData */, const char* /* filePath *
     rescanActiveFile();
 }
 
+/// Save the edited rules and show their results.
+static void saveEntries( const QList<custom_footer::FooterEntry>& entries )
+{
+    if ( !custom_footer::FooterConfig::saveEntries( configDir(), entries ) ) {
+        custom_footer::hostLog( LOGSQUIRL_LOG_WARNING,
+                                "Custom Footer: could not save the rules to the config directory" );
+    }
+    rescanActiveFile();
+}
+
 /// Called when the user clicks "Custom Footer…" in the Plugins menu.
 static void showEditorDialog( void* /* userData */ )
 {
-    const auto dir = configDir();
-    auto entries = custom_footer::FooterConfig::loadEntries( dir );
-
-    custom_footer::FooterEditor editor( entries, nullptr );
+    custom_footer::FooterEditor editor( custom_footer::FooterConfig::loadEntries( configDir() ),
+                                        nullptr );
 
     // Apply button: save and rescan without closing the dialog.
-    QObject::connect( &editor, &custom_footer::FooterEditor::applied, [ &editor ]() {
-        const auto d = configDir();
-        custom_footer::FooterConfig::saveEntries( d, editor.entries() );
-        rescanActiveFile();
-    } );
+    QObject::connect( &editor, &custom_footer::FooterEditor::applied,
+                      [ &editor ]() { saveEntries( editor.entries() ); } );
 
     if ( editor.exec() == QDialog::Accepted ) {
-        custom_footer::FooterConfig::saveEntries( dir, editor.entries() );
-        rescanActiveFile();
+        saveEntries( editor.entries() );
     }
 }
 
@@ -175,6 +179,11 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     custom_footer::g_state.initialised = true;
 
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin initialising…" );
+    if ( configDir().isEmpty() ) {
+        api->log_message( handle, LOGSQUIRL_LOG_WARNING,
+                          "Custom Footer: the host gave no config directory; rules are neither "
+                          "loaded nor saved" );
+    }
 
     // Register menu action to open the rule editor.
     api->register_menu_action( handle, "Plugins", "Custom Footer\u2026", &showEditorDialog,

@@ -173,8 +173,8 @@ QVariant RuleListModel::data( const QModelIndex& index, int role ) const
         if ( !keyColumn && !rule.entry.linePattern.isEmpty() ) {
             lines.append( rule.entry.linePattern );
         }
-        for ( const auto& problem :
-              { rule.problems.key, rule.problems.linePattern, rule.problems.valuePattern } ) {
+        for ( const auto& problem : { rule.problems.key, rule.problems.endCharacter,
+                                      rule.problems.linePattern, rule.problems.valuePattern } ) {
             if ( !problem.isEmpty() ) {
                 lines.append( problem );
             }

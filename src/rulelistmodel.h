@@ -49,18 +49,20 @@ inline QColor problemBackgroundColor()
 /// field is fine.
 struct RuleProblems {
     QString key;
+    QString endCharacter; ///< Of a simple rule's value end.
     QString linePattern;
     QString valuePattern;
 
     bool isEmpty() const
     {
-        return key.isEmpty() && linePattern.isEmpty() && valuePattern.isEmpty();
+        return key.isEmpty() && endCharacter.isEmpty() && linePattern.isEmpty()
+               && valuePattern.isEmpty();
     }
 
     bool operator==( const RuleProblems& other ) const
     {
-        return key == other.key && linePattern == other.linePattern
-               && valuePattern == other.valuePattern;
+        return key == other.key && endCharacter == other.endCharacter
+               && linePattern == other.linePattern && valuePattern == other.valuePattern;
     }
     bool operator!=( const RuleProblems& other ) const
     {

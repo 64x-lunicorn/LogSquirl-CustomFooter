@@ -19,20 +19,22 @@
 
 #pragma once
 
-#include "footerentry.h"
-
-#include <QChar>
 #include <QString>
 
 #include <optional>
 
 namespace custom_footer {
 
+struct FooterEntry;
+
 /// Where the value of a simple rule ends.
 enum class ValueEnd {
-    Whitespace, ///< At the next whitespace: the value is one word.
-    EndOfLine,  ///< At the end of the line, without trailing whitespace.
-    Character,  ///< Before a given character, e.g. `,` or `;`.
+    /// At the next whitespace: the value is one word. Whitespace is ASCII
+    /// whitespace, such as spaces and tabs, as `\s` without Unicode
+    /// properties: a no-break or ideographic space is part of the value.
+    Whitespace,
+    EndOfLine, ///< At the end of the line, without trailing whitespace.
+    Character, ///< Before a given character, e.g. `,` or `;`.
 };
 
 /**
@@ -46,7 +48,9 @@ enum class ValueEnd {
 struct SimpleRule {
     QString textBefore; ///< E.g. `VIN:`, matched literally.
     ValueEnd valueEnd = ValueEnd::Whitespace;
-    QChar endCharacter; ///< Used with ValueEnd::Character.
+    /// Used with ValueEnd::Character: one code point, one or two UTF-16
+    /// units. See endCharacterProblem().
+    QString endCharacter;
 
     bool operator==( const SimpleRule& other ) const
     {
@@ -61,15 +65,22 @@ struct SimpleRule {
 
 /**
  * The line pattern of a simple rule: the text, optional whitespace, and the
- * value as the first capturing group. Only the metacharacters
- * `\ ^ $ . | ? * + ( ) [ ] { }` of the text are escaped, and only
- * `\ ] ^ -` of an end character, so `VIN:` becomes `VIN:\s*(\S+)`. Simple rules need no value
- * pattern.
+ * value as the first capturing group. Simple rules need no value pattern.
+ * Only what PCRE2 treats as special is escaped, so the pattern reads like a
+ * hand-written one: in the text `\ ^ $ . | ? * + ( ) [ {` (`]` and `}` are
+ * literal there, and patterns never use extended mode, so spaces and `#`
+ * are too), and NUL as `\x{0}`; in the end character's class `\ ] ^ -`.
+ * `VIN:` becomes `VIN:\s*(\S+)`.
  *
- * Without a text, or with ValueEnd::Character but no character, the pattern
- * is empty: the rule is incomplete and matches nothing, as a new rule.
+ * Without a text, or with ValueEnd::Character and an endCharacterProblem(),
+ * the pattern is empty: the rule matches nothing.
  */
 QString simpleLinePattern( const SimpleRule& rule );
+
+/// Why the end character of @p rule cannot be used: there is none, it is
+/// not exactly one code point, or it is a control character such as NUL or
+/// a tab. Empty if it can, or if the value does not end at a character.
+QString endCharacterProblem( const SimpleRule& rule );
 
 /// Give @p entry the patterns of @p rule; its key, mappings and enabled
 /// state are kept.

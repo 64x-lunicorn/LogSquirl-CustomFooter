@@ -18,6 +18,9 @@
  */
 
 #include "simplerule.h"
+#include "footerentry.h"
+
+#include <QCoreApplication>
 
 namespace custom_footer {
 
@@ -46,24 +49,35 @@ QString escaped( const QString& text, QLatin1String special )
     return result;
 }
 
-/// The metacharacters of PCRE2 outside a character class. Patterns are
-/// never compiled in extended mode, so whitespace and `#` are literal.
+/// The metacharacters of PCRE2 outside a character class. `]` and `}` are
+/// literal there, as `{` is escaped. Patterns are never compiled in
+/// extended mode, so whitespace and `#` are literal.
 QString escapedText( const QString& text )
 {
-    return escaped( text, QLatin1String( "\\^$.|?*+()[]{}" ) );
+    return escaped( text, QLatin1String( "\\^$.|?*+()[{" ) );
 }
 
 /// The characters special inside a character class.
-QString escapedInClass( QChar c )
+QString escapedInClass( const QString& character )
 {
-    return escaped( QString( c ), QLatin1String( "\\]^-" ) );
+    return escaped( character, QLatin1String( "\\]^-" ) );
+}
+
+/// Whether @p text is exactly one code point, as one UTF-16 unit or a
+/// surrogate pair.
+bool isOneCodePoint( const QString& text )
+{
+    if ( text.size() == 1 ) {
+        return !text.at( 0 ).isSurrogate();
+    }
+    return text.size() == 2 && text.at( 0 ).isHighSurrogate() && text.at( 1 ).isLowSurrogate();
 }
 
 /// Whitespace between the text and the value.
 const QLatin1String kGap( "\\s*" );
 
 /// The pattern after the escaped text, for a complete rule.
-QString valuePart( ValueEnd valueEnd, QChar endCharacter )
+QString valuePart( ValueEnd valueEnd, const QString& endCharacter )
 {
     switch ( valueEnd ) {
     case ValueEnd::Whitespace:
@@ -127,10 +141,10 @@ std::optional<SimpleRule> ruleEndingAs( const QString& linePattern, ValueEnd val
             return std::nullopt;
         }
         const auto character = unescape( rest.left( ( rest.size() - fixedLength ) / 2 ) );
-        if ( !character || character->size() != 1 ) {
+        if ( !character || !isOneCodePoint( *character ) ) {
             return std::nullopt;
         }
-        rule.endCharacter = character->at( 0 );
+        rule.endCharacter = *character;
     }
     suffix = valuePart( valueEnd, rule.endCharacter );
     if ( !linePattern.endsWith( suffix ) ) {
@@ -152,11 +166,28 @@ std::optional<SimpleRule> ruleEndingAs( const QString& linePattern, ValueEnd val
 
 QString simpleLinePattern( const SimpleRule& rule )
 {
-    if ( rule.textBefore.isEmpty()
-         || ( rule.valueEnd == ValueEnd::Character && rule.endCharacter.isNull() ) ) {
+    if ( rule.textBefore.isEmpty() || !endCharacterProblem( rule ).isEmpty() ) {
         return {};
     }
     return escapedText( rule.textBefore ) + valuePart( rule.valueEnd, rule.endCharacter );
+}
+
+QString endCharacterProblem( const SimpleRule& rule )
+{
+    if ( rule.valueEnd != ValueEnd::Character ) {
+        return {};
+    }
+    if ( rule.endCharacter.isEmpty() ) {
+        return QCoreApplication::translate( "SimpleRule", "Enter the character the value ends at" );
+    }
+    if ( !isOneCodePoint( rule.endCharacter ) ) {
+        return QCoreApplication::translate( "SimpleRule", "Enter a single character" );
+    }
+    if ( QChar::category( rule.endCharacter.toUcs4().at( 0 ) ) == QChar::Other_Control ) {
+        return QCoreApplication::translate( "SimpleRule",
+                                            "The value cannot end at a control character" );
+    }
+    return {};
 }
 
 void applySimpleRule( const SimpleRule& rule, FooterEntry& entry )

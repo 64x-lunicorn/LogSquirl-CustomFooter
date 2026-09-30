@@ -111,6 +111,8 @@ private:
                          QLabel** problemLabel );
     /// Handle Return and Escape in @p field, as in every field of the form.
     void watchField( QLineEdit* field );
+    /// A hidden label for why a field keeps the rules from being saved.
+    QLabel* newProblemLabel( const QString& objectName );
     void setMappings( const QList<ValueMapping>& mappings );
 
     /// Show @p rule in the simple fields, without emitting edited().
@@ -134,6 +136,11 @@ private:
     QLineEdit* textBeforeEdit_ = nullptr;
     QComboBox* valueEndCombo_ = nullptr;
     QLineEdit* endCharacterEdit_ = nullptr;
+    QLabel* endCharacterProblem_ = nullptr;
+    /// What Escape reverts the value end and the Advanced switch to, as
+    /// revertText_ does for the line edits.
+    int revertValueEnd_ = 0;
+    bool revertAdvanced_ = false;
     /// The rows of the simple fields, hidden in advanced mode.
     QList<QWidget*> simpleRows_;
     bool advanced_ = false;

@@ -35,7 +35,9 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFile>
+#include <QFocusEvent>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTableView>
@@ -66,6 +68,7 @@ struct SimpleUi {
         , textBefore( find<QLineEdit>( editor, "textBeforeEdit" ) )
         , valueEnd( find<QComboBox>( editor, "valueEndCombo" ) )
         , endCharacter( find<QLineEdit>( editor, "endCharacterEdit" ) )
+        , endCharacterProblem( find<QLabel>( editor, "endCharacterProblem" ) )
         , linePattern( find<QLineEdit>( editor, "linePatternEdit" ) )
         , valuePattern( find<QLineEdit>( editor, "valuePatternEdit" ) )
         , buttons( editor.findChild<QDialogButtonBox*>() )
@@ -114,7 +117,16 @@ struct SimpleUi {
 
     bool canAccept() const
     {
-        return buttons->button( QDialogButtonBox::Ok )->isEnabled();
+        return buttons->button( QDialogButtonBox::Ok )->isEnabled()
+               && buttons->button( QDialogButtonBox::Apply )->isEnabled();
+    }
+
+    /// Whether the end character is marked, with the reason next to it.
+    bool endCharacterMarked() const
+    {
+        return !endCharacter->toolTip().isEmpty()
+               && endCharacterProblem->text() == endCharacter->toolTip()
+               && endCharacterProblem->isVisibleTo( dialog );
     }
 
     FooterEditor* dialog;
@@ -126,6 +138,7 @@ struct SimpleUi {
     QLineEdit* textBefore;
     QComboBox* valueEnd;
     QLineEdit* endCharacter;
+    QLabel* endCharacterProblem;
     QLineEdit* linePattern;
     QLineEdit* valuePattern;
     QDialogButtonBox* buttons;
@@ -136,6 +149,31 @@ void press( QWidget* widget, int key )
     QKeyEvent event( QEvent::KeyPress, key, Qt::NoModifier );
     QApplication::sendEvent( widget, &event );
 }
+
+/// Type @p text into a widget as the user would, one key press.
+void type( QWidget* widget, const QString& text )
+{
+    QKeyEvent event( QEvent::KeyPress, 0, Qt::NoModifier, text );
+    QApplication::sendEvent( widget, &event );
+}
+
+/// Give a widget the focus as far as the panel can tell.
+void focusIn( QWidget* widget )
+{
+    QFocusEvent event( QEvent::FocusIn, Qt::TabFocusReason );
+    QApplication::sendEvent( widget, &event );
+}
+
+/// Counts how often a dialog was closed, whichever way.
+struct ClosedCounter {
+    explicit ClosedCounter( QDialog& dialog )
+    {
+        QObject::connect( &dialog, &QDialog::finished, [ this ]( int ) { ++count; } );
+    }
+    int count = 0;
+};
+
+const QString kEmoji = QString::fromUtf8( "\xF0\x9F\x98\x80" );
 
 /// The footer values of @p entries on @p log, after saving and loading the
 /// rules as the plugin does.
@@ -248,10 +286,121 @@ SCENARIO( "FooterEditor starts a new rule in simple mode", "[footereditor][simpl
             {
                 ui.endCharacter->setText( "" );
 
-                THEN( "the rule is incomplete, like one without text" )
+                THEN( "the field says what is missing, and the rules cannot be saved" )
                 {
+                    REQUIRE( ui.endCharacterMarked() );
+                    REQUIRE( ui.endCharacterProblem->text()
+                             == "Enter the character the value ends at" );
+                    REQUIRE_FALSE( ui.canAccept() );
+                    REQUIRE( ui.textBefore->text() == "user=" );
                     REQUIRE( editor.entries()[ 0 ].linePattern.isEmpty() );
+                }
+
+                AND_WHEN( "another rule is selected, and this one again" )
+                {
+                    ui.addRule->click();
+                    REQUIRE( ui.textBefore->text().isEmpty() );
+                    REQUIRE_FALSE( ui.endCharacterMarked() );
+                    ui.select( 0 );
+
+                    THEN( "the typed fields and the problem are still there" )
+                    {
+                        REQUIRE( ui.inSimpleMode() );
+                        REQUIRE( ui.key->text() == "User" );
+                        REQUIRE( ui.textBefore->text() == "user=" );
+                        REQUIRE( ui.shownValueEnd() == ValueEnd::Character );
+                        REQUIRE( ui.endCharacter->text().isEmpty() );
+                        REQUIRE( ui.endCharacterMarked() );
+                        REQUIRE_FALSE( ui.canAccept() );
+                    }
+
+                    AND_WHEN( "the character is entered" )
+                    {
+                        ui.endCharacter->setText( ";" );
+
+                        THEN( "the rule gets its pattern and can be saved" )
+                        {
+                            REQUIRE( editor.entries()[ 0 ].linePattern
+                                     == "user=\\s*([^;]*[^;\\s])" );
+                            REQUIRE_FALSE( ui.endCharacterMarked() );
+                            REQUIRE( ui.canAccept() );
+                        }
+                    }
+                }
+
+                AND_WHEN( "switching to advanced and back" )
+                {
+                    ui.advanced->click();
+                    REQUIRE( ui.inAdvancedMode() );
                     REQUIRE( ui.canAccept() );
+                    ui.advanced->click();
+
+                    THEN( "the typed fields and the problem are back" )
+                    {
+                        REQUIRE( ui.inSimpleMode() );
+                        REQUIRE( ui.textBefore->text() == "user=" );
+                        REQUIRE( ui.shownValueEnd() == ValueEnd::Character );
+                        REQUIRE( ui.endCharacterMarked() );
+                        REQUIRE_FALSE( ui.canAccept() );
+                    }
+                }
+            }
+
+            AND_WHEN( "a tab is entered as the character" )
+            {
+                ui.endCharacter->setText( "\t" );
+
+                THEN( "it is a problem, and the rules cannot be saved" )
+                {
+                    REQUIRE( ui.endCharacterMarked() );
+                    REQUIRE_FALSE( ui.canAccept() );
+                    REQUIRE( editor.entries()[ 0 ].linePattern.isEmpty() );
+                }
+            }
+
+            AND_WHEN( "NUL is entered as the character" )
+            {
+                ui.endCharacter->setText( QString( QChar() ) );
+
+                THEN( "it is a problem, and the rules cannot be saved" )
+                {
+                    REQUIRE( ui.endCharacterMarked() );
+                    REQUIRE_FALSE( ui.canAccept() );
+                }
+            }
+
+            AND_WHEN( "an emoji is typed as the character" )
+            {
+                ui.endCharacter->clear();
+                type( ui.endCharacter, kEmoji );
+
+                THEN( "it is taken whole and ends the value" )
+                {
+                    REQUIRE( ui.endCharacter->text() == kEmoji );
+                    REQUIRE_FALSE( ui.endCharacterMarked() );
+                    REQUIRE( ui.canAccept() );
+                    REQUIRE( footerValues( editor.entries(),
+                                           ( "user=Jane" + kEmoji + " Doe\n" ).toUtf8() )
+                                 .value( "User" )
+                             == "Jane" );
+                }
+
+                THEN( "no second character can be typed" )
+                {
+                    type( ui.endCharacter, "x" );
+                    REQUIRE( ui.endCharacter->text() == kEmoji );
+                }
+            }
+
+            AND_WHEN( "two characters are typed" )
+            {
+                ui.endCharacter->clear();
+                type( ui.endCharacter, ";" );
+                type( ui.endCharacter, "x" );
+
+                THEN( "only the first is taken" )
+                {
+                    REQUIRE( ui.endCharacter->text() == ";" );
                 }
             }
         }
@@ -472,6 +621,140 @@ SCENARIO( "FooterEditor opens rules of existing configs in the right mode",
             REQUIRE( ui.textBefore->text() == "c:" );
             REQUIRE( ui.shownValueEnd() == ValueEnd::Character );
             REQUIRE( ui.endCharacter->text() == ";" );
+        }
+    }
+}
+
+SCENARIO( "FooterEditor never reverts the read-only patterns of a simple rule",
+          "[footereditor][simplemode]" )
+{
+    GIVEN( "a simple rule whose text was changed" )
+    {
+        FooterEditor editor( { { "VIN", "VIN:\\s*(\\S+)", "", true, {} } } );
+        SimpleUi ui( editor );
+        focusIn( ui.linePattern );
+        ui.textBefore->setText( "ID:" );
+        REQUIRE( ui.linePattern->text() == "ID:\\s*(\\S+)" );
+        const int validations = editor.ruleValidations();
+
+        WHEN( "pressing Escape in the read-only pattern fields" )
+        {
+            press( ui.linePattern, Qt::Key_Escape );
+            press( ui.valuePattern, Qt::Key_Escape );
+
+            THEN( "nothing changes, and the rule was not edited" )
+            {
+                REQUIRE( ui.linePattern->text() == "ID:\\s*(\\S+)" );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "ID:\\s*(\\S+)" );
+                REQUIRE( editor.ruleValidations() == validations );
+                REQUIRE( ui.inSimpleMode() );
+            }
+        }
+    }
+
+    GIVEN( "a simple rule switched to advanced, with the focus in its line pattern" )
+    {
+        FooterEditor editor( { { "VIN", "VIN:\\s*(\\S+)", "", true, {} } } );
+        SimpleUi ui( editor );
+        ui.advanced->click();
+        focusIn( ui.linePattern );
+
+        WHEN( "Advanced is switched off, the text changed, and Escape pressed in the pattern" )
+        {
+            ui.advanced->click();
+            ui.textBefore->setText( "ID:" );
+            press( ui.linePattern, Qt::Key_Escape );
+
+            THEN( "the pattern still matches the simple fields" )
+            {
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.linePattern->text() == "ID:\\s*(\\S+)" );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "ID:\\s*(\\S+)" );
+            }
+
+            AND_WHEN( "Advanced is switched on again, the pattern edited, and Escape pressed" )
+            {
+                ui.advanced->click();
+                ui.linePattern->setText( "ID:(\\d+)" );
+                press( ui.linePattern, Qt::Key_Escape );
+
+                THEN( "the pattern goes back to what it was when it became editable" )
+                {
+                    REQUIRE( ui.linePattern->text() == "ID:\\s*(\\S+)" );
+                    REQUIRE( editor.entries()[ 0 ].linePattern == "ID:\\s*(\\S+)" );
+                }
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps the dialog open for Return and Escape in the mode controls",
+          "[footereditor][simplemode]" )
+{
+    GIVEN( "a shown editor with a simple rule" )
+    {
+        FooterEditor editor( { { "VIN", "VIN:\\s*(\\S+)", "", true, {} } } );
+        SimpleUi ui( editor );
+        editor.show();
+        ClosedCounter closed( editor );
+
+        WHEN( "pressing Return in the value end and the Advanced switch" )
+        {
+            press( ui.valueEnd, Qt::Key_Return );
+            press( ui.valueEnd, Qt::Key_Enter );
+            press( ui.advanced, Qt::Key_Return );
+
+            THEN( "the dialog stays open and nothing changes" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( editor.isVisible() );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "VIN:\\s*(\\S+)" );
+            }
+        }
+
+        WHEN( "choosing another value end and pressing Escape" )
+        {
+            focusIn( ui.valueEnd );
+            ui.chooseValueEnd( ValueEnd::EndOfLine );
+            REQUIRE( editor.entries()[ 0 ].linePattern == "VIN:\\s*(.*\\S)" );
+            press( ui.valueEnd, Qt::Key_Escape );
+
+            THEN( "the choice is reverted, and the dialog stays open" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( ui.shownValueEnd() == ValueEnd::Whitespace );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "VIN:\\s*(\\S+)" );
+            }
+        }
+
+        WHEN( "confirming another value end with Return and pressing Escape" )
+        {
+            focusIn( ui.valueEnd );
+            ui.chooseValueEnd( ValueEnd::EndOfLine );
+            press( ui.valueEnd, Qt::Key_Return );
+            press( ui.valueEnd, Qt::Key_Escape );
+
+            THEN( "the confirmed choice stays" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( ui.shownValueEnd() == ValueEnd::EndOfLine );
+            }
+        }
+
+        WHEN( "switching to advanced and pressing Escape in the switch" )
+        {
+            focusIn( ui.advanced );
+            ui.advanced->click();
+            REQUIRE( ui.inAdvancedMode() );
+            press( ui.advanced, Qt::Key_Escape );
+
+            THEN( "the switch is reverted, and the dialog stays open" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "VIN:\\s*(\\S+)" );
+            }
         }
     }
 }

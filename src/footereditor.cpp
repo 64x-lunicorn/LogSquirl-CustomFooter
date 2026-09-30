@@ -23,6 +23,7 @@
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
+#include "simplerule.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -371,12 +372,17 @@ void FooterEditor::validateRow( int row )
         const auto error = patternError( pattern );
         return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
     };
+    // A simple rule without a usable end character has no patterns yet.
+    if ( entry.unfinishedSimpleRule ) {
+        problems.endCharacter = endCharacterProblem( *entry.unfinishedSimpleRule );
+    }
     problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
     problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
     model_->setProblems( row, problems );
 
     QStringList lines;
-    for ( const auto& problem : { problems.key, problems.linePattern, problems.valuePattern } ) {
+    for ( const auto& problem :
+          { problems.key, problems.endCharacter, problems.linePattern, problems.valuePattern } ) {
         if ( !problem.isEmpty() ) {
             lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
         }
@@ -407,8 +413,8 @@ void FooterEditor::listProblems()
             continue;
         }
         QStringList lines;
-        for ( const auto& problem :
-              { problems.key, problems.linePattern, problems.valuePattern } ) {
+        for ( const auto& problem : { problems.key, problems.endCharacter, problems.linePattern,
+                                      problems.valuePattern } ) {
             if ( !problem.isEmpty() ) {
                 lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
             }

@@ -37,7 +37,7 @@ using namespace custom_footer;
 namespace {
 
 SimpleRule rule( const QString& textBefore, ValueEnd valueEnd = ValueEnd::Whitespace,
-                 QChar endCharacter = QChar() )
+                 const QString& endCharacter = QString() )
 {
     SimpleRule simple;
     simple.textBefore = textBefore;
@@ -45,6 +45,14 @@ SimpleRule rule( const QString& textBefore, ValueEnd valueEnd = ValueEnd::Whites
     simple.endCharacter = endCharacter;
     return simple;
 }
+
+SimpleRule rule( const QString& textBefore, ValueEnd valueEnd, QChar endCharacter )
+{
+    return rule( textBefore, valueEnd, QString( endCharacter ) );
+}
+
+/// An emoji: one code point, two UTF-16 units.
+const QString kEmoji = QString::fromUtf8( "\xF0\x9F\x98\x80" );
 
 /// The value a simple rule extracts from @p line, through the scanner, as
 /// the footer would show it; nothing if the rule does not match.
@@ -326,7 +334,10 @@ SCENARIO( "Rules are simple only if their patterns are regenerated exactly", "[s
                     "VIN\\\\:\\s*(\\S+)\\",       // trailing backslash
                     "[Vv]IN:\\s*(\\S+)",          // a class in the text
                     "VIN\\x3a\\s*(\\S+)",         // another escape in the text
-                    "VIN:\\s*(\\S+)|x",           // alternative
+                    "VIN:\\s*(\\S+)|x",
+                    "\\[main\\] VIN:\\s*(\\S+)", // needless escape of ]
+                    "\\{id\\}:\\s*(\\S+)",       // needless escape of }
+                    "k=\\s*([^\\t]*[^\\t\\s])",  // a control character           // alternative
                     "isComponentProtectionEnabled",
                     "build=(\\d+)" } ) {
                 INFO( pattern.toStdString() );
@@ -394,10 +405,10 @@ SCENARIO( "Simple rules escape only what is special", "[simplerule]" )
 
     GIVEN( "metacharacters in the text" )
     {
-        THEN( "each is escaped once" )
+        THEN( "each is escaped once, but ] and }, which are literal outside a class" )
         {
             REQUIRE( simpleLinePattern( rule( "\\^$.|?*+()[]{}" ) )
-                     == "\\\\\\^\\$\\.\\|\\?\\*\\+\\(\\)\\[\\]\\{\\}\\s*(\\S+)" );
+                     == "\\\\\\^\\$\\.\\|\\?\\*\\+\\(\\)\\[]\\{}\\s*(\\S+)" );
         }
     }
 
@@ -417,6 +428,98 @@ SCENARIO( "Simple rules escape only what is special", "[simplerule]" )
                 REQUIRE( extract( simple, QString( "k= ab %1cd" ).arg( c ) ) == QString( "ab" ) );
                 REQUIRE( simpleRuleOf( simpleLinePattern( simple ), QString() ) == simple );
             }
+        }
+    }
+}
+
+SCENARIO( "Simple rules leave ] and } unescaped", "[simplerule]" )
+{
+    GIVEN( "text with brackets and braces" )
+    {
+        THEN( "only [ and { are escaped, the rules are simple, and match literally" )
+        {
+            const auto main = rule( "[main] VIN:" );
+            REQUIRE( simpleLinePattern( main ) == "\\[main] VIN:\\s*(\\S+)" );
+            REQUIRE( simpleRuleOf( "\\[main] VIN:\\s*(\\S+)", QString() ) == main );
+            REQUIRE( extract( main, "12:00 [main] VIN: WVW1 ok" ) == QString( "WVW1" ) );
+            REQUIRE( extract( main, "12:00 m VIN: WVW1 ok" ) == std::nullopt );
+
+            const auto braces = rule( "{id}:" );
+            REQUIRE( simpleLinePattern( braces ) == "\\{id}:\\s*(\\S+)" );
+            REQUIRE( simpleRuleOf( "\\{id}:\\s*(\\S+)", QString() ) == braces );
+            REQUIRE( extract( braces, "x {id}: 42" ) == QString( "42" ) );
+            REQUIRE( extract( rule( "a}b]c" ), "a}b]c 7" ) == QString( "7" ) );
+            REQUIRE( extract( rule( "x{2}" ), "xx 7" ) == std::nullopt );
+            REQUIRE( extract( rule( "x{2}" ), "x{2} 7" ) == QString( "7" ) );
+        }
+    }
+}
+
+SCENARIO( "Simple rules take any one code point as end character", "[simplerule]" )
+{
+    GIVEN( "an end character outside the Basic Multilingual Plane" )
+    {
+        const auto simple = rule( "k=", ValueEnd::Character, kEmoji );
+
+        THEN( "the pattern compiles, ends the value there, and classifies as the rule" )
+        {
+            REQUIRE( endCharacterProblem( simple ).isEmpty() );
+            const auto pattern = simpleLinePattern( simple );
+            REQUIRE( pattern == "k=\\s*([^" + kEmoji + "]*[^" + kEmoji + "\\s])" );
+            REQUIRE( FooterScanner::patternError( pattern ).isEmpty() );
+            REQUIRE( extract( simple, "k= ab" + kEmoji + "cd" ) == QString( "ab" ) );
+            REQUIRE( simpleRuleOf( pattern, QString() ) == simple );
+        }
+    }
+
+    GIVEN( "no end character, a control character, or more than one character" )
+    {
+        THEN( "the end is a problem, and there is no pattern" )
+        {
+            for ( const auto& end :
+                  { QString(), QString( QChar() ), QString( "\t" ), QString( QChar( 0x7f ) ),
+                    QString( "ab" ), kEmoji + "x", QString( QChar( 0xD83D ) ) } ) {
+                INFO( end.toStdString() );
+                const auto simple = rule( "k=", ValueEnd::Character, end );
+                REQUIRE_FALSE( endCharacterProblem( simple ).isEmpty() );
+                REQUIRE( simpleLinePattern( simple ).isEmpty() );
+            }
+            REQUIRE( endCharacterProblem( rule( "k=", ValueEnd::Character ) )
+                     == "Enter the character the value ends at" );
+        }
+
+        THEN( "other ways to end the value do not need one" )
+        {
+            REQUIRE( endCharacterProblem( rule( "k=" ) ).isEmpty() );
+            REQUIRE( endCharacterProblem( rule( "k=", ValueEnd::EndOfLine, "\t" ) ).isEmpty() );
+        }
+    }
+}
+
+SCENARIO( "Simple rules take only ASCII whitespace as whitespace", "[simplerule]" )
+{
+    const QChar noBreakSpace( 0x00A0 );
+    const QChar ideographicSpace( 0x3000 );
+
+    GIVEN( "no-break and ideographic spaces in a line" )
+    {
+        THEN( "they are part of the value, as documented" )
+        {
+            REQUIRE( extract( rule( "VIN:" ), QString( "VIN:%1ABC def" ).arg( noBreakSpace ) )
+                     == QString( "%1ABC" ).arg( noBreakSpace ) );
+            REQUIRE( extract( rule( "VIN:" ), QString( "VIN: AB%1CD e" ).arg( ideographicSpace ) )
+                     == QString( "AB%1CD" ).arg( ideographicSpace ) );
+            REQUIRE( extract( rule( "M:", ValueEnd::EndOfLine ),
+                              QString( "M: Golf%1" ).arg( noBreakSpace ) )
+                     == QString( "Golf%1" ).arg( noBreakSpace ) );
+            REQUIRE( extract( rule( "u=", ValueEnd::Character, ',' ),
+                              QString( "u=%1Jane,x" ).arg( ideographicSpace ) )
+                     == QString( "%1Jane" ).arg( ideographicSpace ) );
+        }
+
+        THEN( "ASCII spaces and tabs are not" )
+        {
+            REQUIRE( extract( rule( "VIN:" ), "VIN:\t ABC\tdef" ) == QString( "ABC" ) );
         }
     }
 }

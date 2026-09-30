@@ -20,6 +20,7 @@
 #include "ruletemplate.h"
 
 #include <QCoreApplication>
+#include <QRegularExpression>
 
 namespace custom_footer {
 
@@ -45,18 +46,30 @@ QList<RuleTemplate> makeTemplates()
 {
     QList<RuleTemplate> templates;
 
-    // After `version` or `ver`, in any case, with an optional `:` or `=`
-    // and `v`: any number of dotted parts, `version 3` included. Or a `v`
-    // starting a word, directly before a number with at least one dot, so
-    // that `v1` in prose is not taken. A SemVer pre-release or build suffix
-    // (`-rc1`, `+build.5`) belongs to the value; the `v` does not.
+    // After `version` or `ver` in any case, or `Version` / `Ver` starting
+    // a camel-case word (`appVersion`). Not after a letter or digit
+    // otherwise, so `conversion` and `server` do not count, but after `_`
+    // (`app_version`); `appversion` in lower case is missed for that. Then
+    // an optional closing quote, `:`, `=`, `>` or `.`, opening quote and
+    // `v`, for `{"version": "1.2.3"}`, `<version>1.2.3` or `Ver. 2.1`. Or
+    // a `v` starting a word directly before a number with a dot (`v1.2.3`),
+    // so that `v1` in prose is not taken.
+    //
+    // The value is the dotted number, not a date (`\d{4}-\d{2}`). A SemVer
+    // pre-release or build suffix belongs to it only if its first
+    // identifier has a letter (`-rc1`, `-beta.2`, `+build.5`), so a date
+    // after the version (`1.2.3-2024-01-15`) is not taken; the `v` and the
+    // quotes are not part of it.
     templates.append(
         { tr( "Version" ),
           tr( "A version number, e.g. version 1.2.3, Version: v2.0.1-rc1, v1.2" ),
           QStringLiteral( "Version" ),
           {},
-          QStringLiteral( "(?i)(?:\\b(?:version|ver)\\s*[:=]?\\s*v?|\\bv(?=\\d+\\.\\d))"
-                          "(\\d+(?:\\.\\d+)*(?:[-+][0-9a-z]+(?:\\.[0-9a-z]+)*)*)" ) } );
+          QStringLiteral( "(?:(?:(?<![A-Za-z0-9])(?i:version|ver)|(?<=[a-z0-9])(?:Version|Ver))"
+                          "[\"']?\\s*[:=>.]?\\s*[\"']?[vV]?|(?<![\\w.])[vV](?=\\d+\\.\\d))"
+                          "(?!\\d{4}-\\d{2})"
+                          "(\\d+(?:\\.\\d+)*"
+                          "(?:[-+][0-9A-Za-z]*[A-Za-z][0-9A-Za-z]*(?:\\.[0-9A-Za-z]+)*)*)" ) } );
 
     // Build numbers and serial numbers have no common shape: the word after
     // a text, which users adjust to their log.
@@ -73,18 +86,24 @@ QList<RuleTemplate> makeTemplates()
           simple( QStringLiteral( "Serial number:" ) ),
           {} } );
 
-    // Four numbers from 0 to 255, not part of a longer number or dotted
-    // sequence; a dot ending a sentence may follow.
+    // Four numbers from 0 to 255, not part of a word, a longer number or
+    // dotted sequence: no word character or `.` before it, and no word
+    // character, or `.` and one, after it; a dot ending a sentence may
+    // follow.
     templates.append( { tr( "IPv4 address" ),
                         tr( "The first IPv4 address in a line, e.g. 192.168.1.20" ),
                         QStringLiteral( "IP address" ),
                         {},
-                        QStringLiteral( "(?<!\\d|\\d\\.)(" ) + kOctet + QStringLiteral( "(?:\\." )
-                            + kOctet + QStringLiteral( "){3})(?!\\d|\\.\\d)" ) } );
+                        QStringLiteral( "(?<![\\w.])(" ) + kOctet + QStringLiteral( "(?:\\." )
+                            + kOctet + QStringLiteral( "){3})(?!\\w|\\.\\w)" ) } );
 
     // Date, `T` or a space as RFC 3339 allows, hours and minutes, optional
     // seconds (60 for a leap second) with a fraction after `.` or `,`, and
-    // an optional `Z` or offset. Not part of a longer number.
+    // an optional `Z` or offset of `±HH`, `±HHMM` or `±HH:MM`; `t` and `z`
+    // in lower case too. Not part of a longer number. The part after the
+    // minutes is atomic and must end before anything but a digit or `:`,
+    // so malformed input such as `10:30:5` is no match rather than cut
+    // back to `10:30`.
     templates.append(
         { tr( "Timestamp (ISO 8601)" ),
           tr( "The first date and time in a line, e.g. 2024-01-15T10:30:00Z or "
@@ -92,16 +111,20 @@ QList<RuleTemplate> makeTemplates()
           QStringLiteral( "Timestamp" ),
           {},
           QStringLiteral( "(?<!\\d)(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])"
-                          "[T ](?:[01]\\d|2[0-3]):[0-5]\\d(?::(?:[0-5]\\d|60)(?:[.,]\\d+)?)?"
-                          "(?:Z|[+-](?:[01]\\d|2[0-3]):?[0-5]\\d)?)(?!\\d)" ) } );
+                          "[Tt ](?:[01]\\d|2[0-3]):[0-5]\\d"
+                          "(?>(?::(?:[0-5]\\d|60)(?:[.,]\\d+)?)?"
+                          "(?:[Zz]|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)?))(?![\\d:])" ) } );
 
-    // The key the user gives, then `=`; the value ends at whitespace, as in
-    // logfmt. For `a=1;b=2` or `a=1, b=2`, choose the character in the panel.
+    // The key the user gives, then `=` and the value up to whitespace, as
+    // in logfmt. Advanced, as the key must not be the end of a longer one
+    // (`superuser=`, `a.user=`, `my-user=`), and the value starts right
+    // after `=`: `user= msg=hi` has no value for `user`. For `a=1;b=2` or
+    // `a=1, b=2`, edit the pattern.
     templates.append( { tr( "key=value" ),
                         tr( "The value after a key you give and =, up to the next whitespace" ),
                         {},
-                        simple( QStringLiteral( "=" ) ),
-                        {} } );
+                        {},
+                        QStringLiteral( "(?<![\\w.-])%1=(\\S+)" ) } );
 
     return templates;
 }
@@ -111,20 +134,29 @@ QList<RuleTemplate> makeTemplates()
 FooterEntry RuleTemplate::entry( const QString& askedKey ) const
 {
     FooterEntry entry;
-    entry.key = asksForKey() ? askedKey.trimmed() : key;
+    entry.key = asksForKey() ? givenKey( askedKey ) : key;
     if ( entry.key.isEmpty() ) {
         return {};
     }
-    if ( !isSimple() ) {
+    if ( isSimple() ) {
+        applySimpleRule( simple, entry );
+    }
+    else if ( asksForKey() ) {
+        entry.linePattern = linePattern.arg( QRegularExpression::escape( entry.key ) );
+    }
+    else {
         entry.linePattern = linePattern;
-        return entry;
     }
-    auto rule = simple;
-    if ( asksForKey() ) {
-        rule.textBefore.prepend( entry.key );
-    }
-    applySimpleRule( rule, entry );
     return entry;
+}
+
+QString RuleTemplate::givenKey( const QString& askedKey )
+{
+    auto key = askedKey.trimmed();
+    if ( key.endsWith( QLatin1Char( '=' ) ) ) {
+        key.chop( 1 );
+    }
+    return key.trimmed();
 }
 
 const QList<RuleTemplate>& ruleTemplates()

@@ -41,11 +41,11 @@ struct RuleTemplate {
     QString description; ///< One line: what it finds.
     /// The key of the rule; empty if the template asks for it.
     QString key;
-    /// A simple rule, used without a linePattern. With asksForKey(), its
-    /// text follows the key the user gives, e.g. `=` for `user=`.
+    /// A simple rule, used without a linePattern.
     SimpleRule simple;
     /// An advanced line pattern, with the value as the first capturing
-    /// group. Empty for a simple template.
+    /// group. Empty for a simple template. With asksForKey(), `%1` in it
+    /// stands for the given key, escaped to match literally.
     QString linePattern;
 
     /// Whether the user gives the key, e.g. for `key=value`.
@@ -62,11 +62,15 @@ struct RuleTemplate {
     }
 
     /**
-     * The new rule, enabled and without mappings. @p askedKey, trimmed, is
-     * the key of a template that asks for one; other templates ignore it.
-     * A template asking for a key gives an empty rule without one.
+     * The new rule, enabled and without mappings. @p askedKey is the key of
+     * a template that asks for one, see givenKey(); other templates ignore
+     * it. A template asking for a key gives an empty rule without one.
      */
     FooterEntry entry( const QString& askedKey = QString() ) const;
+
+    /// The key a template asking for one uses for @p askedKey: trimmed,
+    /// without one `=` at its end, which the pattern adds anyway.
+    static QString givenKey( const QString& askedKey );
 };
 
 /// The rule templates, in the order they are offered.

@@ -58,10 +58,15 @@ RuleTemplateDialog::RuleTemplateDialog( QWidget* parent )
     auto* form = new QFormLayout;
     keyEdit_ = new QLineEdit( this );
     keyEdit_->setObjectName( "templateKeyEdit" );
-    keyEdit_->setPlaceholderText( tr( "E.g. user, for user=alice" ) );
+    keyEdit_->setPlaceholderText( tr( "E.g. user, to find the value of user" ) );
     keyLabel_ = new QLabel( tr( "&Key:" ), this );
     keyLabel_->setBuddy( keyEdit_ );
     form->addRow( keyLabel_, keyEdit_ );
+    keyHint_ = new QLabel( this );
+    keyHint_->setObjectName( "templateKeyHint" );
+    keyHint_->setWordWrap( true );
+    keyHint_->hide();
+    form->addRow( QString(), keyHint_ );
     layout->addLayout( form );
 
     note_ = new QLabel( this );
@@ -117,6 +122,14 @@ void RuleTemplateDialog::updateChoice()
 
     const auto key = entry().key;
     buttons_->button( QDialogButtonBox::Ok )->setEnabled( !key.isEmpty() );
+
+    // The pattern adds the `=`: one typed with the key is dropped.
+    const bool typedEquals
+        = asksForKey && !key.isEmpty() && keyEdit_->text().trimmed().endsWith( QLatin1Char( '=' ) );
+    keyHint_->setText( typedEquals
+                           ? tr( "The = is added for you: the rule looks for %1=" ).arg( key )
+                           : QString() );
+    keyHint_->setVisible( typedEquals );
 
     // Rules sharing a key are alternatives: allowed, but never silently.
     const bool used = !key.isEmpty() && existingKeys_.contains( key );

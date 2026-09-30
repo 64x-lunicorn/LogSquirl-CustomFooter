@@ -142,6 +142,7 @@ struct TemplateUi {
         templates = find<QTreeWidget>( *dialog, "templateList" );
         templateKey = find<QLineEdit>( *dialog, "templateKeyEdit" );
         note = find<QLabel>( *dialog, "templateKeyNote" );
+        keyHint = find<QLabel>( *dialog, "templateKeyHint" );
         buttons = dialog->findChild<QDialogButtonBox*>();
         REQUIRE( buttons );
         return dialog;
@@ -208,6 +209,7 @@ struct TemplateUi {
     QTreeWidget* templates = nullptr;
     QLineEdit* templateKey = nullptr;
     QLabel* note = nullptr;
+    QLabel* keyHint = nullptr;
     QDialogButtonBox* buttons = nullptr;
 };
 
@@ -273,9 +275,9 @@ SCENARIO( "Rule templates are simple where the value fits the simple form", "[ru
 {
     GIVEN( "each template" )
     {
-        THEN( "build number, serial number and key=value are simple rules" )
+        THEN( "build number and serial number are simple rules" )
         {
-            for ( const auto* name : { "Build number", "Serial number", "key=value" } ) {
+            for ( const auto* name : { "Build number", "Serial number" } ) {
                 INFO( name );
                 const auto& t = templateNamed( name );
                 REQUIRE( t.isSimple() );
@@ -285,13 +287,14 @@ SCENARIO( "Rule templates are simple where the value fits the simple form", "[ru
             }
         }
 
-        THEN( "version, IPv4 address and timestamp need a shape and are advanced" )
+        THEN( "version, IPv4 address, timestamp and key=value need a shape and are advanced" )
         {
-            for ( const auto* name : { "Version", "IPv4 address", "Timestamp (ISO 8601)" } ) {
+            for ( const auto* name :
+                  { "Version", "IPv4 address", "Timestamp (ISO 8601)", "key=value" } ) {
                 INFO( name );
                 const auto& t = templateNamed( name );
                 REQUIRE( !t.isSimple() );
-                REQUIRE( !simpleRuleOf( t.entry() ).has_value() );
+                REQUIRE( !simpleRuleOf( t.entry( "user" ) ).has_value() );
             }
         }
     }
@@ -317,11 +320,41 @@ SCENARIO( "The version template finds version numbers", "[ruletemplate]" )
                                    { "V2.0", "2.0" } } );
     }
 
-    THEN( "not in other words, without a number, or a bare number" )
+    THEN( "after _ or at the start of a camel-case word, e.g. appVersion" )
     {
-        requireFindsNothing( "Version", { "conversion 1.2", "server=1.2", "vertical 3.4",
-                                          "version unknown", "versions 1.2", "v1 of the API",
-                                          "rev1.2.3", "address 10.0.0.1", "1.2.3" } );
+        requireFinds( "Version", { { "app_version=1.2.3", "1.2.3" },
+                                   { "appVersion: 2.1.0", "2.1.0" },
+                                   { "fw_ver=3.1", "3.1" } } );
+    }
+
+    THEN( "with quotes, > or . between the word and the number, without the quotes" )
+    {
+        requireFinds( "Version", { { "{\"version\": \"1.2.3\"}", "1.2.3" },
+                                   { "version=\"1.2.3\"", "1.2.3" },
+                                   { "<version>1.2.3</version>", "1.2.3" },
+                                   { "version '1.2.3'", "1.2.3" },
+                                   { "Ver. 2.1", "2.1" } } );
+    }
+
+    THEN( "a pre-release or build suffix with a letter is kept whole" )
+    {
+        requireFinds( "Version", { { "version 1.2.3-rc1", "1.2.3-rc1" },
+                                   { "version 1.2.3+build.5", "1.2.3+build.5" },
+                                   { "version 2.0.0-beta.2", "2.0.0-beta.2" },
+                                   { "version 1.0-alpha", "1.0-alpha" } } );
+    }
+
+    THEN( "a date after the version is not part of it" )
+    {
+        requireFinds( "Version", { { "version 1.2.3-2024-01-15T10:30:00", "1.2.3" } } );
+    }
+
+    THEN( "not in other words, without a number, a bare number, or a date" )
+    {
+        requireFindsNothing( "Version", { "conversion 1.2", "server=1.2", "server 1.2.3",
+                                          "vertical 3.4", "version unknown", "versions 1.2",
+                                          "v1 of the API", "rev1.2.3", "address 10.0.0.1", "1.2.3",
+                                          "SERVER 1.2", "version: 2024-01-15 10:30" } );
     }
 }
 
@@ -366,10 +399,18 @@ SCENARIO( "The IPv4 template finds dotted quads", "[ruletemplate]" )
                                         { "from 0.0.0.0 and 1.2.3.4", "0.0.0.0" } } );
     }
 
-    THEN( "not out of range, too few or too many parts, or with leading zeros" )
+    THEN( "between punctuation, and before a dot ending a sentence" )
     {
-        requireFindsNothing( "IPv4 address", { "256.1.1.1", "1.2.3", "1.2.3.4.5", "01.2.3.4",
-                                               "version 1.2.3", "1.2.3.999", "a.b.c.d" } );
+        requireFinds( "IPv4 address", { { "ip=10.0.0.1,", "10.0.0.1" },
+                                        { "(192.168.1.1)", "192.168.1.1" },
+                                        { "Connected to 10.0.0.1.", "10.0.0.1" } } );
+    }
+
+    THEN( "not out of range, too few or too many parts, with leading zeros, or in a word" )
+    {
+        requireFindsNothing( "IPv4 address",
+                             { "256.1.1.1", "1.2.3", "1.2.3.4.5", "01.2.3.4", "version 1.2.3",
+                               "1.2.3.999", "a.b.c.d", "v1.2.3.4", "x.1.2.3.4", "1.2.3.4a" } );
     }
 }
 
@@ -385,12 +426,21 @@ SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]
                         { "2024-06-01T00:00:00", "2024-06-01T00:00:00" } } );
     }
 
+    THEN( "an offset of hours only, and lower-case t and z" )
+    {
+        requireFinds( "Timestamp (ISO 8601)",
+                      { { "2024-01-15T10:30:00+01 up", "2024-01-15T10:30:00+01" },
+                        { "2024-01-15 10:30:00-05", "2024-01-15 10:30:00-05" },
+                        { "2024-01-15t10:30:00z", "2024-01-15t10:30:00z" } } );
+    }
+
     THEN( "not a date alone, another format, or values out of range" )
     {
         requireFindsNothing( "Timestamp (ISO 8601)",
                              { "2024-01-15", "2024/01/15 10:30:00", "15.01.2024 10:30",
                                "2024-13-01T10:00:00", "2024-01-32T10:00", "2024-01-15T24:00",
-                               "2024-01-15T10:60", "12024-01-15T10:30:00", "10:30:00" } );
+                               "2024-01-15T10:60", "12024-01-15T10:30:00", "10:30:00",
+                               "2024-01-15T10:30:5", "2024-01-15T10:30:00.5:1" } );
     }
 }
 
@@ -400,20 +450,20 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
     {
         const auto entry = templateNamed( "key=value" ).entry( "  user " );
 
-        THEN( "the rule is named after the trimmed key and looks for user=" )
+        THEN( "the rule is named after the trimmed key and looks for user= as a whole key" )
         {
             REQUIRE( entry.key == "user" );
-            REQUIRE( simpleRuleOf( entry )->textBefore == "user=" );
-            REQUIRE( simpleRuleOf( entry )->valueEnd == ValueEnd::Whitespace );
+            REQUIRE( entry.linePattern == "(?<![\\w.-])user=(\\S+)" );
         }
 
-        THEN( "the value ends at whitespace" )
+        THEN( "the value directly after = ends at whitespace" )
         {
             for ( const Sample& sample :
                   std::initializer_list<Sample>{ { "user=alice", "alice" },
                                                  { "level=info user=alice msg=hi", "alice" },
-                                                 { "user= bob", "bob" },
-                                                 { "a=1 user=x;y=2", "x;y=2" } } ) {
+                                                 { "a=1 user=x;y=2", "x;y=2" },
+                                                 { "superuser=root user=alice", "alice" },
+                                                 { "user= msg=hi user=bob", "bob" } } ) {
                 INFO( sample.line );
                 REQUIRE( extract( entry, sample.line ) == QString( sample.value ) );
             }
@@ -421,7 +471,9 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
 
         THEN( "not for other keys, another separator, or without a value" )
         {
-            for ( const auto* line : { "users: alice", "user: alice", "User=alice", "user=" } ) {
+            for ( const auto* line :
+                  { "users: alice", "user: alice", "User=alice", "user=", "user= msg=hi",
+                    "superuser=root", "a.user=x", "my-user=x" } ) {
                 INFO( line );
                 REQUIRE( extract( entry, line ) == std::nullopt );
             }
@@ -439,12 +491,24 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
         }
     }
 
+    GIVEN( "a key given with its =" )
+    {
+        const auto entry = templateNamed( "key=value" ).entry( "user=" );
+
+        THEN( "one = is dropped: the rule looks for user=, not user==" )
+        {
+            REQUIRE( entry.key == "user" );
+            REQUIRE( extract( entry, "user=alice" ) == QString( "alice" ) );
+        }
+    }
+
     GIVEN( "no key" )
     {
         THEN( "the template makes no rule" )
         {
             REQUIRE( templateNamed( "key=value" ).asksForKey() );
             REQUIRE( templateNamed( "key=value" ).entry( "  " ).linePattern.isEmpty() );
+            REQUIRE( templateNamed( "key=value" ).entry( " = " ).linePattern.isEmpty() );
         }
     }
 }
@@ -599,15 +663,55 @@ SCENARIO( "The key=value template asks for the key", "[ruletemplate][footeredito
             ui.templateKey->setText( "user" );
             ui.ok()->click();
 
-            THEN( "the new rule is a simple rule for user= named user, selected" )
+            THEN( "the new rule for user= is named user, selected in advanced mode" )
             {
                 const auto entries = editor.entries();
                 REQUIRE( entries.size() == 3 );
                 REQUIRE( entries[ 2 ].key == "user" );
                 REQUIRE( ui.currentRow() == 2 );
-                REQUIRE( ui.inSimpleMode() );
-                REQUIRE( ui.textBefore->text() == "user=" );
+                REQUIRE( ui.inAdvancedMode() );
+                REQUIRE( ui.linePattern->text() == entries[ 2 ].linePattern );
             }
+        }
+
+        WHEN( "giving the key with its =" )
+        {
+            ui.templateKey->setText( "user=" );
+
+            THEN( "a hint says the = is added anyway, and OK is enabled" )
+            {
+                REQUIRE( !ui.keyHint->isHidden() );
+                REQUIRE( ui.keyHint->text().contains( "user=" ) );
+                REQUIRE( ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "clicking OK" )
+            {
+                ui.ok()->click();
+
+                THEN( "the rule is for user=, named user" )
+                {
+                    REQUIRE( editor.entries()[ 2 ].key == "user" );
+                    REQUIRE( sameEntry( editor.entries()[ 2 ],
+                                        templateNamed( "key=value" ).entry( "user" ) ) );
+                }
+            }
+
+            AND_WHEN( "removing the =" )
+            {
+                ui.templateKey->setText( "user" );
+
+                THEN( "the hint goes away" )
+                {
+                    REQUIRE( ui.keyHint->isHidden() );
+                }
+            }
+        }
+
+        THEN( "the placeholder does not suggest typing the =" )
+        {
+            REQUIRE( !ui.templateKey->placeholderText().contains( "=" ) );
+            REQUIRE( ui.keyHint->isHidden() );
         }
 
         WHEN( "cancelling" )
@@ -685,7 +789,7 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
 
         WHEN( "choosing a template with another key" )
         {
-            ui.choose( "IPv4 address" );
+            ui.choose( "Timestamp (ISO 8601)" );
 
             THEN( "there is no note" )
             {
@@ -712,6 +816,29 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
                     REQUIRE( ui.note->isHidden() );
                 }
             }
+        }
+    }
+}
+
+SCENARIO( "The alternative note counts only rules the scanner uses",
+          "[ruletemplate][footereditor]" )
+{
+    GIVEN( "a disabled rule for Version and an enabled one without a line pattern for "
+           "IP address" )
+    {
+        const QList<FooterEntry> rules{ { "Version", "Version=(\\S+)", "", false, {} },
+                                        { "IP address", "", "", true, {} } };
+        FooterEditor editor( rules );
+        TemplateUi ui( editor );
+        editor.show();
+        ui.open();
+
+        THEN( "neither key gets the note" )
+        {
+            ui.choose( "Version" );
+            REQUIRE( ui.note->isHidden() );
+            ui.choose( "IPv4 address" );
+            REQUIRE( ui.note->isHidden() );
         }
     }
 }

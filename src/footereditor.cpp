@@ -229,9 +229,12 @@ void FooterEditor::addFromTemplate()
         templateDialog_ = new RuleTemplateDialog( this );
         connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRule );
     }
+    // Only rules the scanner uses make the new one an alternative.
     QStringList keys;
     for ( const auto& entry : model_->entries() ) {
-        keys.append( entry.key );
+        if ( entry.enabled && !entry.linePattern.isEmpty() ) {
+            keys.append( entry.key );
+        }
     }
     templateDialog_->reset( keys );
     // Not exec(): the dialog stays window-modal, and tests can drive it.

@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   along and stays selected in the panel. Ctrl+Shift+Up / Ctrl+Shift+Down
   (⇧⌘↑ / ⇧⌘↓ on macOS) move the selected rule as well, next to the ↑/↓
   buttons. The rules are saved in the order of the list.
+- **Simple mode for rules** — a rule can be described without a regex: the
+  text before the value (e.g. `VIN:`, matched literally, with any
+  whitespace after it ignored) and where the value ends: at whitespace, at
+  the end of the line, or before a given character such as `,` or `;`. The
+  line pattern is generated from these and shown read-only. New rules
+  start in simple mode; rules whose patterns have exactly the generated
+  form open in it, all others in advanced mode. **Advanced** shows the
+  line and value patterns for editing and keeps the generated ones;
+  switching back is offered while the patterns still have the simple form.
+  Simple rules are saved as their patterns, so the config format is
+  unchanged and older versions read them. Whitespace means ASCII
+  whitespace: a no-break space is part of the value.
 
 ### Changed
 - **Rule editor** — the rules are now shown as a list, each with its

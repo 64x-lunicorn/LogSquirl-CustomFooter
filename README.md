@@ -92,6 +92,34 @@ validation marks wherever it is moved, and stays selected.
 
 Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
+### Simple and advanced mode
+
+Most rules need no regex. In **simple mode** a rule is described by:
+
+- the **text before the value**, e.g. `VIN:`, matched literally — `[`, `.`,
+  `(` or `\` are just characters — with any whitespace after it ignored;
+- where the **value ends**: at whitespace (one word, the default), at the
+  end of the line (without trailing whitespace), or before a given
+  character, e.g. `,` or `;` (without the whitespace before it). The
+  character may be any single character, emoji included, but not a control
+  character such as a tab; until it is entered, the rule is marked and the
+  rules cannot be saved.
+
+Whitespace means ASCII whitespace, such as spaces and tabs, as `\s` in the
+patterns: a no-break space or an ideographic space is part of the value.
+
+The line pattern is generated from these and shown read-only; a simple rule
+needs no value pattern. `VIN:` with the value ending at whitespace becomes
+`VIN:\s*(\S+)`: only regex metacharacters are escaped. New rules start in
+simple mode, and a hand-written rule like `VIN:\s*(\S+)` opens in it.
+
+Check **Advanced** to edit the line and value patterns directly; the
+generated patterns are kept. Switching back is offered only while the
+patterns still have exactly the form simple mode generates. When the editor
+opens, a rule whose patterns have that form is shown in simple mode, every
+other rule in advanced mode. Simple rules are saved as their patterns, so the
+config and JSON formats do not change.
+
 ### How rules are applied
 
 - Each key takes its value from the **first line** of the file that one of

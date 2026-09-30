@@ -331,6 +331,8 @@ SCENARIO( "FooterEditor shows the selected rule in the detail panel", "[footered
             AND_WHEN( "filling it in through the panel" )
             {
                 ui.key->setText( "VIN" );
+                // A new rule starts in simple mode, with read-only patterns.
+                EditorUi::find<QCheckBox>( editor, "advancedCheck" )->click();
                 ui.linePattern->setText( "VIN:\\s+(\\S+)" );
 
                 THEN( "the rule is stored" )

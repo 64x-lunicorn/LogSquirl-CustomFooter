@@ -20,11 +20,14 @@
 #pragma once
 
 #include "footerentry.h"
+#include "simplerule.h"
 
 #include <QAbstractTableModel>
 #include <QColor>
 #include <QList>
 #include <QString>
+
+#include <optional>
 
 #include <optional>
 
@@ -49,18 +52,20 @@ inline QColor problemBackgroundColor()
 /// field is fine.
 struct RuleProblems {
     QString key;
+    QString endCharacter; ///< Of a simple rule's value end.
     QString linePattern;
     QString valuePattern;
 
     bool isEmpty() const
     {
-        return key.isEmpty() && linePattern.isEmpty() && valuePattern.isEmpty();
+        return key.isEmpty() && endCharacter.isEmpty() && linePattern.isEmpty()
+               && valuePattern.isEmpty();
     }
 
     bool operator==( const RuleProblems& other ) const
     {
-        return key == other.key && linePattern == other.linePattern
-               && valuePattern == other.valuePattern;
+        return key == other.key && endCharacter == other.endCharacter
+               && linePattern == other.linePattern && valuePattern == other.valuePattern;
     }
     bool operator!=( const RuleProblems& other ) const
     {
@@ -106,6 +111,13 @@ public:
     /// Move the rule in @p from so that it ends up in @p to.
     bool moveRule( int from, int to );
 
+    /// A simple rule being written in the detail panel whose patterns
+    /// cannot be generated yet, as its end character is missing or
+    /// unusable; its entry's patterns are empty meanwhile. Editor state:
+    /// never part of entries(), but kept with the row when rules move.
+    std::optional<SimpleRule> unfinishedSimpleRule( int row ) const;
+    void setUnfinishedSimpleRule( int row, const std::optional<SimpleRule>& rule );
+
     RuleProblems problems( int row ) const;
     void setProblems( int row, const RuleProblems& problems );
 
@@ -145,6 +157,7 @@ private:
     struct Rule {
         FooterEntry entry;
         RuleProblems problems;
+        std::optional<SimpleRule> unfinishedSimpleRule = std::nullopt;
     };
 
     void emitRowChanged( int row );

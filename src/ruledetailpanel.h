@@ -21,11 +21,15 @@
 
 #include "footerentry.h"
 #include "rulelistmodel.h"
+#include "simplerule.h"
 
 #include <QGroupBox>
 #include <QHash>
 
+#include <optional>
+
 class QCheckBox;
+class QComboBox;
 class QFormLayout;
 class QLabel;
 class QLineEdit;
@@ -39,11 +43,20 @@ namespace custom_footer {
  * value mappings, each field with the reason it keeps the rules from being
  * saved.
  *
+ * A rule is edited in simple or advanced mode. In simple mode the user
+ * gives the text before the value and where the value ends, and the
+ * patterns are generated from them (simplerule.h) and shown read-only. In
+ * advanced mode the patterns are edited directly. A rule is shown in simple
+ * mode exactly when its patterns have the simple form; switching to
+ * advanced keeps the patterns, and switching back is offered only while
+ * they still have the simple form. The mode is not saved: it follows from
+ * the patterns whenever a rule is shown.
+ *
  * The panel only edits a copy: every change emits edited(), and the owner
  * stores entry() into its rule. showEntry() does not emit edited().
  *
- * The layout is a column of sections, so that more of them (a live
- * preview, a simple mode for the patterns) can be added below the form.
+ * The layout is a column of sections, so that more of them, such as a
+ * live preview, can be added below the form.
  */
 class RuleDetailPanel : public QGroupBox {
     Q_OBJECT
@@ -52,13 +65,25 @@ public:
     explicit RuleDetailPanel( QWidget* parent = nullptr );
 
     /// Show @p entry for editing and enable the panel.
-    void showEntry( const FooterEntry& entry );
+    /// An @p unfinished simple rule is shown in its simple fields instead
+    /// of what the entry's patterns say.
+    void showEntry( const FooterEntry& entry,
+                    const std::optional<SimpleRule>& unfinished = std::nullopt );
 
     /// Show no rule: the panel is emptied and disabled.
     void showNoEntry();
 
+    /// Show that the rule was enabled or disabled elsewhere, e.g. in the
+    /// list, keeping the rest of the panel, its mode included, as it is.
+    void showEnabled( bool enabled );
+
     /// The rule as edited in the panel.
     FooterEntry entry() const;
+
+    /// The simple rule being written, if its patterns cannot be generated
+    /// yet: its end character is missing or unusable. entry() then has
+    /// empty patterns.
+    std::optional<SimpleRule> unfinishedSimpleRule() const;
 
     /// Mark the fields of the shown rule that have problems.
     void setProblems( const RuleProblems& problems );
@@ -81,6 +106,10 @@ Q_SIGNALS:
     void edited();
 
 private Q_SLOTS:
+    void advancedToggled( bool advanced );
+    void simpleFieldEdited();
+    void valueEndChosen();
+    void patternEdited();
     void addMapping();
     void removeMapping();
     void updateMappingButtons();
@@ -90,7 +119,20 @@ private:
     /// content keeps the rules from being saved.
     QLineEdit* addField( QFormLayout* form, const QString& label, const QString& objectName,
                          QLabel** problemLabel );
+    /// Handle Return and Escape in @p field, as in every field of the form.
+    void watchField( QLineEdit* field );
+    /// A hidden label for why a field keeps the rules from being saved.
+    QLabel* newProblemLabel( const QString& objectName );
     void setMappings( const QList<ValueMapping>& mappings );
+
+    /// Show @p rule in the simple fields, without emitting edited().
+    void setSimpleFields( const SimpleRule& rule );
+    /// The simple rule as given in the simple fields.
+    SimpleRule simpleRule() const;
+    /// Show the fields of the mode, and whether the mode can be switched.
+    void setAdvanced( bool advanced );
+    /// Offer switching to simple mode only while the patterns allow it.
+    void updateAdvancedCheck();
 
     QCheckBox* enabledCheck_ = nullptr;
     QLineEdit* keyEdit_ = nullptr;
@@ -99,6 +141,19 @@ private:
     QLabel* keyProblem_ = nullptr;
     QLabel* linePatternProblem_ = nullptr;
     QLabel* valuePatternProblem_ = nullptr;
+
+    QCheckBox* advancedCheck_ = nullptr;
+    QLineEdit* textBeforeEdit_ = nullptr;
+    QComboBox* valueEndCombo_ = nullptr;
+    QLineEdit* endCharacterEdit_ = nullptr;
+    QLabel* endCharacterProblem_ = nullptr;
+    /// What Escape reverts the value end and the Advanced switch to, as
+    /// revertText_ does for the line edits.
+    int revertValueEnd_ = 0;
+    bool revertAdvanced_ = false;
+    /// The rows of the simple fields, hidden in advanced mode.
+    QList<QWidget*> simpleRows_;
+    bool advanced_ = false;
     /// What Escape reverts each field to: its text when the rule was shown,
     /// the field got the focus, or Return was pressed in it.
     QHash<QLineEdit*, QString> revertText_;

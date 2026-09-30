@@ -40,6 +40,7 @@ add_library(logsquirl_custom_footer SHARED
     src/rulelistmodel.cpp
     src/rulelistview.cpp
     src/ruledetailpanel.cpp
+    src/simplerule.cpp
 )
 
 set_target_properties(logsquirl_custom_footer PROPERTIES

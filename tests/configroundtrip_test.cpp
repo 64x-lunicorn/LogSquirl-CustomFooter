@@ -27,6 +27,7 @@
 #include "footerconfig.h"
 #include "footereditor.h"
 #include "rulelistmodel.h"
+#include "simplerule.h"
 
 #include <QFile>
 #include <QTableView>
@@ -303,6 +304,68 @@ SCENARIO( "A config saved by 0.3.0 passes through the editor unchanged",
                 {
                     REQUIRE( readFile( iniPath ) == saved );
                 }
+            }
+        }
+    }
+}
+
+SCENARIO( "Simple and advanced rules pass through the editor unchanged",
+          "[footereditor][footerconfig][simplemode]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // Simple rules with each way to end the value and special characters,
+    // rules that only look simple (needless escapes, a value pattern), and an empty rule.
+    const QList<FooterEntry> rules{
+        { "VIN", "VIN:\\s*(\\S+)", "", true, {} },
+        { "Model", "Model \\(x\\):\\s*(.*\\S)", "", false, {} },
+        { "User", "user=\\s*([^,]*[^,\\s])", "", true, { ValueMapping{ "a", "b" } } },
+        { "Path", "C:\\\\\\[\\$]\\s*(\\S+)", "", true, {} },
+        { "Near", "VIN\\:\\s*(\\S+)", "", true, {} },
+        { "Two", "id:\\s*(\\S+)", ":(\\S+)", true, {} },
+        { "", "", "", true, {} },
+    };
+    const QList<bool> simple{ true, true, true, true, false, false, true };
+    for ( int i = 0; i < rules.size(); ++i ) {
+        INFO( "rule " << i );
+        REQUIRE( simpleRuleOf( rules[ i ] ).has_value() == simple[ i ] );
+    }
+
+    GIVEN( "a custom_footer.ini with them" )
+    {
+        REQUIRE( FooterConfig::saveEntries( dir.path(), rules ) );
+        const auto iniPath = dir.path() + "/custom_footer.ini";
+        const auto original = readFile( iniPath );
+
+        WHEN( "they are loaded, opened in the editor and saved" )
+        {
+            REQUIRE( FooterConfig::saveEntries(
+                dir.path(), throughEditor( FooterConfig::loadEntries( dir.path() ) ) ) );
+
+            THEN( "the file is byte for byte the same" )
+            {
+                REQUIRE( readFile( iniPath ) == original );
+            }
+        }
+    }
+
+    GIVEN( "a rules file with them" )
+    {
+        const auto importPath = dir.path() + "/import.json";
+        const auto exportPath = dir.path() + "/export.json";
+        REQUIRE( FooterConfig::exportToJson( importPath, rules ) );
+
+        WHEN( "it is imported into the editor and exported again" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( importPath, &error );
+            REQUIRE( error.isEmpty() );
+            REQUIRE( FooterConfig::exportToJson( exportPath, throughEditor( imported ) ) );
+
+            THEN( "the file is byte for byte the same" )
+            {
+                REQUIRE( readFile( exportPath ) == readFile( importPath ) );
             }
         }
     }

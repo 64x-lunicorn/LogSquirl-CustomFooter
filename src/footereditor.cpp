@@ -23,6 +23,7 @@
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
+#include "simplerule.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -305,7 +306,7 @@ void FooterEditor::showCurrentRule()
         panel_->showNoEntry();
     }
     else {
-        panel_->showEntry( model_->entry( row ) );
+        panel_->showEntry( model_->entry( row ), model_->unfinishedSimpleRule( row ) );
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
@@ -318,15 +319,17 @@ void FooterEditor::storePanelInCurrentRule()
         return;
     }
     model_->setEntry( row, panel_->entry() );
+    model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
     validateRow( row );
     showProblems();
 }
 
 void FooterEditor::ruleChanged( int row )
 {
-    // Enabled or disabled in the list.
+    // Enabled or disabled in the list. Showing the whole rule again would
+    // put it back into simple mode after a switch to advanced.
     if ( row == currentRow() ) {
-        panel_->showEntry( model_->entry( row ) );
+        panel_->showEnabled( model_->entry( row ).enabled );
     }
     validateRow( row );
     showProblems();
@@ -370,12 +373,17 @@ void FooterEditor::validateRow( int row )
         const auto error = patternError( pattern );
         return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
     };
+    // A simple rule without a usable end character has no patterns yet.
+    if ( const auto unfinished = model_->unfinishedSimpleRule( row ) ) {
+        problems.endCharacter = endCharacterProblem( *unfinished );
+    }
     problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
     problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
     model_->setProblems( row, problems );
 
     QStringList lines;
-    for ( const auto& problem : { problems.key, problems.linePattern, problems.valuePattern } ) {
+    for ( const auto& problem :
+          { problems.key, problems.endCharacter, problems.linePattern, problems.valuePattern } ) {
         if ( !problem.isEmpty() ) {
             lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
         }
@@ -406,8 +414,8 @@ void FooterEditor::listProblems()
             continue;
         }
         QStringList lines;
-        for ( const auto& problem :
-              { problems.key, problems.linePattern, problems.valuePattern } ) {
+        for ( const auto& problem : { problems.key, problems.endCharacter, problems.linePattern,
+                                      problems.valuePattern } ) {
             if ( !problem.isEmpty() ) {
                 lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
             }

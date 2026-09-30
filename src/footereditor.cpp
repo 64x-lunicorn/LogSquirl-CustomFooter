@@ -27,7 +27,6 @@
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QSet>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
@@ -408,7 +407,6 @@ void FooterEditor::storeMappingsOfCurrentRule()
 void FooterEditor::validate()
 {
     QStringList problems;
-    QSet<QString> enabledKeys;
 
     // Marking a cell changes its item: do not validate again for that.
     const QSignalBlocker blocker( table_ );
@@ -425,18 +423,16 @@ void FooterEditor::validate()
             }
         };
 
-        const auto* keyItem = table_->item( row, 1 );
-        const auto key = keyItem ? keyItem->text() : QString();
+        // Rules sharing a key are alternatives. A rule without a line pattern
+        // is incomplete and ignored, but one with a pattern needs a key.
+        const auto text = [ this, row ]( int column ) {
+            const auto* item = table_->item( row, column );
+            return item ? item->text() : QString();
+        };
         const auto* checkbox = static_cast<CenteredCheckbox*>( table_->cellWidget( row, 0 ) );
-        QString keyProblem;
-        if ( checkbox && checkbox->isChecked() ) {
-            if ( enabledKeys.contains( key ) ) {
-                keyProblem
-                    = tr( "the key \"%1\" is already used by an enabled rule above" ).arg( key );
-            }
-            enabledKeys.insert( key );
-        }
-        mark( 1, keyProblem );
+        const bool keyMissing = checkbox && checkbox->isChecked() && !text( 2 ).isEmpty()
+                                && text( 1 ).trimmed().isEmpty();
+        mark( 1, keyMissing ? tr( "a rule with a line pattern needs a key" ) : QString() );
 
         const auto patternProblem = [ this, row ]( int column, const QString& what ) {
             const auto* item = table_->item( row, column );

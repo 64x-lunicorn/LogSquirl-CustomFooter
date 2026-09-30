@@ -188,6 +188,45 @@ SCENARIO( "FooterController scans the active file in the background", "[footerco
             }
         }
     }
+
+    GIVEN( "an active file whose values are shown" )
+    {
+        const auto rotating = logDir.path() + "/rotating.log";
+        writeFile( rotating, "VIN: BEFORE-ROTATION\nmore lines\n" );
+
+        FooterController controller( &widget, configDir.path() );
+        controller.setActiveFile( rotating );
+        REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "BEFORE-ROTATION" ); } ) );
+
+        WHEN( "it is truncated and written again" )
+        {
+            writeFile( rotating, "VIN: AFTER\n" );
+
+            THEN( "the new values are shown" )
+            {
+                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "AFTER" ); } ) );
+            }
+        }
+
+        WHEN( "it is rotated away and recreated only later" )
+        {
+            REQUIRE( QFile::rename( rotating, rotating + ".1" ) );
+            settle( 3 * FooterController::kRescanDelayMs );
+            writeFile( rotating, "VIN: RECREATED\n" );
+
+            THEN( "the recreated file is scanned" )
+            {
+                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "RECREATED" ); } ) );
+
+                AND_THEN( "it is watched again" )
+                {
+                    writeFile( rotating, "VIN: SECOND-ROTATION-WITH-A-LONGER-VALUE\n" );
+                    REQUIRE( waitFor(
+                        [ & ] { return shownText( widget ).contains( "SECOND-ROTATION" ); } ) );
+                }
+            }
+        }
+    }
 }
 
 SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]" )

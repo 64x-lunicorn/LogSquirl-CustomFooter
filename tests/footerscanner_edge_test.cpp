@@ -235,7 +235,7 @@ SCENARIO( "FooterScanner uses the first matching line per rule", "[footerscanner
     }
 }
 
-SCENARIO( "FooterScanner with duplicate keys uses the first rule", "[footerscanner][edge]" )
+SCENARIO( "FooterScanner treats rules sharing a key as alternatives", "[footerscanner][edge]" )
 {
     QTemporaryDir tmpDir;
     REQUIRE( tmpDir.isValid() );
@@ -254,10 +254,10 @@ SCENARIO( "FooterScanner with duplicate keys uses the first rule", "[footerscann
             const FooterScanner scanner( entries );
             const auto results = scanner.scanFile( filePath );
 
-            THEN( "the first rule in list order owns the key" )
+            THEN( "the first line any of the key's rules matches provides the value" )
             {
                 REQUIRE( results.size() == 1 );
-                REQUIRE( results[ "VIN" ] == "from-first-rule" );
+                REQUIRE( results[ "VIN" ] == "from-second-rule" );
             }
 
             THEN( "the ordered values show the key once" )
@@ -267,17 +267,60 @@ SCENARIO( "FooterScanner with duplicate keys uses the first rule", "[footerscann
                 REQUIRE( ordered[ 0 ].first == "VIN" );
             }
 
-            THEN( "the ignored duplicate is reported" )
+            THEN( "nothing is reported" )
             {
-                REQUIRE( scanner.problems().size() == 1 );
-                REQUIRE( scanner.problems()[ 0 ].contains( "VIN" ) );
+                REQUIRE( scanner.problems().isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "two rules with the same key that both match the same line" )
+    {
+        const QStringList lines = { "noise", "build=7 rev=abc" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        QList<FooterEntry> entries;
+        entries.append( { "Build", "rev=(\\S+)", "", true, {} } );
+        entries.append( { "Build", "build=(\\S+)", "", true, {} } );
+
+        WHEN( "scanning" )
+        {
+            const auto results = FooterScanner::scan( filePath, entries );
+
+            THEN( "the first rule in list order wins" )
+            {
+                REQUIRE( results[ "Build" ] == "abc" );
+            }
+        }
+    }
+
+    GIVEN( "alternatives for a key around a rule for another key" )
+    {
+        const QStringList lines = { "id=42", "new-format version 2.0" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        QList<FooterEntry> entries;
+        entries.append( { "Version", "old-format v(\\S+)", "", true, {} } );
+        entries.append( { "ID", "id=(\\S+)", "", true, {} } );
+        entries.append( { "Version", "new-format version (\\S+)", "", true, {} } );
+
+        WHEN( "only the later alternative matches" )
+        {
+            const FooterScanner scanner( entries );
+            const auto ordered = scanner.inRuleOrder( scanner.scanFile( filePath ) );
+
+            THEN( "the key is shown at the position of its first rule" )
+            {
+                REQUIRE( ordered.size() == 2 );
+                REQUIRE( ordered[ 0 ] == qMakePair( QString( "Version" ), QString( "2.0" ) ) );
+                REQUIRE( ordered[ 1 ] == qMakePair( QString( "ID" ), QString( "42" ) ) );
             }
         }
     }
 
     GIVEN( "a disabled rule followed by an enabled one with the same key" )
     {
-        const QStringList lines = { "id=42" };
+        const QStringList lines = { "VIN: ignored", "id=42" };
         const auto filePath = writeTempLines( tmpDir, lines );
 
         QList<FooterEntry> entries;
@@ -288,9 +331,55 @@ SCENARIO( "FooterScanner with duplicate keys uses the first rule", "[footerscann
         {
             const auto results = FooterScanner::scan( filePath, entries );
 
-            THEN( "the enabled rule provides the value" )
+            THEN( "only the enabled rule provides the value" )
             {
                 REQUIRE( results[ "ID" ] == "42" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterScanner skips incomplete rules", "[footerscanner][edge]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+
+    const auto filePath = writeTempLines( tmpDir, { "id=42" } );
+
+    GIVEN( "an enabled rule with a line pattern but no key" )
+    {
+        QList<FooterEntry> entries;
+        entries.append( { "  ", "id=(\\S+)", "", true, {} } );
+        entries.append( { "ID", "id=(\\S+)", "", true, {} } );
+
+        WHEN( "scanning" )
+        {
+            const FooterScanner scanner( entries );
+            const auto results = scanner.scanFile( filePath );
+
+            THEN( "it is skipped and reported" )
+            {
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "ID" ] == "42" );
+                REQUIRE( scanner.problems().size() == 1 );
+                REQUIRE( scanner.problems()[ 0 ].startsWith( "Rule 1" ) );
+            }
+        }
+    }
+
+    GIVEN( "an enabled rule with a key but no line pattern" )
+    {
+        QList<FooterEntry> entries;
+        entries.append( { "Empty", "", "", true, {} } );
+
+        WHEN( "scanning" )
+        {
+            const FooterScanner scanner( entries );
+
+            THEN( "it is skipped silently" )
+            {
+                REQUIRE( scanner.scanFile( filePath ).isEmpty() );
+                REQUIRE( scanner.problems().isEmpty() );
             }
         }
     }

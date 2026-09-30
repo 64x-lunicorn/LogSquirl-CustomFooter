@@ -40,9 +40,9 @@ namespace custom_footer {
  *   - Inline mapping editor panel below the table
  *   - QDialogButtonBox with OK / Cancel / Apply
  *
- * Rules are validated as they are edited: an invalid pattern, or a key an
- * earlier enabled rule already uses, is marked in its cell and blocks OK and
- * Apply.
+ * Rules are validated as they are edited: an invalid pattern, or an enabled
+ * rule with a line pattern but no key, is marked in its cell and blocks OK
+ * and Apply. Rules may share a key: they are alternatives for its value.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT

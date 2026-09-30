@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **Duplicate keys** — when several enabled rules share a key, the first rule
-  in the list owns it; later ones are ignored and reported in the host log.
-  Previously the key was shown twice and the last rule won.
-- **Rule validation in the editor** — invalid patterns and keys already used
-  by an enabled rule above are marked in their cell, with the reason in the
-  tooltip and below the table; OK and Apply stay disabled until they are
-  fixed.
+- **Rules sharing a key** — rules with the same key are now alternatives,
+  e.g. one pattern for old logs and one for new ones: the key's value comes
+  from the first line that any of them matches, and if several match that
+  line, the rule higher in the list wins. The key is shown once, at the
+  position of its first rule. Previously the key was shown twice and the
+  last rule won.
+- **Rule validation in the editor** — invalid patterns, and enabled rules
+  with a line pattern but no key, are marked in their cell, with the reason
+  in the tooltip and below the table; OK and Apply stay disabled until they
+  are fixed. The scanner skips such rules and reports them in the host log;
+  rules without a line pattern are ignored.
 - **Background scanning** — the active file is now scanned on a worker
   thread instead of blocking the window; a scan still running when the file
   changes again is cancelled and its values are never shown. The rules are
@@ -22,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file switch. The footer is cleared as soon as another file becomes active.
 - **Follow mode** — the active file is watched and scanned again shortly
   after it changes, so values that appear later in a growing log show up
-  without switching files.
+  without switching files. Only the lines appended since the last scan are
+  read, and none once every key has a value; a file that was truncated or
+  replaced is scanned from its start. When the file is rotated away, its
+  directory is watched until it is recreated.
 
 ### Fixed
 - **Mappings lost when removing a rule** — removing the selected rule could

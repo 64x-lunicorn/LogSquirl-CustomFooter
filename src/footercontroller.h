@@ -40,7 +40,11 @@ namespace custom_footer {
  * The rules are loaded and compiled once, and again on reloadConfig(). Scans
  * run on a worker thread; a scan's values are shown only if no newer scan was
  * requested meanwhile. The active file is watched, so the values follow a
- * growing log.
+ * growing log: once scanned, a file that only grew is scanned on from where
+ * the last scan stopped, and not at all once every key has a value. A file
+ * that was truncated or replaced is scanned from its start. While the active
+ * file is missing, e.g. after it was rotated away, its directory is watched
+ * so that the file is scanned and watched again once it is recreated.
  *
  * Destroying the controller cancels a running scan and waits for it: no code
  * of the plugin runs on the worker thread afterwards.
@@ -73,6 +77,7 @@ private:
     void loadConfig();
     void rescan();
     void watchActiveFile();
+    void unwatch();
     void show( const Values& values );
 
     QPointer<FooterDisplayWidget> widget_;
@@ -82,7 +87,12 @@ private:
     std::shared_ptr<const FooterScanner> scanner_;
     int maxLines_ = FooterScanner::kDefaultMaxLines;
 
+    /// How far the active file has been scanned with the current rules.
+    FooterScanner::Progress progress_;
+
     QFileSystemWatcher fileWatcher_;
+    /// The active file's directory, watched while the file is missing.
+    QString watchedDir_;
     QTimer rescanTimer_;
 
     /// Counts scan requests; a finished scan is shown only if it is the last.

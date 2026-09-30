@@ -42,7 +42,16 @@ FooterController::FooterController( FooterDisplayWidget* widget, const QString& 
     rescanTimer_.setInterval( kRescanDelayMs );
     connect( &rescanTimer_, &QTimer::timeout, this, &FooterController::rescan );
     connect( &fileWatcher_, &QFileSystemWatcher::fileChanged, this, [ this ] {
+        // The file may have been renamed away, and some watchers would keep
+        // following it: the rescan watches whatever is at the path then.
+        fileWatcher_.removePath( activeFile_ );
         if ( !rescanTimer_.isActive() ) {
+            rescanTimer_.start();
+        }
+    } );
+    // Only watched while the active file is missing: wait for it to be recreated.
+    connect( &fileWatcher_, &QFileSystemWatcher::directoryChanged, this, [ this ] {
+        if ( QFileInfo::exists( activeFile_ ) && !rescanTimer_.isActive() ) {
             rescanTimer_.start();
         }
     } );
@@ -61,10 +70,9 @@ FooterController::~FooterController()
 void FooterController::setActiveFile( const QString& filePath )
 {
     if ( filePath != activeFile_ ) {
-        if ( !activeFile_.isEmpty() ) {
-            fileWatcher_.removePath( activeFile_ );
-        }
+        unwatch();
         activeFile_ = filePath;
+        progress_ = {};
 
         // The previous file's values must not pass for this file's while it is scanned.
         show( {} );
@@ -75,6 +83,7 @@ void FooterController::setActiveFile( const QString& filePath )
 void FooterController::reloadConfig()
 {
     loadConfig();
+    progress_ = {};
     rescan();
 }
 
@@ -109,33 +118,60 @@ void FooterController::rescan()
     cancelRunning_ = cancelled;
 
     // The watcher lives on this thread, so its finished() is delivered here.
-    auto* watcher = new QFutureWatcher<Values>( this );
-    connect( watcher, &QFutureWatcher<Values>::finished, this, [ this, watcher, generation ] {
+    using Scan = FooterScanner::Scan;
+    auto* watcher = new QFutureWatcher<Scan>( this );
+    connect( watcher, &QFutureWatcher<Scan>::finished, this, [ this, watcher, generation ] {
         watcher->deleteLater();
         if ( generation == generation_ ) {
-            show( watcher->result() );
+            const auto scan = watcher->result();
+            progress_ = scan.progress;
+            show( scanner_->inRuleOrder( scan.values ) );
         }
     } );
-    watcher->setFuture( QtConcurrent::run( &pool_,
-                                           [ scanner = scanner_, filePath = activeFile_,
-                                             maxLines = maxLines_, cancelled ]() -> Values {
-                                               try {
-                                                   return scanner->inRuleOrder( scanner->scanFile(
-                                                       filePath, maxLines, cancelled.get() ) );
-                                               } catch ( ... ) {
-                                                   // E.g. out of memory: better no values than a
-                                                   // dead host.
-                                                   return {};
-                                               }
-                                           } ) );
+    watcher->setFuture( QtConcurrent::run(
+        &pool_,
+        [ scanner = scanner_, filePath = activeFile_, progress = progress_, maxLines = maxLines_,
+          cancelled ]() -> Scan {
+            try {
+                return scanner->scanFrom( filePath, progress, maxLines, cancelled.get() );
+            } catch ( ... ) {
+                // E.g. out of memory: better no values than a dead host.
+                return {};
+            }
+        } ) );
 }
 
 void FooterController::watchActiveFile()
 {
-    // A log that was rotated or replaced drops out of the watcher.
-    if ( !fileWatcher_.files().contains( activeFile_ ) && QFileInfo::exists( activeFile_ ) ) {
+    if ( !QFileInfo::exists( activeFile_ ) ) {
+        // Rotated away or not created yet: wait in its directory for it.
+        fileWatcher_.removePath( activeFile_ );
+        const auto dir = QFileInfo( activeFile_ ).absolutePath();
+        if ( watchedDir_ != dir && QFileInfo::exists( dir ) ) {
+            unwatch();
+            if ( fileWatcher_.addPath( dir ) ) {
+                watchedDir_ = dir;
+            }
+        }
+        return;
+    }
+
+    if ( !watchedDir_.isEmpty() ) {
+        fileWatcher_.removePath( watchedDir_ );
+        watchedDir_.clear();
+    }
+    if ( !fileWatcher_.files().contains( activeFile_ ) ) {
         fileWatcher_.addPath( activeFile_ );
     }
+}
+
+void FooterController::unwatch()
+{
+    const auto paths = fileWatcher_.files() + fileWatcher_.directories();
+    if ( !paths.isEmpty() ) {
+        fileWatcher_.removePaths( paths );
+    }
+    watchedDir_.clear();
 }
 
 void FooterController::show( const Values& values )

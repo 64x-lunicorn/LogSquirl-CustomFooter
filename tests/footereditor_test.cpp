@@ -297,21 +297,44 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
         {
             ui.rules->item( 1, 1 )->setText( "A" );
 
-            THEN( "the duplicate key is marked and the rules cannot be saved" )
+            THEN( "the rules are alternatives for the key and can be saved" )
+            {
+                REQUIRE( ui.rules->item( 1, 1 )->toolTip().isEmpty() );
+                REQUIRE( ui.rules->item( 0, 1 )->toolTip().isEmpty() );
+                REQUIRE( ui.canAccept() );
+            }
+        }
+
+        WHEN( "an enabled rule with a line pattern loses its key" )
+        {
+            ui.rules->item( 1, 1 )->setText( " " );
+
+            THEN( "the key is marked and the rules cannot be saved" )
             {
                 REQUIRE_FALSE( ui.rules->item( 1, 1 )->toolTip().isEmpty() );
-                REQUIRE( ui.rules->item( 0, 1 )->toolTip().isEmpty() );
                 REQUIRE_FALSE( ui.canAccept() );
             }
 
-            AND_WHEN( "one of them is disabled" )
+            AND_WHEN( "the rule is disabled" )
             {
-                ui.setEnabled( 0, false );
+                ui.setEnabled( 1, false );
 
                 THEN( "the rules can be saved" )
                 {
+                    REQUIRE( ui.rules->item( 1, 1 )->toolTip().isEmpty() );
                     REQUIRE( ui.canAccept() );
                 }
+            }
+        }
+
+        WHEN( "a rule has neither key nor line pattern yet" )
+        {
+            ui.rules->item( 1, 1 )->setText( "" );
+            ui.rules->item( 1, 2 )->setText( "" );
+
+            THEN( "the rules can still be saved" )
+            {
+                REQUIRE( ui.canAccept() );
             }
         }
     }

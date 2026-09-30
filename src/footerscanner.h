@@ -21,6 +21,7 @@
 
 #include "footerentry.h"
 
+#include <QDateTime>
 #include <QList>
 #include <QMap>
 #include <QPair>
@@ -31,15 +32,19 @@
 #include <atomic>
 #include <optional>
 
+class QFile;
+
 namespace custom_footer {
 
 /**
  * Scans a log file and extracts the first match per enabled FooterEntry.
  *
- * The rules are compiled once on construction. A rule is skipped, and
- * reported in problems(), if one of its patterns is invalid or if an earlier
- * enabled rule already uses its key: per key, the first rule in list order
- * wins.
+ * The rules are compiled once on construction. Rules sharing a key are
+ * alternatives: the key's value comes from the first line that any of its
+ * rules matches; if several of them match that line, the first rule in list
+ * order wins. An enabled rule without a line pattern is incomplete and
+ * skipped; one with a line pattern but without a key, or with an invalid
+ * pattern, is skipped and reported in problems().
  */
 class FooterScanner {
 public:
@@ -50,6 +55,29 @@ public:
 
     /// A scan stops after this many bytes, whatever maxLines says.
     static constexpr qint64 kMaxScanBytes = 64 * 1024 * 1024;
+
+    /// Bytes compared at the start and before the end of the scanned part of
+    /// a file, to tell whether it is still the file scanned before.
+    static constexpr qint64 kIdentityBytes = 256;
+
+    /// How far a file has been scanned, to continue there once it has grown.
+    struct Progress {
+        qint64 offset = 0;             ///< End of the last complete line scanned.
+        int lines = 0;                 ///< Complete lines scanned.
+        QMap<QString, QString> values; ///< Found in those lines.
+        bool done = false;             ///< Every key has a value, or a limit was reached.
+        QByteArray head;               ///< The file's first bytes, up to offset.
+        QByteArray tail;               ///< The bytes just before offset.
+        QDateTime birthTime;           ///< Invalid where the platform has none.
+    };
+
+    struct Scan {
+        /// Found so far, including in a last line that is not terminated yet.
+        QMap<QString, QString> values;
+        Progress progress;
+        /// Whether the scan continued from the given progress.
+        bool resumed = false;
+    };
 
     explicit FooterScanner( const QList<FooterEntry>& entries );
 
@@ -62,9 +90,10 @@ public:
     /**
      * Scan a log file for matching key-value pairs.
      *
-     * For each rule, the first line its linePattern matches (and its
-     * valuePattern, if set) provides the value: the first capturing group, or
-     * the full match without one. Mappings are then applied.
+     * For each key, the first line that one of its rules matches provides the
+     * value: the linePattern must match, and the valuePattern too if set; the
+     * value is the first capturing group, or the full match without one.
+     * Mappings are then applied.
      *
      * @param filePath   Path to the log file.
      * @param maxLines   Maximum number of lines to scan (0 = unlimited).
@@ -74,7 +103,23 @@ public:
     QMap<QString, QString> scanFile( const QString& filePath, int maxLines = kDefaultMaxLines,
                                      const std::atomic_bool* cancelled = nullptr ) const;
 
-    /// The given values as key-value pairs, in rule order.
+    /**
+     * Scan a file, continuing where a scan of the same file stopped.
+     *
+     * Where the file only grew since @p from, only the bytes appended since
+     * are read, and only while keys are missing and the limits allow. A file
+     * that shrank, or whose start or scanned end differs, or with another
+     * birth time, was replaced and is scanned from its start. A last line
+     * without a line break is matched but not remembered in the progress, as
+     * it may still be being written.
+     *
+     * A cancelled scan returns no values and empty progress.
+     */
+    Scan scanFrom( const QString& filePath, const Progress& from, int maxLines = kDefaultMaxLines,
+                   const std::atomic_bool* cancelled = nullptr ) const;
+
+    /// The given values as key-value pairs, once per key, at the position of
+    /// the key's first rule.
     QList<QPair<QString, QString>> inRuleOrder( const QMap<QString, QString>& values ) const;
 
     /// Compile the entries and scan a file in one go.
@@ -95,7 +140,11 @@ private:
     /// The value a rule extracts from a line, if it matches.
     std::optional<QString> valueOf( const Rule& rule, const QString& line ) const;
 
+    /// Whether the file is still the one the progress was made on.
+    static bool continues( QFile& file, const Progress& from );
+
     QList<Rule> rules_;
+    QStringList keys_; ///< Distinct keys, in the order of their first rule.
     QStringList problems_;
 };
 

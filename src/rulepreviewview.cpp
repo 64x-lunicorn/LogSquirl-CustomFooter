@@ -98,6 +98,11 @@ void RulePreviewView::showNoRule()
     showMessage( tr( "Select a rule to preview what it finds in the active file." ) );
 }
 
+void RulePreviewView::showRuleProblem( const QString& problem )
+{
+    showMessage( tr( "This rule cannot match anything yet: %1" ).arg( problem ) );
+}
+
 void RulePreviewView::showUpdating()
 {
     updating_->show();

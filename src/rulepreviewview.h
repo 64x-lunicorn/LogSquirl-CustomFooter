@@ -56,6 +56,9 @@ public:
     /// Show that no rule is selected.
     void showNoRule();
 
+    /// Show why the rule cannot match yet, e.g. an unfinished simple rule.
+    void showRuleProblem( const QString& problem );
+
     /// The number of matching lines, and how much of the file they are in.
     static QString countText( const FooterScanner::Preview& preview );
 

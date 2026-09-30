@@ -647,6 +647,42 @@ SCENARIO( "The editor previews the selected rule against the active file",
     }
 }
 
+SCENARIO( "The editor's preview explains an unfinished simple rule", "[preview][simplemode]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/users.log";
+    writeBytes( path, "user=alice, id=1\n" );
+
+    GIVEN( "a simple rule previewed against a file" )
+    {
+        FooterEditor editor( { { "User", "user=\\s*([^,]*[^,\\s])", "", true, {} } } );
+        auto* previewer = child<RulePreviewer>( editor, "rulePreviewer" );
+        previewer->setDelays( 0, 0 );
+        auto* message = child<QLabel>( editor, "previewMessage" );
+        auto* line = child<QTextEdit>( editor, "previewLine" );
+        editor.setActiveFile( path );
+        previewer->flush();
+        REQUIRE( processUntil( [ previewer ] { return !previewer->isBusy(); } ) );
+        REQUIRE_FALSE( line->isHidden() );
+
+        WHEN( "its end character is removed, so it has no pattern yet" )
+        {
+            child<QLineEdit>( editor, "endCharacterEdit" )->setText( "" );
+            QCoreApplication::processEvents();
+
+            THEN( "the preview shows the problem, not that nothing matches" )
+            {
+                REQUIRE( message->text()
+                         == "This rule cannot match anything yet: Enter the character the "
+                            "value ends at" );
+                REQUIRE( line->isHidden() );
+                REQUIRE_FALSE( previewer->isBusy() );
+            }
+        }
+    }
+}
+
 SCENARIO( "The preview section counts matches in readable words", "[preview]" )
 {
     Preview preview;

@@ -27,6 +27,7 @@
 #include "simplerule.h"
 #include "rulepreviewer.h"
 #include "rulepreviewview.h"
+#include "simplerule.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -546,6 +547,20 @@ void FooterEditor::schedulePreview( RulePreviewer::Start start )
     if ( row < 0 ) {
         previewer_->clear();
         panel_->previewView()->showNoRule();
+        return;
+    }
+    // A rule without a pattern because of a problem, e.g. an unfinished
+    // simple rule: the problem says more than "no line pattern".
+    const auto problems = model_->problems( row );
+    if ( model_->entry( row ).linePattern.isEmpty() && !problems.isEmpty() ) {
+        previewer_->clear();
+        for ( const auto& problem : { problems.endCharacter, problems.key, problems.linePattern,
+                                      problems.valuePattern } ) {
+            if ( !problem.isEmpty() ) {
+                panel_->previewView()->showRuleProblem( problem );
+                break;
+            }
+        }
         return;
     }
     previewer_->schedule( model_->entries(), row, start );

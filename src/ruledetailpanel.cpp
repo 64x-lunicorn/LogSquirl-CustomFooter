@@ -20,6 +20,7 @@
 #include "ruledetailpanel.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -32,6 +33,7 @@
 #include <QVBoxLayout>
 
 #include <limits>
+#include <utility>
 
 namespace custom_footer {
 
@@ -85,13 +87,50 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
 
     keyEdit_ = addField( form, tr( "&Key:" ), "keyEdit", &keyProblem_ );
     keyEdit_->setPlaceholderText( tr( "Shown in the footer, e.g. VIN" ) );
+
+    // ── Simple mode: the text before the value, and where it ends ────────
+    textBeforeEdit_ = new QLineEdit( this );
+    textBeforeEdit_->setObjectName( "textBeforeEdit" );
+    textBeforeEdit_->setMaxLength( std::numeric_limits<int>::max() );
+    textBeforeEdit_->setPlaceholderText( tr( "Matched literally, e.g. VIN:" ) );
+    watchField( textBeforeEdit_ );
+    auto* textBeforeLabel = new QLabel( tr( "&Text before the value:" ), this );
+    textBeforeLabel->setBuddy( textBeforeEdit_ );
+    form->addRow( textBeforeLabel, textBeforeEdit_ );
+
+    auto* valueEnd = new QWidget( this );
+    auto* valueEndLayout = new QHBoxLayout( valueEnd );
+    valueEndLayout->setContentsMargins( 0, 0, 0, 0 );
+    valueEndCombo_ = new QComboBox( valueEnd );
+    valueEndCombo_->setObjectName( "valueEndCombo" );
+    valueEndCombo_->addItem( tr( "Whitespace" ), static_cast<int>( ValueEnd::Whitespace ) );
+    valueEndCombo_->addItem( tr( "End of line" ), static_cast<int>( ValueEnd::EndOfLine ) );
+    valueEndCombo_->addItem( tr( "Character" ), static_cast<int>( ValueEnd::Character ) );
+    valueEndLayout->addWidget( valueEndCombo_ );
+    endCharacterEdit_ = new QLineEdit( valueEnd );
+    endCharacterEdit_->setObjectName( "endCharacterEdit" );
+    endCharacterEdit_->setMaxLength( 1 );
+    endCharacterEdit_->setPlaceholderText( QStringLiteral( "," ) );
+    endCharacterEdit_->setToolTip(
+        tr( "The character before which the value ends, e.g. a comma or a semicolon" ) );
+    endCharacterEdit_->setMaximumWidth( 4 * fontMetrics().horizontalAdvance( QLatin1Char( 'M' ) ) );
+    watchField( endCharacterEdit_ );
+    valueEndLayout->addWidget( endCharacterEdit_ );
+    valueEndLayout->addStretch();
+    auto* valueEndLabel = new QLabel( tr( "Value &ends at:" ), this );
+    valueEndLabel->setBuddy( valueEndCombo_ );
+    form->addRow( valueEndLabel, valueEnd );
+    simpleRows_ = { textBeforeLabel, textBeforeEdit_, valueEndLabel, valueEnd };
+
+    // ── Advanced mode: the patterns themselves ───────────────────────────
+    advancedCheck_ = new QCheckBox( tr( "&Advanced: edit the patterns" ), this );
+    advancedCheck_->setObjectName( "advancedCheck" );
+    form->addRow( QString(), advancedCheck_ );
+
     linePatternEdit_
         = addField( form, tr( "&Line pattern:" ), "linePatternEdit", &linePatternProblem_ );
-    linePatternEdit_->setPlaceholderText( tr( "Regex finding the line, e.g. VIN:\\s+(\\S+)" ) );
     valuePatternEdit_
         = addField( form, tr( "&Value pattern:" ), "valuePatternEdit", &valuePatternProblem_ );
-    valuePatternEdit_->setPlaceholderText(
-        tr( "Optional regex for the value in the line, e.g. :\\s+(\\S+)$" ) );
 
     // ── Its value mappings ───────────────────────────────────────────────
     auto* mappings = new QWidget( this );
@@ -130,8 +169,15 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
 
     // ── Connections ──────────────────────────────────────────────────────
     connect( enabledCheck_, &QCheckBox::toggled, this, &RuleDetailPanel::edited );
-    for ( auto* field : { keyEdit_, linePatternEdit_, valuePatternEdit_ } ) {
-        connect( field, &QLineEdit::textChanged, this, &RuleDetailPanel::edited );
+    connect( keyEdit_, &QLineEdit::textChanged, this, &RuleDetailPanel::edited );
+    for ( auto* field : { textBeforeEdit_, endCharacterEdit_ } ) {
+        connect( field, &QLineEdit::textChanged, this, &RuleDetailPanel::simpleFieldEdited );
+    }
+    connect( valueEndCombo_, &QComboBox::currentIndexChanged, this,
+             &RuleDetailPanel::valueEndChosen );
+    connect( advancedCheck_, &QCheckBox::toggled, this, &RuleDetailPanel::advancedToggled );
+    for ( auto* field : { linePatternEdit_, valuePatternEdit_ } ) {
+        connect( field, &QLineEdit::textChanged, this, &RuleDetailPanel::patternEdited );
     }
     connect( mappingTable_, &QTableWidget::cellChanged, this, &RuleDetailPanel::edited );
     connect( mappingTable_, &QTableWidget::currentCellChanged, this,
@@ -155,8 +201,11 @@ void RuleDetailPanel::showEntry( const FooterEntry& entry )
         valuePatternEdit_->setText( entry.valuePattern );
         setMappings( entry.mappings );
     }
-    for ( auto* field : { keyEdit_, linePatternEdit_, valuePatternEdit_ } ) {
-        revertText_[ field ] = field->text();
+    const auto simple = simpleRuleOf( entry );
+    setSimpleFields( simple.value_or( SimpleRule() ) );
+    setAdvanced( !simple );
+    for ( auto field = revertText_.begin(); field != revertText_.end(); ++field ) {
+        field.value() = field.key()->text();
     }
     setEnabled( true );
     updateMappingButtons();
@@ -167,6 +216,12 @@ void RuleDetailPanel::showNoEntry()
     showEntry( FooterEntry() );
     setProblems( RuleProblems() );
     setEnabled( false );
+}
+
+void RuleDetailPanel::showEnabled( bool enabled )
+{
+    const QSignalBlocker blocker( enabledCheck_ );
+    enabledCheck_->setChecked( enabled );
 }
 
 FooterEntry RuleDetailPanel::entry() const
@@ -237,6 +292,65 @@ bool RuleDetailPanel::eventFilter( QObject* watched, QEvent* event )
     return QGroupBox::eventFilter( watched, event );
 }
 
+void RuleDetailPanel::advancedToggled( bool advanced )
+{
+    if ( advanced ) {
+        // The patterns stay as they are, now editable.
+        setAdvanced( true );
+        return;
+    }
+
+    const auto linePattern = linePatternEdit_->text();
+    const auto valuePattern = valuePatternEdit_->text();
+    const auto simple = simpleRuleOf( linePattern, valuePattern );
+    if ( !simple ) {
+        // Not offered then; the check box is disabled.
+        setAdvanced( true );
+        return;
+    }
+    // Keep the simple fields if they still make these patterns, e.g. a text
+    // whose end character is missing, which makes no pattern at all.
+    const bool fieldsMatch
+        = valuePattern.isEmpty() && simpleLinePattern( simpleRule() ) == linePattern;
+    if ( !fieldsMatch ) {
+        setSimpleFields( *simple );
+    }
+    setAdvanced( false );
+}
+
+void RuleDetailPanel::simpleFieldEdited()
+{
+    if ( advanced_ ) {
+        return;
+    }
+    FooterEntry generated;
+    applySimpleRule( simpleRule(), generated );
+    {
+        const QSignalBlocker lineBlocker( linePatternEdit_ );
+        const QSignalBlocker valueBlocker( valuePatternEdit_ );
+        linePatternEdit_->setText( generated.linePattern );
+        valuePatternEdit_->setText( generated.valuePattern );
+    }
+    Q_EMIT edited();
+}
+
+void RuleDetailPanel::valueEndChosen()
+{
+    const bool atCharacter = simpleRule().valueEnd == ValueEnd::Character;
+    endCharacterEdit_->setEnabled( atCharacter );
+    if ( atCharacter && endCharacterEdit_->text().isEmpty() ) {
+        const QSignalBlocker blocker( endCharacterEdit_ );
+        endCharacterEdit_->setText( QStringLiteral( "," ) );
+    }
+    simpleFieldEdited();
+}
+
+void RuleDetailPanel::patternEdited()
+{
+    updateAdvancedCheck();
+    Q_EMIT edited();
+}
+
 void RuleDetailPanel::addMapping()
 {
     const int row = mappingTable_->rowCount();
@@ -278,8 +392,7 @@ QLineEdit* RuleDetailPanel::addField( QFormLayout* form, const QString& label,
     field->setObjectName( objectName );
     // Not the default 32767 characters, which would cut long patterns.
     field->setMaxLength( std::numeric_limits<int>::max() );
-    field->installEventFilter( this );
-    revertText_.insert( field, QString() );
+    watchField( field );
 
     auto* problem = new QLabel( this );
     problem->setObjectName( objectName.chopped( 4 ) + "Problem" ); // keyEdit → keyProblem
@@ -298,6 +411,70 @@ QLineEdit* RuleDetailPanel::addField( QFormLayout* form, const QString& label,
     buddy->setBuddy( field );
     form->addRow( buddy, column );
     return field;
+}
+
+void RuleDetailPanel::watchField( QLineEdit* field )
+{
+    field->installEventFilter( this );
+    revertText_.insert( field, QString() );
+}
+
+void RuleDetailPanel::setSimpleFields( const SimpleRule& rule )
+{
+    const QSignalBlocker textBlocker( textBeforeEdit_ );
+    const QSignalBlocker endBlocker( valueEndCombo_ );
+    const QSignalBlocker characterBlocker( endCharacterEdit_ );
+    textBeforeEdit_->setText( rule.textBefore );
+    valueEndCombo_->setCurrentIndex(
+        valueEndCombo_->findData( static_cast<int>( rule.valueEnd ) ) );
+    endCharacterEdit_->setText( rule.endCharacter.isNull() ? QString()
+                                                           : QString( rule.endCharacter ) );
+    endCharacterEdit_->setEnabled( rule.valueEnd == ValueEnd::Character );
+}
+
+SimpleRule RuleDetailPanel::simpleRule() const
+{
+    SimpleRule rule;
+    rule.textBefore = textBeforeEdit_->text();
+    rule.valueEnd = static_cast<ValueEnd>( valueEndCombo_->currentData().toInt() );
+    const auto character = endCharacterEdit_->text();
+    rule.endCharacter = character.isEmpty() ? QChar() : character.at( 0 );
+    return rule;
+}
+
+void RuleDetailPanel::setAdvanced( bool advanced )
+{
+    advanced_ = advanced;
+    {
+        const QSignalBlocker blocker( advancedCheck_ );
+        advancedCheck_->setChecked( advanced );
+    }
+    for ( auto* widget : std::as_const( simpleRows_ ) ) {
+        widget->setVisible( !advanced );
+    }
+    linePatternEdit_->setReadOnly( !advanced );
+    valuePatternEdit_->setReadOnly( !advanced );
+    if ( advanced ) {
+        linePatternEdit_->setPlaceholderText( tr( "Regex finding the line, e.g. VIN:\\s+(\\S+)" ) );
+        valuePatternEdit_->setPlaceholderText(
+            tr( "Optional regex for the value in the line, e.g. :\\s+(\\S+)$" ) );
+    }
+    else {
+        linePatternEdit_->setPlaceholderText( tr( "Made from the text before the value" ) );
+        valuePatternEdit_->setPlaceholderText( tr( "Not needed: the line pattern has the value" ) );
+    }
+    updateAdvancedCheck();
+}
+
+void RuleDetailPanel::updateAdvancedCheck()
+{
+    const bool canSwitch
+        = !advanced_ || simpleRuleOf( linePatternEdit_->text(), valuePatternEdit_->text() );
+    advancedCheck_->setEnabled( canSwitch );
+    advancedCheck_->setToolTip(
+        canSwitch ? tr( "Edit the line and value patterns as regular expressions" )
+                  : tr( "Simple mode needs a line pattern made from a text before the value, "
+                        "and no value pattern" ) );
 }
 
 void RuleDetailPanel::setMappings( const QList<ValueMapping>& mappings )

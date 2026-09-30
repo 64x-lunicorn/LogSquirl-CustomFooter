@@ -324,9 +324,10 @@ void FooterEditor::storePanelInCurrentRule()
 
 void FooterEditor::ruleChanged( int row )
 {
-    // Enabled or disabled in the list.
+    // Enabled or disabled in the list. Showing the whole rule again would
+    // put it back into simple mode after a switch to advanced.
     if ( row == currentRow() ) {
-        panel_->showEntry( model_->entry( row ) );
+        panel_->showEnabled( model_->entry( row ).enabled );
     }
     validateRow( row );
     showProblems();

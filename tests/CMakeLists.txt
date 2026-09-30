@@ -32,6 +32,7 @@ add_executable(logsquirl_custom_footer_tests
     ruledragdrop_test.cpp
     configroundtrip_test.cpp
     simplerule_test.cpp
+    simplemode_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES

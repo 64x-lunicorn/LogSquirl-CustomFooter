@@ -164,7 +164,10 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
 /// Called when the user clicks "Custom Footer…" in the Plugins menu.
 static void onEditorMenuAction( void* /* userData */ )
 {
-    guarded( "the rule editor", [] { showEditorDialog( nullptr ); } );
+    guarded( "the rule editor", [] {
+        const auto* footer = custom_footer::g_state.footerWidget;
+        showEditorDialog( footer ? footer->window() : nullptr );
+    } );
 }
 
 // ── Exported C entry points ──────────────────────────────────────────────
@@ -255,10 +258,10 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
 {
-    (void)parent_widget;
     // The editor is opened via the Plugins menu action.
-    // configure() also opens it as a convenience.
-    guarded( "the rule editor", [] { showEditorDialog( nullptr ); } );
+    // configure() also opens it as a convenience, over the host's window.
+    guarded( "the rule editor",
+             [ parent_widget ] { showEditorDialog( static_cast<QWidget*>( parent_widget ) ); } );
 }
 
 } // extern "C"

@@ -47,7 +47,7 @@ sequenceDiagram
     Note over Host,Plugin: User clicks "Custom Footer…" in Plugins menu
 
     Host->>Plugin: onEditorMenuAction() callback
-    Plugin->>Plugin: Open FooterEditor dialog
+    Plugin->>Plugin: Open FooterEditor dialog over the main window
     Plugin->>Plugin: User edits rules, clicks OK
     Plugin->>Plugin: FooterConfig::saveEntries()
     Plugin->>Plugin: FooterController::reloadConfig()

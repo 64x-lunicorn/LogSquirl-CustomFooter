@@ -27,13 +27,16 @@
 #include "footerconfig.h"
 #include "logsquirl_plugin_api.h"
 
+#include <QApplication>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 #include <QWidget>
 
 extern "C" int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
@@ -144,6 +147,24 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             THEN( "that file's values are shown" )
             {
                 REQUIRE( waitForText( "SECOND" ) );
+            }
+        }
+
+        WHEN( "the rule editor is opened through configure()" )
+        {
+            QWidget hostWindow;
+            QWidget* editorParent = nullptr;
+            QTimer::singleShot( 0, [ &editorParent ] {
+                if ( auto* dialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() ) ) {
+                    editorParent = dialog->parentWidget();
+                    dialog->reject();
+                }
+            } );
+            logsquirl_plugin_configure( &hostWindow );
+
+            THEN( "it is parented to the widget the host passed" )
+            {
+                REQUIRE( editorParent == &hostWindow );
             }
         }
 

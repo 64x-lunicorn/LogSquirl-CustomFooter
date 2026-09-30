@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rules were read from and written to `/custom_footer.ini`; they are now
   neither loaded nor saved, and a warning is logged. A failed save is logged
   too.
+- **Editor parent** — the rule editor opened through `configure()` ignored
+  the parent window the host passed, and the one from the Plugins menu had
+  none; both now open over LogSquirl's main window.
 - **Exceptions at the C boundary** — an exception in an entry point or host
   callback, e.g. out of memory while scanning, is now logged instead of
   crossing into the host.

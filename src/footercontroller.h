@@ -78,7 +78,13 @@ public:
     /// it to be created again.
     bool isWaitingForActiveFile() const
     {
-        return fileWatcher_.isWaitingForFile();
+        return fileWatcher_->isWaitingForFile();
+    }
+
+    /// How many scans were started; for tests.
+    int scansStarted() const
+    {
+        return scans_.started();
     }
 
 private:
@@ -103,7 +109,7 @@ private:
     FooterScanner::Progress progress_;
 
     /// Watches the active file, or its directory while it is missing.
-    ActiveFileWatcher fileWatcher_{ kRescanDelayMs };
+    ActiveFileWatcher* fileWatcher_ = new ActiveFileWatcher( kRescanDelayMs, this );
 
     /// The active file is to be scanned again once the running scan finished.
     bool rescanPending_ = false;

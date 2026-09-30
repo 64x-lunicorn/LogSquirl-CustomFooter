@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <QDateTime>
 #include <QFileSystemWatcher>
 #include <QObject>
 #include <QString>
@@ -38,6 +39,12 @@ namespace custom_footer {
  * watched at its path. While the file is missing, e.g. after it was rotated
  * away, its directory is watched instead, and changed() is emitted once
  * the file is there again.
+ *
+ * Some systems report reading the file as a change of it, e.g. of its
+ * access time, so an owner reacting to every notification would read the
+ * file again and again. A notification is therefore reported only if the
+ * file's size, modification or birth time, or its existence differ from
+ * when the owner last read it (watch()) or the last change was reported.
  */
 class ActiveFileWatcher : public QObject {
     Q_OBJECT
@@ -100,6 +107,21 @@ private Q_SLOTS:
     void directoryChanged( const QString& path );
 
 private:
+    /// What tells a change of the file's content or identity.
+    struct Stamp {
+        bool exists = false;
+        qint64 size = -1;
+        QDateTime modified;
+        QDateTime birth;
+
+        bool operator==( const Stamp& other ) const
+        {
+            return exists == other.exists && size == other.size && modified == other.modified
+                   && birth == other.birth;
+        }
+    };
+    static Stamp stampOf( const QString& filePath );
+
     void unwatch();
 
     QString file_;
@@ -109,6 +131,8 @@ private:
     QTimer timer_;
     int delayMs_;
     bool systemNotifications_ = true;
+    /// The file as last read by the owner, or as last reported changed.
+    Stamp known_;
 };
 
 } // namespace custom_footer

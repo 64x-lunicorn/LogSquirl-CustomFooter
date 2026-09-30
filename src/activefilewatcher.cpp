@@ -39,11 +39,17 @@ void ActiveFileWatcher::setFile( const QString& filePath )
     timer_.stop();
     unwatch();
     file_ = filePath;
+    known_ = {};
 }
 
 void ActiveFileWatcher::watch()
 {
-    if ( file_.isEmpty() || !systemNotifications_ ) {
+    if ( file_.isEmpty() ) {
+        return;
+    }
+    // The owner reads the file now: later notifications are compared to it.
+    known_ = stampOf( file_ );
+    if ( !systemNotifications_ ) {
         return;
     }
     if ( !QFileInfo::exists( file_ ) ) {
@@ -105,6 +111,12 @@ void ActiveFileWatcher::fileChanged( const QString& path )
     if ( path != file_ ) {
         return;
     }
+    // Only read, e.g. by the owner's own scan: nothing to read again.
+    const auto now = stampOf( file_ );
+    if ( now == known_ ) {
+        return;
+    }
+    known_ = now;
     // The file may have been renamed away, and some watchers would keep
     // following it: watch() watches whatever is at the path then.
     watcher_.removePath( file_ );
@@ -116,6 +128,19 @@ void ActiveFileWatcher::directoryChanged( const QString& path )
     if ( path == watchedDir_ && QFileInfo::exists( file_ ) ) {
         schedule();
     }
+}
+
+ActiveFileWatcher::Stamp ActiveFileWatcher::stampOf( const QString& filePath )
+{
+    const QFileInfo info( filePath );
+    Stamp stamp;
+    stamp.exists = info.exists();
+    if ( stamp.exists ) {
+        stamp.size = info.size();
+        stamp.modified = info.lastModified();
+        stamp.birth = info.birthTime();
+    }
+    return stamp;
 }
 
 void ActiveFileWatcher::unwatch()

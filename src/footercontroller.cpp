@@ -32,7 +32,7 @@ FooterController::FooterController( FooterDisplayWidget* widget, const QString& 
 {
     // Collect the changes of a busy log, without postponing the scan for as
     // long as it keeps changing.
-    connect( &fileWatcher_, &ActiveFileWatcher::changed, this, &FooterController::requestScan );
+    connect( fileWatcher_, &ActiveFileWatcher::changed, this, &FooterController::requestScan );
 
     loadConfig();
 }
@@ -46,7 +46,7 @@ void FooterController::setActiveFile( const QString& filePath )
 {
     if ( filePath != activeFile_ ) {
         activeFile_ = filePath;
-        fileWatcher_.setFile( filePath );
+        fileWatcher_->setFile( filePath );
         progress_ = {};
 
         // The previous file's values must not pass for this file's while it is scanned.
@@ -83,9 +83,9 @@ void FooterController::requestScan()
 
     // Let the running scan of this file finish, or on a busy log no scan
     // would ever finish; then scan on from where it stopped.
-    fileWatcher_.cancelPending();
+    fileWatcher_->cancelPending();
     rescanPending_ = true;
-    fileWatcher_.watch();
+    fileWatcher_->watch();
 }
 
 void FooterController::restartScan()
@@ -99,7 +99,7 @@ void FooterController::restartScan()
 
 void FooterController::startScan()
 {
-    fileWatcher_.cancelPending();
+    fileWatcher_->cancelPending();
     rescanPending_ = false;
 
     if ( activeFile_.isEmpty() ) {
@@ -107,7 +107,7 @@ void FooterController::startScan()
         show( {} );
         return;
     }
-    fileWatcher_.watch();
+    fileWatcher_->watch();
 
     using Scan = FooterScanner::Scan;
     scans_.run(

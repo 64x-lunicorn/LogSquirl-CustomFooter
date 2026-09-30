@@ -79,7 +79,13 @@ generation counter, a cancel flag, and results handed to the GUI thread
 only for the latest job; `stop()` cancels, waits, and drops results not
 yet handed over. Both watch the active file with an `ActiveFileWatcher`,
 which collects changes for a pause, ignores queued changes of a file no
-longer active, and watches the file's directory while it is missing.
+longer active, and watches the file's directory while it is missing. It
+reports a notification only when the file's existence, size,
+modification or birth time differ from when its owner last read it:
+Linux and Windows may report the owner's own reading, e.g. of the access
+time, and the owner would otherwise read the file again every pause for
+as long as it is open. A rewrite to the same size within the file
+system's time resolution goes unnoticed, as for the footer's rescans.
 
 The rule editor's live preview has a worker thread of its own, owned by
 `RulePreviewer`, with the same rules: every request (an edit, another

@@ -154,3 +154,66 @@ SCENARIO( "ActiveFileWatcher follows the active file", "[activefilewatcher]" )
         }
     }
 }
+
+SCENARIO( "ActiveFileWatcher reports only changes of the file's content or identity",
+          "[activefilewatcher]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const auto path = dir.path() + "/active.log";
+    writeBytes( path, "a\n" );
+
+    ActiveFileWatcher watcher( 0 );
+    // The test reports the notifications itself.
+    watcher.setSystemNotifications( false );
+    int changes = 0;
+    QObject::connect( &watcher, &ActiveFileWatcher::changed, [ &changes ] { ++changes; } );
+    const auto notify = [ &watcher, &path ] {
+        REQUIRE( QMetaObject::invokeMethod( &watcher, "fileChanged", Qt::DirectConnection,
+                                            Q_ARG( QString, path ) ) );
+    };
+
+    GIVEN( "a file its owner has read" )
+    {
+        watcher.setFile( path );
+        watcher.watch();
+
+        WHEN( "a notification arrives, but the file is as it was" )
+        {
+            notify();
+
+            THEN( "it is dropped" )
+            {
+                REQUIRE_FALSE( watcher.isPending() );
+                QCoreApplication::processEvents();
+                REQUIRE( changes == 0 );
+            }
+        }
+
+        WHEN( "a notification arrives for a file that grew" )
+        {
+            writeBytes( path, "b\n", true );
+            notify();
+            notify();
+
+            THEN( "one change is reported" )
+            {
+                REQUIRE( watcher.isPending() );
+                REQUIRE( processUntil( [ &changes ] { return changes == 1; } ) );
+                QCoreApplication::processEvents();
+                REQUIRE( changes == 1 );
+            }
+        }
+
+        WHEN( "a notification arrives for a file that was deleted" )
+        {
+            REQUIRE( QFile::remove( path ) );
+            notify();
+
+            THEN( "a change is reported" )
+            {
+                REQUIRE( watcher.isPending() );
+            }
+        }
+    }
+}

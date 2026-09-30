@@ -26,6 +26,7 @@ add_executable(logsquirl_custom_footer_tests
     footercontroller_test.cpp
     footerdisplaywidget_test.cpp
     footereditor_test.cpp
+    configroundtrip_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES

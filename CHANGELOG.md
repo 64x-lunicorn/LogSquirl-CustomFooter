@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread instead of blocking the window; a scan still running when the file
   changes again is cancelled and its values are never shown. The rules are
   read once and again only when they are applied, instead of twice on every
-  file switch.
+  file switch. The footer is cleared as soon as another file becomes active.
 - **Follow mode** — the active file is watched and scanned again shortly
   after it changes, so values that appear later in a growing log show up
   without switching files.

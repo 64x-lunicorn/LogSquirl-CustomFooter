@@ -65,6 +65,9 @@ void FooterController::setActiveFile( const QString& filePath )
             fileWatcher_.removePath( activeFile_ );
         }
         activeFile_ = filePath;
+
+        // The previous file's values must not pass for this file's while it is scanned.
+        show( {} );
     }
     rescan();
 }

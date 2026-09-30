@@ -111,7 +111,7 @@ forward-compatible changes.  See the README for format examples.
 ## Adding a New Feature
 
 1. Extend `FooterEntry` in `footerentry.h` if new per-rule data is needed.
-2. Update `FooterScanner::scan()` to use the new data.
+2. Update `FooterScanner` (compiling and `scanFile()`) to use the new data.
 3. Update `FooterConfig` to persist/load the new field (both INI and JSON).
 4. Update `FooterEditor` to expose the field in the UI.
 5. Add test scenarios in `tests/`.

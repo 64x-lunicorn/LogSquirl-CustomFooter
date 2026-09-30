@@ -122,6 +122,19 @@ SCENARIO( "FooterController scans the active file in the background", "[footerco
             }
         }
 
+        WHEN( "another file becomes active" )
+        {
+            controller.setActiveFile( first );
+            REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "FIRST" ); } ) );
+            controller.setActiveFile( second );
+
+            THEN( "the values of the previous file are gone at once" )
+            {
+                REQUIRE_FALSE( shownText( widget ).contains( "FIRST" ) );
+                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "SECOND" ); } ) );
+            }
+        }
+
         WHEN( "no file is active" )
         {
             controller.setActiveFile( first );

@@ -279,6 +279,7 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
 
         WHEN( "the active file is set again, e.g. because it changed" )
         {
+            previewer.setDelays( 0, 0 );
             previewer.setActiveFile( "/some/file.log" );
             gate.release.release( 2 );
             REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 2; } ) );
@@ -289,6 +290,22 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
                 REQUIRE( gate.calls == 2 );
                 REQUIRE( emitted.patterns == QStringList{ "slow-old", "slow-old" } );
             }
+        }
+
+        WHEN( "the file changes while its preview runs" )
+        {
+            // A pause after a change that no test outlasts.
+            previewer.setDelays( 0, 3600 * 1000 );
+            previewer.setActiveFile( "/some/file.log" );
+            gate.release.release();
+            REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 1; } ) );
+
+            THEN( "it is previewed again only after the pause, never back to back" )
+            {
+                REQUIRE( previewer.previewsStarted() == 1 );
+                REQUIRE( previewer.isBusy() );
+            }
+            previewer.stop();
         }
     }
 }
@@ -574,6 +591,21 @@ SCENARIO( "The editor previews the selected rule against the active file",
             {
                 REQUIRE( processUntil( [ count ] {
                     return count->text() == "3 matching lines in all 7 lines of the file.";
+                } ) );
+            }
+        }
+
+        WHEN( "the file is rotated away and created again" )
+        {
+            REQUIRE( QFile::remove( path ) );
+            REQUIRE( processUntil(
+                [ message ] { return message->text().contains( "cannot be read" ); } ) );
+            writeBytes( path, "mode=0x04\n" );
+
+            THEN( "the new file is previewed once it is there" )
+            {
+                REQUIRE( processUntil( [ count ] {
+                    return count->text() == "1 matching line in the file's only line.";
                 } ) );
             }
         }

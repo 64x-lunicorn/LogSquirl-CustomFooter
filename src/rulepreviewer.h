@@ -19,20 +19,19 @@
 
 #pragma once
 
+#include "activefilewatcher.h"
 #include "footerentry.h"
 #include "footerscanner.h"
+#include "latestjob.h"
 
 #include <QList>
 #include <QObject>
 #include <QString>
-#include <QThreadPool>
 
 #include <atomic>
 #include <functional>
-#include <memory>
 #include <optional>
 
-class QFileSystemWatcher;
 class QTimer;
 
 namespace custom_footer {
@@ -49,10 +48,12 @@ namespace custom_footer {
  * emitted, whatever order results arrive in. Without an active file the
  * preview is made on the GUI thread, as it reads nothing.
  *
- * The active file is watched: when it changes on disk, e.g. a growing log,
- * the preview is made again, after a pause that collects the changes. A
- * running preview of the file is not cancelled for that; it finishes, and
- * one more preview then covers the changes made meanwhile.
+ * The active file is watched as the footer watches it (ActiveFileWatcher):
+ * when it changes on disk, e.g. a growing log, or reappears after it was
+ * rotated away, the preview is made again, after a pause that collects the
+ * changes. A running preview of the file is not cancelled for that; it
+ * finishes, and one more preview covers the changes made meanwhile, again
+ * only after the pause, so a busy log is never scanned back to back.
  *
  * Destroying the previewer, or stop(), cancels a running preview, waits for
  * the worker, and leaves no timer running and no result pending: no code of
@@ -89,7 +90,7 @@ public:
     void setActiveFile( const QString& filePath );
     const QString& activeFile() const
     {
-        return activeFile_;
+        return fileWatcher_->file();
     }
 
     /// The scan's line limit, as configured for the footer. A new limit
@@ -120,11 +121,11 @@ public:
     /// them finished, emitted or dropped as outdated; for tests.
     int previewsStarted() const
     {
-        return previewsStarted_;
+        return previews_.started();
     }
     int previewsFinished() const
     {
-        return previewsFinished_;
+        return previews_.finished();
     }
 
     void setPreviewFunction( PreviewFunction function );
@@ -144,13 +145,12 @@ private:
 
     /// Preview the current request now.
     void start();
-    /// The active file changed on disk.
-    void fileChanged();
-    void watchActiveFile();
-    /// Make the running preview, if any, outdated.
-    void dropRunning();
+    /// The active file changed: preview it again after the pause, or after
+    /// the running preview.
+    void noteChange();
+    /// The pause after a change of the active file has passed.
+    void previewChangedFile();
 
-    QString activeFile_;
     int maxLines_ = FooterScanner::kDefaultMaxLines;
     int editDelayMs_ = kDelayMs;
     PreviewFunction previewFunction_;
@@ -162,20 +162,13 @@ private:
     bool startSoon_ = false;
     QTimer* startTimer_ = nullptr;
 
-    QFileSystemWatcher* fileWatcher_ = nullptr;
-    QTimer* rescanTimer_ = nullptr;
+    /// The active file, with the pause after its changes.
+    ActiveFileWatcher* fileWatcher_ = nullptr;
     /// The file changed while its preview was running: preview it again.
     bool rerun_ = false;
 
-    /// Counts requests; a result is emitted only for the latest one.
-    quint64 generation_ = 0;
-    bool running_ = false;
-    std::shared_ptr<std::atomic_bool> cancelRunning_;
-    int previewsStarted_ = 0;
-    int previewsFinished_ = 0;
-
-    /// One worker thread: a new preview waits for the cancelled one to stop.
-    QThreadPool pool_;
+    /// The previews: only the latest request's result is emitted.
+    LatestJob<Preview> previews_{ this };
 };
 
 } // namespace custom_footer

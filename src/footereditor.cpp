@@ -123,11 +123,13 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     toolLayout->addStretch();
 
     importButton_ = new QToolButton( listSide );
+    importButton_->setObjectName( "importButton" );
     importButton_->setText( tr( "Import" ) );
     importButton_->setToolTip( tr( "Import rules from a JSON file" ) );
     toolLayout->addWidget( importButton_ );
 
     exportButton_ = new QToolButton( listSide );
+    exportButton_->setObjectName( "exportButton" );
     exportButton_->setText( tr( "Export" ) );
     exportButton_->setToolTip( tr( "Export rules to a JSON file" ) );
     toolLayout->addWidget( exportButton_ );
@@ -219,8 +221,17 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
 FooterEditor::~FooterEditor()
 {
-    // No preview may run on while, or after, the widgets are deleted.
+    // While the dialog and its children are torn down, a mapping cell being
+    // edited would commit as it loses the focus, and reach this editor half
+    // destroyed. Commit it now, while everything is whole, then cut the
+    // children off from this editor before any of them dies.
     closing_ = true;
+    panel_->commitPendingEdit();
+    disconnect( panel_, nullptr, this, nullptr );
+    disconnect( model_, nullptr, this, nullptr );
+    disconnect( list_, nullptr, this, nullptr );
+    disconnect( list_->selectionModel(), nullptr, this, nullptr );
+    // No preview may run on while, or after, the widgets are deleted.
     previewer_->stop();
 }
 
@@ -347,19 +358,29 @@ void FooterEditor::updateButtons()
     downButton_->setEnabled( row >= 0 && row < count - 1 );
 }
 
+// The file dialogs and messages are opened with open(), never run in a
+// nested event loop of their own: the plugin may be shut down while they
+// are open, and deleting the editor deletes them.
+
 void FooterEditor::importRules()
 {
     panel_->commitPendingEdit();
-    const auto filePath = QFileDialog::getOpenFileName(
-        this, tr( "Import Rules" ), QString(), tr( "JSON Files (*.json);;All Files (*)" ) );
-    if ( filePath.isEmpty() ) {
-        return;
-    }
+    auto* dialog = new QFileDialog( this, tr( "Import Rules" ), QString(),
+                                    tr( "JSON Files (*.json);;All Files (*)" ) );
+    dialog->setObjectName( "importDialog" );
+    dialog->setAcceptMode( QFileDialog::AcceptOpen );
+    dialog->setFileMode( QFileDialog::ExistingFile );
+    dialog->setAttribute( Qt::WA_DeleteOnClose );
+    connect( dialog, &QFileDialog::fileSelected, this, &FooterEditor::importFrom );
+    dialog->open();
+}
 
+void FooterEditor::importFrom( const QString& filePath )
+{
     QString error;
     const auto imported = FooterConfig::importFromJson( filePath, &error );
     if ( imported.isEmpty() && !error.isEmpty() ) {
-        QMessageBox::warning( this, tr( "Import Error" ), error );
+        showError( tr( "Import Error" ), error, "importErrorBox" );
         return;
     }
 
@@ -369,17 +390,30 @@ void FooterEditor::importRules()
 void FooterEditor::exportRules()
 {
     panel_->commitPendingEdit();
-    const auto filePath = QFileDialog::getSaveFileName(
-        this, tr( "Export Rules" ), QStringLiteral( "footer_rules.json" ),
-        tr( "JSON Files (*.json);;All Files (*)" ) );
-    if ( filePath.isEmpty() ) {
-        return;
-    }
+    auto* dialog = new QFileDialog( this, tr( "Export Rules" ), QString(),
+                                    tr( "JSON Files (*.json);;All Files (*)" ) );
+    dialog->setObjectName( "exportDialog" );
+    dialog->setAcceptMode( QFileDialog::AcceptSave );
+    dialog->selectFile( QStringLiteral( "footer_rules.json" ) );
+    dialog->setAttribute( Qt::WA_DeleteOnClose );
+    connect( dialog, &QFileDialog::fileSelected, this, &FooterEditor::exportTo );
+    dialog->open();
+}
 
+void FooterEditor::exportTo( const QString& filePath )
+{
     if ( !FooterConfig::exportToJson( filePath, entries() ) ) {
-        QMessageBox::warning( this, tr( "Export Error" ),
-                              tr( "Could not write to file: %1" ).arg( filePath ) );
+        showError( tr( "Export Error" ), tr( "Could not write to file: %1" ).arg( filePath ),
+                   "exportErrorBox" );
     }
+}
+
+void FooterEditor::showError( const QString& title, const QString& text, const QString& objectName )
+{
+    auto* box = new QMessageBox( QMessageBox::Warning, title, text, QMessageBox::Ok, this );
+    box->setObjectName( objectName );
+    box->setAttribute( Qt::WA_DeleteOnClose );
+    box->open();
 }
 
 void FooterEditor::showCurrentRule()

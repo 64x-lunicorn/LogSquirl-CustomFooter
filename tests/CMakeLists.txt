@@ -31,6 +31,7 @@ add_executable(logsquirl_custom_footer_tests
     activefilewatcher_test.cpp
     footerdisplaywidget_test.cpp
     footereditor_test.cpp
+    editorlifetime_test.cpp
     ruledragdrop_test.cpp
     rulepreview_test.cpp
     configroundtrip_test.cpp

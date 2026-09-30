@@ -121,7 +121,9 @@ private Q_SLOTS:
     void moveEntryDown();
     void updateButtons();
     void importRules();
+    void importFrom( const QString& filePath );
     void exportRules();
+    void exportTo( const QString& filePath );
     void showCurrentRule();
     void storePanelInCurrentRule();
     void ruleChanged( int row );
@@ -140,6 +142,9 @@ private:
     /// List the problems of all rules, with their current row numbers, from
     /// the problems stored in the model. Validates nothing.
     void listProblems();
+    /// Show a warning without blocking: opened with open().
+    void showError( const QString& title, const QString& text, const QString& objectName );
+
     /// Preview the selected rule, or show that none is.
     void schedulePreview( RulePreviewer::Start start = RulePreviewer::Start::AfterPause );
     /// Show the listed problems below the list, at the panel's fields, and

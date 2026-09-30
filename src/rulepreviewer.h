@@ -130,6 +130,10 @@ public:
 
     void setPreviewFunction( PreviewFunction function );
 
+    /// A monotonic clock in milliseconds, for the pause between previews of
+    /// a changing file; tests set the time themselves.
+    void setClock( std::function<qint64()> clock );
+
 Q_SIGNALS:
     /// A preview was requested; the shown one is outdated until previewed().
     void updating();
@@ -143,8 +147,14 @@ private:
         int rule = -1;
     };
 
+    /// Start the scheduled preview: its pause has passed, or flush().
+    void startScheduled();
     /// Preview the current request now.
     void start();
+    /// Whether changes of the active file are to be previewed: there is a
+    /// request and a file, and no preview of the request is scheduled
+    /// anyway.
+    bool followsFileChanges() const;
     /// The active file changed: preview it again after the pause, or after
     /// the running preview.
     void noteChange();
@@ -157,8 +167,8 @@ private:
 
     /// The latest request, kept to preview it again when the file changes.
     std::optional<Request> request_;
-    /// A start of request_ is scheduled; soon rather than after the pause.
-    bool startPending_ = false;
+    /// A start of request_ is scheduled (startTimer_ runs) soon rather than
+    /// after the pause.
     bool startSoon_ = false;
     QTimer* startTimer_ = nullptr;
 
@@ -166,6 +176,13 @@ private:
     ActiveFileWatcher* fileWatcher_ = nullptr;
     /// The file changed while its preview was running: preview it again.
     bool rerun_ = false;
+    int fileChangeDelayMs_ = kRescanDelayMs;
+    std::function<qint64()> clock_;
+    /// When the last preview of the request finished, by clock_, and the
+    /// preview; a change of the file is previewed no sooner than the pause
+    /// after it, and not at all if it cannot alter it.
+    std::optional<qint64> lastFinished_;
+    std::optional<Preview> lastPreview_;
 
     /// The previews: only the latest request's result is emitted.
     LatestJob<Preview> previews_{ this };

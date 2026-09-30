@@ -59,6 +59,9 @@ public:
     /// Emit changed() after the pause, as for a change of the file.
     void schedule();
 
+    /// Emit changed() after @p delayMs instead, replacing a pending change.
+    void scheduleIn( int delayMs );
+
     /// Drop a change not yet reported.
     void cancelPending();
 
@@ -98,6 +101,7 @@ private:
     QString watchedDir_;
     QFileSystemWatcher watcher_;
     QTimer timer_;
+    int delayMs_;
 };
 
 } // namespace custom_footer

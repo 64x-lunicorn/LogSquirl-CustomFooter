@@ -25,9 +25,9 @@ namespace custom_footer {
 
 ActiveFileWatcher::ActiveFileWatcher( int delayMs, QObject* parent )
     : QObject( parent )
+    , delayMs_( delayMs )
 {
     timer_.setSingleShot( true );
-    timer_.setInterval( delayMs );
     connect( &timer_, &QTimer::timeout, this, &ActiveFileWatcher::changed );
     connect( &watcher_, &QFileSystemWatcher::fileChanged, this, &ActiveFileWatcher::fileChanged );
     connect( &watcher_, &QFileSystemWatcher::directoryChanged, this,
@@ -71,8 +71,13 @@ void ActiveFileWatcher::watch()
 void ActiveFileWatcher::schedule()
 {
     if ( !timer_.isActive() ) {
-        timer_.start();
+        timer_.start( delayMs_ );
     }
+}
+
+void ActiveFileWatcher::scheduleIn( int delayMs )
+{
+    timer_.start( delayMs );
 }
 
 void ActiveFileWatcher::cancelPending()
@@ -82,7 +87,7 @@ void ActiveFileWatcher::cancelPending()
 
 void ActiveFileWatcher::setDelay( int delayMs )
 {
-    timer_.setInterval( delayMs );
+    delayMs_ = delayMs;
 }
 
 void ActiveFileWatcher::fileChanged( const QString& path )

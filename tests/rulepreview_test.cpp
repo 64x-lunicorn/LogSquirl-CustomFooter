@@ -25,6 +25,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "activefilewatcher.h"
 #include "footereditor.h"
 #include "footerscanner.h"
 #include "rulelistmodel.h"
@@ -306,6 +307,118 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
                 REQUIRE( previewer.isBusy() );
             }
             previewer.stop();
+        }
+    }
+}
+
+SCENARIO( "RulePreviewer never previews a changed file back to back", "[preview][previewer]" )
+{
+    GIVEN( "a preview that just finished, with a clock the test sets" )
+    {
+        RulePreviewer previewer;
+        previewer.setPreviewFunction(
+            []( const QString&, const QList<FooterEntry>& entries, int index, int,
+                const std::atomic_bool* ) { return previewOfPattern( entries, index ); } );
+        // Timers that never fire by themselves: the test says when time passes.
+        const int pause = 3600 * 1000;
+        previewer.setDelays( 0, pause );
+        qint64 now = 0;
+        previewer.setClock( [ &now ] { return now; } );
+        previewer.setActiveFile( "/some/file.log" );
+        auto* fileWatcher = previewer.findChild<ActiveFileWatcher*>();
+        REQUIRE( fileWatcher );
+
+        previewer.schedule( { rule( "K", "k" ) }, 0 );
+        previewer.flush();
+        now = 1000;
+        REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
+        REQUIRE( previewer.previewsStarted() == 1 );
+
+        WHEN( "the pause after a change of the file ends right after it finished" )
+        {
+            now = 1010;
+            Q_EMIT fileWatcher->changed();
+
+            THEN( "the file is previewed again only a full pause after that preview" )
+            {
+                REQUIRE( previewer.previewsStarted() == 1 );
+                REQUIRE( previewer.isBusy() );
+                REQUIRE( fileWatcher->isPending() );
+
+                now = 1000 + pause;
+                Q_EMIT fileWatcher->changed();
+                REQUIRE( previewer.previewsStarted() == 2 );
+            }
+        }
+    }
+}
+
+SCENARIO( "RulePreviewer skips previews a change of the file cannot alter", "[preview][previewer]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/grow.log";
+    writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\n" );
+
+    RulePreviewer previewer;
+    previewer.setDelays( 0, 3600 * 1000 );
+    qint64 now = 0;
+    previewer.setClock( [ &now ] { return now; } );
+    previewer.setActiveFile( path );
+    auto* fileWatcher = previewer.findChild<ActiveFileWatcher*>();
+    REQUIRE( fileWatcher );
+    std::vector<Preview> previews;
+    QObject::connect( &previewer, &RulePreviewer::previewed,
+                      [ &previews ]( const Preview& preview ) { previews.push_back( preview ); } );
+
+    const auto previewWith = [ & ]( int maxLines ) {
+        previewer.setMaxLines( maxLines );
+        previewer.schedule( { rule( "X", "x=(\\d+)" ) }, 0 );
+        previewer.flush();
+        REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
+        // Long after it, so only the file decides.
+        now = 1000 * 1000 * 1000;
+    };
+    const auto fileChanged = [ & ] {
+        const int started = previewer.previewsStarted();
+        Q_EMIT fileWatcher->changed();
+        REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
+        return previewer.previewsStarted() > started;
+    };
+
+    GIVEN( "a preview that stopped at the line limit" )
+    {
+        previewWith( 2 );
+        REQUIRE( previews.back().lineLimitReached );
+
+        THEN( "lines appended beyond the limit start no preview" )
+        {
+            writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\nx=6\n" );
+            REQUIRE_FALSE( fileChanged() );
+        }
+        THEN( "a file replaced with other lines is previewed again" )
+        {
+            writeBytes( path, "y=1\nx=9\nx=3\nx=4\nx=5\n" );
+            REQUIRE( fileChanged() );
+            REQUIRE( previews.back().value->value == "9" );
+        }
+    }
+
+    GIVEN( "a preview of the whole file" )
+    {
+        previewWith( 0 );
+        REQUIRE_FALSE( previews.back().limitReached() );
+
+        THEN( "a change that left the file as it was starts no preview" )
+        {
+            writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\n" );
+            REQUIRE_FALSE( fileChanged() );
+        }
+        THEN( "appended lines are previewed" )
+        {
+            writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\nx=6\n" );
+            REQUIRE( fileChanged() );
+            REQUIRE( previews.back().matches == 6 );
         }
     }
 }

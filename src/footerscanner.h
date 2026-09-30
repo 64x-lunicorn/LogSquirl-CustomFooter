@@ -130,6 +130,12 @@ public:
         std::optional<FooterValue> keyValue;
         qint64 keyLineNumber = 0;
 
+        /// What was read of the file, to tell whether a change of it can
+        /// alter the preview (fileUnchangedFor()); no values.
+        Progress read;
+        /// The file's size when the preview was made.
+        qint64 fileSize = 0;
+
         bool limitReached() const
         {
             return lineLimitReached || byteLimitReached;
@@ -190,6 +196,14 @@ public:
     static Preview preview( const QString& filePath, const QList<FooterEntry>& entries, int rule,
                             int maxLines = kDefaultMaxLines,
                             const std::atomic_bool* cancelled = nullptr );
+
+    /**
+     * Whether a change of @p filePath since @p preview was made cannot alter
+     * it: the part of the file read is unchanged, and either the preview
+     * stopped at a limit, so appended lines are beyond it, or the file has
+     * its size still. A truncated or replaced file is changed.
+     */
+    static bool fileUnchangedFor( const QString& filePath, const Preview& preview );
 
     /// The given values, once per key, at the position of the key's first rule.
     QList<FooterValue> footerValues( const Values& values ) const;

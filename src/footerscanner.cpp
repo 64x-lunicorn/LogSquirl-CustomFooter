@@ -493,8 +493,31 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     preview.byteLimitReached = more && ( stoppedInLine || position.offset >= kMaxScanBytes );
     preview.lineLimitReached
         = more && !preview.byteLimitReached && maxLines > 0 && position.lines >= maxLines;
+
+    auto& read = preview.read;
+    read.offset = position.offset;
+    read.lines = position.lines;
+    read.done = preview.limitReached();
+    read.birthTime = QFileInfo( file ).birthTime();
+    read.head = readAt( file, 0, qMin( read.offset, kIdentityBytes ) );
+    const auto tailSize = qMin( read.offset, kIdentityBytes );
+    read.tail = readAt( file, read.offset - tailSize, tailSize );
+    preview.fileSize = file.size();
+
     preview.status = Preview::Status::Scanned;
     return preview;
+}
+
+bool FooterScanner::fileUnchangedFor( const QString& filePath, const Preview& preview )
+{
+    if ( preview.status != Preview::Status::Scanned || preview.filePath != filePath ) {
+        return false;
+    }
+    QFile file( filePath );
+    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, preview.read ) ) {
+        return false;
+    }
+    return preview.limitReached() || file.size() == preview.fileSize;
 }
 
 QList<FooterValue> FooterScanner::footerValues( const Values& values ) const

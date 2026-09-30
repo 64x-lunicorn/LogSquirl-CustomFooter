@@ -25,6 +25,8 @@
 #include "rulelistview.h"
 #include "ruletemplatedialog.h"
 #include "simplerule.h"
+#include "rulepreviewer.h"
+#include "rulepreviewview.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -180,6 +182,20 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( model_, &RuleListModel::aboutToDropRules, panel_,
              &RuleDetailPanel::commitPendingEdit );
 
+    // ── The live preview (#16) ───────────────────────────────────────────
+    // Any change of the rules may change what the selected rule finds, or
+    // which rule of its key supplies the value.
+    previewer_ = new RulePreviewer( this );
+    connect( previewer_, &RulePreviewer::updating, panel_->previewView(),
+             &RulePreviewView::showUpdating );
+    connect( previewer_, &RulePreviewer::previewed, panel_->previewView(),
+             &RulePreviewView::showPreview );
+    connect( model_, &RuleListModel::dataChanged, this, &FooterEditor::schedulePreview );
+    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::schedulePreview );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::schedulePreview );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::schedulePreview );
+    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::schedulePreview );
+
     // A mapping still being typed belongs to the rules that are saved.
     connect( buttonBox_, &QDialogButtonBox::accepted, this, [ this ] {
         panel_->commitPendingEdit();
@@ -199,6 +215,12 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     showCurrentRule();
 }
 
+FooterEditor::~FooterEditor()
+{
+    // No preview may run on while, or after, the widgets are deleted.
+    previewer_->stop();
+}
+
 // ── Public accessors ─────────────────────────────────────────────────────
 
 QList<FooterEntry> FooterEditor::entries() const
@@ -212,6 +234,34 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
     if ( currentRow() < 0 && model_->rowCount() > 0 ) {
         selectRow( 0 );
     }
+}
+
+void FooterEditor::setActiveFile( const QString& filePath )
+{
+    previewer_->setActiveFile( filePath );
+    schedulePreview();
+    previewer_->flush();
+}
+
+QString FooterEditor::activeFile() const
+{
+    return previewer_->activeFile();
+}
+
+void FooterEditor::setMaxLines( int maxLines )
+{
+    previewer_->setMaxLines( maxLines );
+}
+
+void FooterEditor::stopPreview()
+{
+    previewer_->stop();
+}
+
+void FooterEditor::done( int result )
+{
+    previewer_->stop();
+    QDialog::done( result );
 }
 
 // ── Slots ────────────────────────────────────────────────────────────────
@@ -344,6 +394,10 @@ void FooterEditor::showCurrentRule()
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
+
+    // Another rule: no need to wait for typing to pause.
+    schedulePreview();
+    previewer_->flush();
 }
 
 void FooterEditor::storePanelInCurrentRule()
@@ -480,6 +534,17 @@ void FooterEditor::showProblems()
     problemLabel_->setVisible( !valid );
     buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
     buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
+}
+
+void FooterEditor::schedulePreview()
+{
+    const int row = currentRow();
+    if ( row < 0 ) {
+        previewer_->cancel();
+        panel_->previewView()->showNoRule();
+        return;
+    }
+    previewer_->schedule( model_->entries(), row );
 }
 
 QString FooterEditor::patternError( const QString& pattern )

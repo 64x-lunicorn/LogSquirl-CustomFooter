@@ -38,6 +38,7 @@ class RuleDetailPanel;
 class RuleListModel;
 class RuleListView;
 class RuleTemplateDialog;
+class RulePreviewer;
 
 /**
  * Modal dialog for editing footer extraction rules.
@@ -59,12 +60,33 @@ class RuleTemplateDialog;
  * rule with a line pattern but no key, is marked at its field and in the
  * list and blocks OK and Apply. Rules may share a key: they are
  * alternatives for its value.
+ *
+ * The panel previews the selected rule against the active file, which the
+ * plugin passes in with setActiveFile(): shortly after an edit stops, a
+ * RulePreviewer scans the file on a worker thread. Closing or destroying
+ * the dialog cancels a running preview and waits for it.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
 
 public:
     explicit FooterEditor( const QList<FooterEntry>& entries, QWidget* parent = nullptr );
+    ~FooterEditor() override;
+
+    /// The log file the selected rule is previewed against; empty for none.
+    /// The plugin sets it, and again whenever the active file changes.
+    void setActiveFile( const QString& filePath );
+    QString activeFile() const;
+
+    /// The footer's line limit, which the preview scans with too.
+    void setMaxLines( int maxLines );
+
+    /// Cancel a scheduled or running preview and wait for the worker, e.g.
+    /// before the plugin is unloaded.
+    void stopPreview();
+
+    /// Stops the preview before closing.
+    void done( int result ) override;
 
     /// Return the edited list of entries.
     QList<FooterEntry> entries() const;
@@ -119,6 +141,8 @@ private:
     /// List the problems of all rules, with their current row numbers, from
     /// the problems stored in the model. Validates nothing.
     void listProblems();
+    /// Preview the selected rule once edits pause, or show that none is.
+    void schedulePreview();
     /// Show the listed problems below the list, at the panel's fields, and
     /// allow OK and Apply only without any.
     void showProblems();
@@ -137,6 +161,7 @@ private:
     RuleListModel* model_ = nullptr;
     RuleListView* list_ = nullptr;
     RuleDetailPanel* panel_ = nullptr;
+    RulePreviewer* previewer_ = nullptr;
 
     QToolButton* addButton_ = nullptr;
     QToolButton* templateButton_ = nullptr;

@@ -20,6 +20,7 @@
 #pragma once
 
 #include "footerentry.h"
+#include "rulepreviewer.h"
 
 #include <QDialog>
 #include <QHash>
@@ -63,8 +64,10 @@ class RulePreviewer;
  *
  * The panel previews the selected rule against the active file, which the
  * plugin passes in with setActiveFile(): shortly after an edit stops, a
- * RulePreviewer scans the file on a worker thread. Closing or destroying
- * the dialog cancels a running preview and waits for it.
+ * RulePreviewer scans the file on a worker thread, and again when the file
+ * changes. Closing or destroying the dialog cancels a running preview and
+ * waits for it; nothing restarts it afterwards, not even an edit committed
+ * while the dialog closes.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -81,11 +84,7 @@ public:
     /// The footer's line limit, which the preview scans with too.
     void setMaxLines( int maxLines );
 
-    /// Cancel a scheduled or running preview and wait for the worker, e.g.
-    /// before the plugin is unloaded.
-    void stopPreview();
-
-    /// Stops the preview before closing.
+    /// Stops the preview for good before closing.
     void done( int result ) override;
 
     /// Return the edited list of entries.
@@ -141,8 +140,8 @@ private:
     /// List the problems of all rules, with their current row numbers, from
     /// the problems stored in the model. Validates nothing.
     void listProblems();
-    /// Preview the selected rule once edits pause, or show that none is.
-    void schedulePreview();
+    /// Preview the selected rule, or show that none is.
+    void schedulePreview( RulePreviewer::Start start = RulePreviewer::Start::AfterPause );
     /// Show the listed problems below the list, at the panel's fields, and
     /// allow OK and Apply only without any.
     void showProblems();
@@ -162,6 +161,8 @@ private:
     RuleListView* list_ = nullptr;
     RuleDetailPanel* panel_ = nullptr;
     RulePreviewer* previewer_ = nullptr;
+    /// The dialog is closing: no more previews.
+    bool closing_ = false;
 
     QToolButton* addButton_ = nullptr;
     QToolButton* templateButton_ = nullptr;

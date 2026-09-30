@@ -28,6 +28,7 @@
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
 #include "logsquirl_plugin_api.h"
+#include "plugin.h"
 #include "rulepreviewer.h"
 
 #include <QApplication>
@@ -84,6 +85,20 @@ LogSquirlHostApi fakeApi()
               host().activeFileUserData = userData;
           };
     return api;
+}
+
+template <typename Predicate>
+bool processUntil( Predicate done, int boundMs = 10000 )
+{
+    QElapsedTimer timer;
+    timer.start();
+    while ( !done() ) {
+        if ( timer.elapsed() > boundMs ) {
+            return false;
+        }
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    }
+    return true;
 }
 
 bool waitForText( const QString& text, int timeoutMs = 5000 )
@@ -157,72 +172,85 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
         WHEN( "the rule editor is opened through configure()" )
         {
             QWidget hostWindow;
-            QWidget* editorParent = nullptr;
-            QTimer::singleShot( 0, [ &editorParent ] {
-                if ( auto* dialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() ) ) {
-                    editorParent = dialog->parentWidget();
-                    dialog->reject();
-                }
-            } );
             logsquirl_plugin_configure( &hostWindow );
+            QPointer<FooterEditor> editor = g_state.editor;
 
-            THEN( "it is parented to the widget the host passed" )
+            THEN( "it is open without blocking, parented to the widget the host passed" )
             {
-                REQUIRE( editorParent == &hostWindow );
+                REQUIRE( editor );
+                REQUIRE( editor->isVisible() );
+                REQUIRE( editor->parentWidget() == &hostWindow );
+            }
+
+            AND_WHEN( "it is opened again" )
+            {
+                logsquirl_plugin_configure( &hostWindow );
+
+                THEN( "the same editor is kept" )
+                {
+                    REQUIRE( g_state.editor == editor );
+                }
+            }
+
+            AND_WHEN( "it is closed" )
+            {
+                editor->reject();
+                QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+                THEN( "it is deleted" )
+                {
+                    REQUIRE_FALSE( editor );
+                    REQUIRE_FALSE( g_state.editor );
+                }
             }
         }
 
         WHEN( "the rule editor is open while the host switches files" )
         {
-            QString openedWith;
-            QString followed;
-            QTimer::singleShot( 0, [ &openedWith, &followed, &logDir ] {
-                if ( auto* editor
-                     = qobject_cast<FooterEditor*>( QApplication::activeModalWidget() ) ) {
-                    openedWith = editor->activeFile();
-                    const auto second = ( logDir.path() + "/second.log" ).toUtf8();
-                    host().activeFileCallback( host().activeFileUserData, second.constData() );
-                    followed = editor->activeFile();
-                    editor->reject();
-                }
-            } );
             logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            const auto openedWith = editor->activeFile();
+            const auto second = ( logDir.path() + "/second.log" ).toUtf8();
+            host().activeFileCallback( host().activeFileUserData, second.constData() );
 
             THEN( "its preview uses the host's active file, and follows it" )
             {
                 REQUIRE( openedWith == logDir.path() + "/first.log" );
-                REQUIRE( followed == logDir.path() + "/second.log" );
+                REQUIRE( editor->activeFile() == logDir.path() + "/second.log" );
             }
         }
 
-        WHEN( "the plugin is shut down while the rule editor is open" )
+        WHEN( "the plugin is shut down from the event loop while the editor is previewing" )
         {
-            QPointer<FooterEditor> openEditor;
-            bool busyBefore = false;
-            bool busyAfter = true;
-            bool visibleAfter = true;
-            QTimer::singleShot( 0, [ & ] {
-                openEditor = qobject_cast<FooterEditor*>( QApplication::activeModalWidget() );
-                auto* previewer = openEditor
-                                      ? openEditor->findChild<RulePreviewer*>( "rulePreviewer" )
-                                      : nullptr;
-                if ( previewer ) {
-                    // A preview of the active file is scheduled or running.
-                    openEditor->setActiveFile( openEditor->activeFile() );
-                    busyBefore = previewer->isBusy();
-                    logsquirl_plugin_shutdown();
-                    busyAfter = previewer->isBusy();
-                    visibleAfter = openEditor->isVisible();
-                }
-            } );
             logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            QPointer<RulePreviewer> previewer = editor->findChild<RulePreviewer*>();
+            REQUIRE( previewer );
+            REQUIRE( previewer->isBusy() );
+            QList<QPointer<QTimer>> timers;
+            for ( auto* timer : editor->findChildren<QTimer*>() ) {
+                timers.append( timer );
+            }
+            REQUIRE_FALSE( timers.isEmpty() );
 
-            THEN( "its preview was stopped, and the editor closed and deleted" )
+            // As a host would: from its event loop, with no plugin frame on the stack.
+            bool shutDown = false;
+            QTimer::singleShot( 0, [ &shutDown ] {
+                logsquirl_plugin_shutdown();
+                shutDown = true;
+            } );
+            REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
+
+            THEN( "the editor, its previewer and all their timers are gone at once" )
             {
-                REQUIRE( busyBefore );
-                REQUIRE_FALSE( busyAfter );
-                REQUIRE_FALSE( visibleAfter );
-                REQUIRE_FALSE( openEditor );
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( previewer );
+                for ( const auto& timer : timers ) {
+                    REQUIRE_FALSE( timer );
+                }
+                REQUIRE_FALSE( g_state.editor );
             }
         }
 

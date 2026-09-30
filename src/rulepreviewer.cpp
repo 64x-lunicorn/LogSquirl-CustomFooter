@@ -19,7 +19,10 @@
 
 #include "rulepreviewer.h"
 
+#include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QFutureWatcher>
+#include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <utility>
@@ -29,13 +32,33 @@ namespace custom_footer {
 RulePreviewer::RulePreviewer( QObject* parent )
     : QObject( parent )
     , previewFunction_( &FooterScanner::preview )
+    , startTimer_( new QTimer( this ) )
+    , fileWatcher_( new QFileSystemWatcher( this ) )
+    , rescanTimer_( new QTimer( this ) )
 {
     setObjectName( "rulePreviewer" );
     pool_.setMaxThreadCount( 1 );
 
-    delay_.setSingleShot( true );
-    delay_.setInterval( kDelayMs );
-    connect( &delay_, &QTimer::timeout, this, &RulePreviewer::flush );
+    startTimer_->setSingleShot( true );
+    startTimer_->setInterval( kDelayMs );
+    connect( startTimer_, &QTimer::timeout, this, &RulePreviewer::flush );
+
+    rescanTimer_->setSingleShot( true );
+    rescanTimer_->setInterval( kRescanDelayMs );
+    connect( rescanTimer_, &QTimer::timeout, this, [ this ] {
+        if ( running_ ) {
+            rerun_ = true;
+        }
+        else {
+            start();
+        }
+    } );
+    connect( fileWatcher_, &QFileSystemWatcher::fileChanged, this, [ this ] {
+        // The file may have been replaced, and some watchers would keep
+        // following the old one: the next preview watches the path again.
+        fileWatcher_->removePath( activeFile_ );
+        fileChanged();
+    } );
 }
 
 RulePreviewer::~RulePreviewer()
@@ -45,30 +68,102 @@ RulePreviewer::~RulePreviewer()
 
 void RulePreviewer::setActiveFile( const QString& filePath )
 {
+    if ( filePath == activeFile_ ) {
+        fileChanged();
+        return;
+    }
+
+    const auto watched = fileWatcher_->files();
+    if ( !watched.isEmpty() ) {
+        fileWatcher_->removePaths( watched );
+    }
     activeFile_ = filePath;
+    if ( request_ ) {
+        auto request = *request_;
+        schedule( request.entries, request.rule, Start::Soon );
+    }
 }
 
 void RulePreviewer::setMaxLines( int maxLines )
 {
+    if ( maxLines == maxLines_ ) {
+        return;
+    }
     maxLines_ = maxLines;
+    if ( request_ ) {
+        auto request = *request_;
+        schedule( request.entries, request.rule, Start::Soon );
+    }
 }
 
-void RulePreviewer::schedule( const QList<FooterEntry>& entries, int rule )
+void RulePreviewer::setDelays( int editMs, int fileChangeMs )
+{
+    editDelayMs_ = editMs;
+    rescanTimer_->setInterval( fileChangeMs );
+}
+
+void RulePreviewer::schedule( const QList<FooterEntry>& entries, int rule, Start start )
 {
     dropRunning();
-    pending_ = Request{ entries, rule };
-    delay_.start();
+    rescanTimer_->stop();
+    rerun_ = false;
+
+    request_ = Request{ entries, rule };
+    startPending_ = true;
+    // Coalesced with an earlier request that was to start soon, e.g. the
+    // selection moving off a rule that is then removed.
+    startSoon_ = startSoon_ || start == Start::Soon;
+    startTimer_->start( startSoon_ ? 0 : editDelayMs_ );
     Q_EMIT updating();
 }
 
 void RulePreviewer::flush()
 {
-    delay_.stop();
-    if ( !pending_ ) {
+    if ( !startPending_ ) {
         return;
     }
-    const auto request = std::move( *pending_ );
-    pending_.reset();
+    startTimer_->stop();
+    startPending_ = false;
+    startSoon_ = false;
+    start();
+}
+
+void RulePreviewer::clear()
+{
+    startTimer_->stop();
+    rescanTimer_->stop();
+    request_.reset();
+    startPending_ = false;
+    startSoon_ = false;
+    rerun_ = false;
+    dropRunning();
+}
+
+void RulePreviewer::stop()
+{
+    clear();
+    pool_.waitForDone();
+    // Their results are outdated: none may arrive later.
+    const auto watchers = findChildren<QFutureWatcherBase*>( Qt::FindDirectChildrenOnly );
+    qDeleteAll( watchers );
+}
+
+bool RulePreviewer::isBusy() const
+{
+    return startPending_ || running_ || rerun_ || rescanTimer_->isActive();
+}
+
+void RulePreviewer::setPreviewFunction( PreviewFunction function )
+{
+    previewFunction_ = std::move( function );
+}
+
+void RulePreviewer::start()
+{
+    if ( !request_ ) {
+        return;
+    }
+    const auto& request = *request_;
 
     if ( activeFile_.isEmpty() ) {
         // Nothing to read: only the patterns are checked.
@@ -76,6 +171,7 @@ void RulePreviewer::flush()
             FooterScanner::preview( QString(), request.entries, request.rule, maxLines_ ) );
         return;
     }
+    watchActiveFile();
 
     const auto generation = generation_;
     auto cancelled = std::make_shared<std::atomic_bool>( false );
@@ -87,6 +183,7 @@ void RulePreviewer::flush()
     auto* watcher = new QFutureWatcher<Preview>( this );
     connect( watcher, &QFutureWatcher<Preview>::finished, this, [ this, watcher, generation ] {
         watcher->deleteLater();
+        ++previewsFinished_;
         if ( generation != generation_ ) {
             return;
         }
@@ -95,6 +192,11 @@ void RulePreviewer::flush()
         const auto preview = watcher->result();
         if ( preview.status != Preview::Status::Cancelled ) {
             Q_EMIT previewed( preview );
+        }
+        if ( rerun_ ) {
+            // The file changed meanwhile.
+            rerun_ = false;
+            start();
         }
     } );
     watcher->setFuture(
@@ -114,22 +216,27 @@ void RulePreviewer::flush()
                            } ) );
 }
 
-void RulePreviewer::cancel()
+void RulePreviewer::fileChanged()
 {
-    delay_.stop();
-    pending_.reset();
-    dropRunning();
+    if ( !request_ || activeFile_.isEmpty() || startPending_ ) {
+        // Nothing to preview again, or a preview of the file starts anyway.
+        return;
+    }
+    if ( running_ ) {
+        // Let it finish, or on a busy log no preview would ever finish.
+        rerun_ = true;
+        return;
+    }
+    if ( !rescanTimer_->isActive() ) {
+        rescanTimer_->start();
+    }
 }
 
-void RulePreviewer::stop()
+void RulePreviewer::watchActiveFile()
 {
-    cancel();
-    pool_.waitForDone();
-}
-
-void RulePreviewer::setPreviewFunction( PreviewFunction function )
-{
-    previewFunction_ = std::move( function );
+    if ( QFileInfo::exists( activeFile_ ) && !fileWatcher_->files().contains( activeFile_ ) ) {
+        fileWatcher_->addPath( activeFile_ );
+    }
 }
 
 void RulePreviewer::dropRunning()

@@ -146,36 +146,46 @@ static QString activeFilePath()
     return filePath ? QString::fromUtf8( filePath ) : QString();
 }
 
-/// Open the rule editor as a modal dialog over the given parent.
-static void showEditorDialog( QWidget* parent )
+/**
+ * Open the rule editor over the given parent, or raise it if it is open.
+ *
+ * It is not run with exec(): a nested event loop would keep this plugin's
+ * frames on the stack, and the host may shut the plugin down and unload it
+ * from within that loop. The editor lives on the heap instead, OK and Apply
+ * are handled through its signals, and shutdown deletes it at once.
+ */
+static void openEditor( QWidget* parent )
 {
-    const auto dir = configDir();
-    custom_footer::FooterEditor editor( custom_footer::FooterConfig::loadEntries( dir ), parent );
-    editor.setMaxLines( custom_footer::FooterConfig::loadMaxLines( dir ) );
-    editor.setActiveFile( activeFilePath() );
+    auto& st = custom_footer::g_state;
+    if ( st.editor ) {
+        st.editor->raise();
+        st.editor->activateWindow();
+        return;
+    }
 
-    // Known while open, so that the preview follows the active file and
-    // shutdown can stop it; forgotten however the dialog ends.
-    struct OpenEditor {
-        explicit OpenEditor( custom_footer::FooterEditor* editor )
-        {
-            custom_footer::g_state.editor = editor;
-        }
-        ~OpenEditor()
-        {
-            custom_footer::g_state.editor = nullptr;
-        }
-        OpenEditor( const OpenEditor& ) = delete;
-        OpenEditor& operator=( const OpenEditor& ) = delete;
-    } open( &editor );
+    const auto dir = configDir();
+    auto* editor = new custom_footer::FooterEditor( custom_footer::FooterConfig::loadEntries( dir ),
+                                                    parent );
+    editor->setMaxLines( custom_footer::FooterConfig::loadMaxLines( dir ) );
+    editor->setActiveFile( activeFilePath() );
+    st.editor = editor;
 
     // Apply button: save and rescan without closing the dialog.
-    QObject::connect( &editor, &custom_footer::FooterEditor::applied,
-                      [ &editor ]() { saveEntries( editor.entries() ); } );
+    QObject::connect( editor, &custom_footer::FooterEditor::applied, editor, [ editor ] {
+        guarded( "saving the rules", [ editor ] { saveEntries( editor->entries() ); } );
+    } );
+    QObject::connect( editor, &QDialog::finished, editor, [ editor ]( int result ) {
+        guarded( "saving the rules", [ editor, result ] {
+            if ( result == QDialog::Accepted ) {
+                saveEntries( editor->entries() );
+            }
+        } );
+        // Deleted later, as it is still in its own signal; shutdown deletes
+        // it at once if that comes first.
+        editor->deleteLater();
+    } );
 
-    if ( editor.exec() == QDialog::Accepted ) {
-        saveEntries( editor.entries() );
-    }
+    editor->open();
 }
 
 /// Called by the host when the active file changes.
@@ -186,8 +196,8 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
         if ( custom_footer::g_state.controller ) {
             custom_footer::g_state.controller->setActiveFile( path );
         }
-        if ( custom_footer::g_state.editor ) {
-            custom_footer::g_state.editor->setActiveFile( path );
+        if ( auto* editor = custom_footer::g_state.editor.data() ) {
+            editor->setActiveFile( path );
         }
     } );
 }
@@ -197,7 +207,7 @@ static void onEditorMenuAction( void* /* userData */ )
 {
     guarded( "the rule editor", [] {
         const auto* footer = custom_footer::g_state.footerWidget;
-        showEditorDialog( footer ? footer->window() : nullptr );
+        openEditor( footer ? footer->window() : nullptr );
     } );
 }
 
@@ -271,11 +281,11 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         custom_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
 
         // First stop scanning: the host unloads the library after this returns.
-        // An open editor's preview is stopped too, and the editor closed.
-        if ( st.editor ) {
-            st.editor->stopPreview();
-            st.editor->reject();
-        }
+        // The editor too, open or closed but not yet deleted: deleting it
+        // stops its preview and waits for it, and drops its timers and
+        // pending events. Nothing of the plugin is on the stack here, as
+        // the editor runs in the host's event loop, not in one of ours.
+        delete st.editor.data();
         delete st.controller;
         st.controller = nullptr;
 
@@ -296,7 +306,7 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
     // The editor is opened via the Plugins menu action.
     // configure() also opens it as a convenience, over the host's window.
     guarded( "the rule editor",
-             [ parent_widget ] { showEditorDialog( static_cast<QWidget*>( parent_widget ) ); } );
+             [ parent_widget ] { openEditor( static_cast<QWidget*>( parent_widget ) ); } );
 }
 
 } // extern "C"

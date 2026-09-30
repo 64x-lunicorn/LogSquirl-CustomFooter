@@ -190,11 +190,12 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
              &RulePreviewView::showUpdating );
     connect( previewer_, &RulePreviewer::previewed, panel_->previewView(),
              &RulePreviewView::showPreview );
-    connect( model_, &RuleListModel::dataChanged, this, &FooterEditor::schedulePreview );
-    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::schedulePreview );
-    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::schedulePreview );
-    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::schedulePreview );
-    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::schedulePreview );
+    // Edits schedule it where they are stored, once per edit; not on every
+    // dataChanged(), which validation marks emit too.
+    connect( model_, &RuleListModel::rowsInserted, this, [ this ] { schedulePreview(); } );
+    connect( model_, &RuleListModel::rowsRemoved, this, [ this ] { schedulePreview(); } );
+    connect( model_, &RuleListModel::rowsMoved, this, [ this ] { schedulePreview(); } );
+    connect( model_, &RuleListModel::modelReset, this, [ this ] { schedulePreview(); } );
 
     // A mapping still being typed belongs to the rules that are saved.
     connect( buttonBox_, &QDialogButtonBox::accepted, this, [ this ] {
@@ -218,6 +219,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 FooterEditor::~FooterEditor()
 {
     // No preview may run on while, or after, the widgets are deleted.
+    closing_ = true;
     previewer_->stop();
 }
 
@@ -239,8 +241,6 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
 void FooterEditor::setActiveFile( const QString& filePath )
 {
     previewer_->setActiveFile( filePath );
-    schedulePreview();
-    previewer_->flush();
 }
 
 QString FooterEditor::activeFile() const
@@ -253,13 +253,11 @@ void FooterEditor::setMaxLines( int maxLines )
     previewer_->setMaxLines( maxLines );
 }
 
-void FooterEditor::stopPreview()
-{
-    previewer_->stop();
-}
-
 void FooterEditor::done( int result )
 {
+    // Closing may still commit a mapping cell being edited, as its editor
+    // loses the focus; closing_ keeps that from starting a preview.
+    closing_ = true;
     previewer_->stop();
     QDialog::done( result );
 }
@@ -395,9 +393,9 @@ void FooterEditor::showCurrentRule()
     }
     updateButtons();
 
-    // Another rule: no need to wait for typing to pause.
-    schedulePreview();
-    previewer_->flush();
+    // Another rule: no need to wait for typing to pause. Coalesced with the
+    // change that follows, e.g. the removal of the rule selected before.
+    schedulePreview( RulePreviewer::Start::Soon );
 }
 
 void FooterEditor::storePanelInCurrentRule()
@@ -410,6 +408,7 @@ void FooterEditor::storePanelInCurrentRule()
     model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
     validateRow( row );
     showProblems();
+    schedulePreview();
 }
 
 void FooterEditor::ruleChanged( int row )
@@ -421,6 +420,8 @@ void FooterEditor::ruleChanged( int row )
     }
     validateRow( row );
     showProblems();
+    // Another rule of the key may supply its value now.
+    schedulePreview();
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────
@@ -536,15 +537,18 @@ void FooterEditor::showProblems()
     buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
 }
 
-void FooterEditor::schedulePreview()
+void FooterEditor::schedulePreview( RulePreviewer::Start start )
 {
+    if ( closing_ ) {
+        return;
+    }
     const int row = currentRow();
     if ( row < 0 ) {
-        previewer_->cancel();
+        previewer_->clear();
         panel_->previewView()->showNoRule();
         return;
     }
-    previewer_->schedule( model_->entries(), row );
+    previewer_->schedule( model_->entries(), row, start );
 }
 
 QString FooterEditor::patternError( const QString& pattern )

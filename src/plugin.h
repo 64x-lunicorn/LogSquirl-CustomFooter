@@ -22,13 +22,14 @@
 #include "logsquirl_plugin_api.h"
 
 #include "footerdisplaywidget.h"
+#include "footereditor.h"
 
+#include <QPointer>
 #include <QString>
 
 namespace custom_footer {
 
 class FooterController;
-class FooterEditor;
 
 /// Global plugin state — bridges C ABI entry points to C++ implementation.
 struct PluginState {
@@ -38,9 +39,9 @@ struct PluginState {
 
     FooterDisplayWidget* footerWidget = nullptr; ///< Registered in footer bar.
     FooterController* controller = nullptr;      ///< Fills footerWidget.
-    /// The rule editor while it is open, to keep its preview on the active
-    /// file and to stop the preview on shutdown.
-    FooterEditor* editor = nullptr;
+    /// The rule editor from when it is opened until it is deleted: its
+    /// preview follows the active file, and shutdown deletes it.
+    QPointer<FooterEditor> editor;
 };
 
 extern PluginState g_state;

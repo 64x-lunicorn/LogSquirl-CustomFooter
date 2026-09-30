@@ -39,10 +39,12 @@
 #include <QLocale>
 #include <QSemaphore>
 #include <QTableView>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QThread>
+#include <QToolButton>
 
 #include <atomic>
 #include <memory>
@@ -181,13 +183,18 @@ SCENARIO( "RulePreviewer previews once typing pauses", "[preview][previewer]" )
             }
         }
 
-        WHEN( "an edit is requested and the event loop runs on" )
+        WHEN( "edits are requested and the event loop runs on" )
         {
+            // No real pause in tests: the pause ends with the next pass of
+            // the event loop, after the edits made before it.
+            previewer.setDelays( 0, 0 );
+            previewer.schedule( { rule( "K", "tim" ) }, 0 );
             previewer.schedule( { rule( "K", "timed" ) }, 0 );
             REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
 
-            THEN( "the pause ends by itself, and the edit is previewed" )
+            THEN( "the pause ends by itself, and the last edit is previewed once" )
             {
+                REQUIRE( previewer.previewsStarted() == 1 );
                 REQUIRE( emitted.patterns == QStringList{ "timed" } );
             }
         }
@@ -233,7 +240,7 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
 
         previewer.schedule( { rule( "K", "slow-old" ) }, 0 );
         previewer.flush();
-        gate.started.acquire();
+        REQUIRE( gate.started.tryAcquire( 1, 10000 ) );
 
         WHEN( "a newer pattern is previewed, and the old preview finishes first" )
         {
@@ -255,15 +262,32 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
 
         WHEN( "a newer pattern is typed, and the old preview finishes during the pause" )
         {
+            // A pause no test outlasts: the newer preview does not start.
+            previewer.setDelays( 3600 * 1000, 0 );
             previewer.schedule( { rule( "K", "newer" ) }, 0 );
             gate.release.release();
-            // Let the old preview's result arrive while the new one waits.
-            previewer.stop();
-            QCoreApplication::processEvents();
+            // The old preview's result arrives while the newer one waits.
+            REQUIRE( processUntil( [ &previewer ] { return previewer.previewsFinished() == 1; } ) );
 
-            THEN( "the old result is not shown" )
+            THEN( "the old result is dropped, and the newer one still awaited" )
             {
                 REQUIRE( emitted.patterns.isEmpty() );
+                REQUIRE( previewer.isBusy() );
+                REQUIRE( previewer.previewsStarted() == 1 );
+            }
+        }
+
+        WHEN( "the active file is set again, e.g. because it changed" )
+        {
+            previewer.setActiveFile( "/some/file.log" );
+            gate.release.release( 2 );
+            REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 2; } ) );
+
+            THEN( "the running preview is not cancelled but shown, and made once more" )
+            {
+                REQUIRE_FALSE( gate.sawCancel );
+                REQUIRE( gate.calls == 2 );
+                REQUIRE( emitted.patterns == QStringList{ "slow-old", "slow-old" } );
             }
         }
     }
@@ -287,7 +311,8 @@ SCENARIO( "The editor's preview stops when the editor closes", "[preview][footer
         QObject::connect( previewer, &RulePreviewer::previewed, [ &shown ] { ++shown; } );
 
         editor->setActiveFile( path );
-        gate.started.acquire();
+        previewer->flush();
+        REQUIRE( gate.started.tryAcquire( 1, 10000 ) );
 
         WHEN( "the editor is destroyed mid-preview" )
         {
@@ -349,6 +374,11 @@ SCENARIO( "The editor previews the selected rule against the active file",
     auto* linePattern = child<QLineEdit>( editor, "linePatternEdit" );
     auto* keyEdit = child<QLineEdit>( editor, "keyEdit" );
 
+    auto* removeRule = child<QToolButton>( editor, "removeRuleButton" );
+    auto* mappings = child<QTableWidget>( editor, "mappingTable" );
+    // No real pauses: they end with the next pass of the event loop.
+    previewer->setDelays( 0, 0 );
+
     const auto settle = [ previewer ] {
         previewer->flush();
         REQUIRE( processUntil( [ previewer ] { return !previewer->isBusy(); } ) );
@@ -359,6 +389,8 @@ SCENARIO( "The editor previews the selected rule against the active file",
 
     GIVEN( "no active file" )
     {
+        settle();
+
         THEN( "the preview explains that a file is needed" )
         {
             REQUIRE( editor.activeFile().isEmpty() );
@@ -506,7 +538,6 @@ SCENARIO( "The editor previews the selected rule against the active file",
         WHEN( "the footer's line limit is lower than the file" )
         {
             editor.setMaxLines( 3 );
-            editor.setActiveFile( path );
             settle();
 
             THEN( "the count says the limit was reached" )
@@ -530,9 +561,82 @@ SCENARIO( "The editor previews the selected rule against the active file",
             }
         }
 
+        WHEN( "a matching line is appended to the file" )
+        {
+            REQUIRE( count->text() == "2 matching lines in all 6 lines of the file." );
+            {
+                QFile file( path );
+                REQUIRE( file.open( QIODevice::Append ) );
+                file.write( "mode=0x09\n" );
+            }
+
+            THEN( "the preview is made again for the grown file" )
+            {
+                REQUIRE( processUntil( [ count ] {
+                    return count->text() == "3 matching lines in all 7 lines of the file.";
+                } ) );
+            }
+        }
+
+        WHEN( "a key is typed" )
+        {
+            int updates = 0;
+            QObject::connect( previewer, &RulePreviewer::updating, [ &updates ] { ++updates; } );
+            keyEdit->setText( "Mod" );
+
+            THEN( "one preview is requested for it" )
+            {
+                REQUIRE( updates == 1 );
+            }
+        }
+
+        WHEN( "the selected rule is removed" )
+        {
+            select( 1 );
+            settle();
+            std::atomic_int previewedRules{ -1 };
+            previewer->setPreviewFunction(
+                [ &previewedRules ]( const QString& file, const QList<FooterEntry>& rules,
+                                     int index, int maxLines, const std::atomic_bool* cancelled ) {
+                    previewedRules = static_cast<int>( rules.size() );
+                    return FooterScanner::preview( file, rules, index, maxLines, cancelled );
+                } );
+            const int started = previewer->previewsStarted();
+            removeRule->click();
+            REQUIRE( processUntil( [ previewer ] { return !previewer->isBusy(); } ) );
+
+            THEN( "one preview is made, of the rule selected next in the remaining rules" )
+            {
+                REQUIRE( previewer->previewsStarted() == started + 1 );
+                REQUIRE( previewedRules == 2 );
+                REQUIRE( location->text() == "First match, line 2:" );
+            }
+        }
+
+        WHEN( "the editor is closed while a mapping is being edited" )
+        {
+            mappings->setCurrentCell( 0, 1 );
+            mappings->editItem( mappings->item( 0, 1 ) );
+            auto* cellEditor = mappings->viewport()->findChild<QLineEdit*>();
+            REQUIRE( cellEditor );
+            cellEditor->setText( "Changed" );
+            const int started = previewer->previewsStarted();
+            editor.reject();
+            // Whatever closing commits, as the open cell editor would.
+            mappings->item( 0, 1 )->setText( "Committed late" );
+            QCoreApplication::processEvents();
+
+            THEN( "no preview is scheduled or started again" )
+            {
+                REQUIRE_FALSE( previewer->isBusy() );
+                REQUIRE( previewer->previewsStarted() == started );
+            }
+        }
+
         WHEN( "the active file goes away" )
         {
             editor.setActiveFile( QString() );
+            settle();
 
             THEN( "the preview explains that a file is needed" )
             {

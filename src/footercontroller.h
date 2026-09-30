@@ -84,7 +84,7 @@ public:
     }
 
 private:
-    using Values = QList<QPair<QString, QString>>;
+    using Values = QList<FooterValue>;
 
     void loadConfig();
     /// Scan the active file for changes, after a running scan of it.

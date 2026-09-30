@@ -118,6 +118,7 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
         }
 
         Rule rule;
+        rule.index = i;
         rule.key = entry.key;
         rule.lineRegex.setPattern( entry.linePattern );
         if ( !entry.valuePattern.isEmpty() ) {
@@ -135,7 +136,12 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
 QMap<QString, QString> FooterScanner::scanFile( const QString& filePath, int maxLines,
                                                 const std::atomic_bool* cancelled ) const
 {
-    return scanFrom( filePath, {}, maxLines, cancelled ).values;
+    QMap<QString, QString> shown;
+    const auto values = scanFrom( filePath, {}, maxLines, cancelled ).values;
+    for ( auto it = values.begin(); it != values.end(); ++it ) {
+        shown.insert( it.key(), it->value );
+    }
+    return shown;
 }
 
 FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Progress& from,
@@ -170,7 +176,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     };
 
     // Values found in a last line without a line break.
-    QMap<QString, QString> unterminated;
+    Values unterminated;
     // The scan limit was reached inside a line, before its end.
     bool stoppedInLine = false;
 
@@ -206,8 +212,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                 if ( values.contains( rule.key ) ) {
                     continue;
                 }
-                if ( const auto value = valueOf( rule, line ) ) {
-                    values.insert( rule.key, *value );
+                if ( const auto found = valueOf( rule, line ) ) {
+                    values.insert( rule.key, *found );
                 }
             }
 
@@ -248,7 +254,7 @@ bool FooterScanner::continues( QFile& file, const Progress& from )
            && readAt( file, from.offset - from.tail.size(), from.tail.size() ) == from.tail;
 }
 
-std::optional<QString> FooterScanner::valueOf( const Rule& rule, const QString& line ) const
+std::optional<FooterValue> FooterScanner::valueOf( const Rule& rule, const QString& line ) const
 {
     const auto lineMatch = rule.lineRegex.match( line );
     if ( !lineMatch.hasMatch() ) {
@@ -268,22 +274,23 @@ std::optional<QString> FooterScanner::valueOf( const Rule& rule, const QString& 
     }
 
     // Apply value mappings (exact string match).
+    QString value = rawValue;
     for ( const auto& mapping : rule.mappings ) {
         if ( rawValue == mapping.pattern ) {
-            return mapping.displayValue;
+            value = mapping.displayValue;
+            break;
         }
     }
-    return rawValue;
+    return FooterValue{ rule.key, value, rawValue, rule.index };
 }
 
-QList<QPair<QString, QString>>
-FooterScanner::inRuleOrder( const QMap<QString, QString>& values ) const
+QList<FooterValue> FooterScanner::footerValues( const Values& values ) const
 {
-    QList<QPair<QString, QString>> ordered;
+    QList<FooterValue> ordered;
     for ( const auto& key : keys_ ) {
         const auto it = values.find( key );
         if ( it != values.end() ) {
-            ordered.append( { key, it.value() } );
+            ordered.append( it.value() );
         }
     }
     return ordered;

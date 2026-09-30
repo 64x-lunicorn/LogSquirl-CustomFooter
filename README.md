@@ -40,7 +40,7 @@ in the footer.
 
 | Write the rule | Read the answer |
 | :--- | :--- |
-| **Regex extraction.** A rule matches a line and captures the value you want from it. | **Always on screen.** Results sit in a compact bar along the bottom of the main window. |
+| **Regex extraction.** A rule matches a line and captures the value you want from it. | **Always on screen.** Results sit in a compact bar along the bottom of the main window; a click copies a value. |
 | **Two-stage matching.** An optional second regex runs against the matched line, for when the value needs a finer cut than the line pattern gives. | **Readable values.** Map raw captures to display text, so `0x04` can read as `Production`. |
 | **Rules you can share.** Import and export rule sets as JSON, per project or per team. | **Edited in one place.** Rules are managed in a dialog: a list of all rules, and a panel with the patterns and value mappings of the selected one. |
 
@@ -106,6 +106,12 @@ Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
   value; a file that was truncated or replaced is scanned from its start.
   If the file is rotated away, the footer picks it up again once it is
   recreated.
+- **Copy a value** by clicking it in the footer: exactly the value is copied,
+  not its key, and a short "Copied" tooltip confirms it. Hover a value to see
+  which rule supplied it and, for a mapped value, the raw value it replaced.
+  With the keyboard, Tab to a value and press Space, Return or the copy
+  shortcut. The context menu of a value offers "Copy Value", "Copy Key and
+  Value", and "Copy All" for every key and value shown, one per line.
 - A scan stops after `scan/maxLines` lines (default 100000, `0` for no
   limit) and never reads more than 64 MiB; lines longer than 64 KiB are
   matched against their start.
@@ -161,7 +167,8 @@ Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 ## Prerequisites
 
 - **LogSquirl** ≥ 26.03 with the plugin system enabled
-- **Qt6** (Core + Widgets) — same version LogSquirl was built with
+- **Qt6** (Core + Widgets) — same version LogSquirl was built with; the
+  tests also need Qt Test
 - **CMake** ≥ 3.16
 - A C++17-capable compiler (GCC ≥ 9, Clang ≥ 14, MSVC ≥ 19.29)
 

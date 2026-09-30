@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Copy a value with a click** — clicking a value in the footer copies
+  exactly that value, without its key, to the clipboard, and a short
+  "Copied" tooltip confirms it. Hovering a value shows its key, the rule
+  that supplied it and, for a mapped value, the raw value before mapping.
+  The values take the keyboard focus with Tab, copy with Space, Return or
+  the copy shortcut, and carry an accessible name with their key and value
+  for screen readers. The context menu of a value offers "Copy Value",
+  "Copy Key and Value", and "Copy All" for every shown key and value, one
+  per line.
+
 ### Changed
 - **Rule editor** — the rules are now shown as a list, each with its
   enabled check box, key and line pattern, and the selected rule in a

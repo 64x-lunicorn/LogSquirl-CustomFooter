@@ -45,6 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   others, whose values need a shape or boundaries, in advanced mode. If an
   enabled rule with a line pattern already has the key, the dialog says
   that the new rule becomes an alternative for it.
+- **Live preview in the rule editor** — below the selected rule's fields,
+  a preview shows what the rule finds in the active log file, without
+  applying it: the first matching line with its number, the line pattern's
+  match and the captured value highlighted; the raw value and the value
+  after mappings; how many lines match within the scan limits, and when a
+  limit was reached; and, for rules sharing a key, whether this rule or
+  another one supplies the key's value in this file. It updates shortly
+  after typing stops, scans in the background with the footer's limits
+  and matching, and follows the active file while the editor is open.
+  Without an active file, or with an invalid pattern, it says why instead.
 
 ### Changed
 - **Rule editor** — the rules are now shown as a list, each with its

@@ -73,6 +73,17 @@ on the GUI thread. `logsquirl_plugin_shutdown()` deletes the controller first, w
 cancels the running scan and waits for the worker: after it returns, no code
 of the plugin runs, and the host may unload the library.
 
+The rule editor's live preview has a worker thread of its own, owned by
+`RulePreviewer`, with the same rules: every request (an edit, another
+selected rule, another active file) bumps its generation counter and
+cancels the running preview, and a result is emitted only for the latest
+request. Requests start after `RulePreviewer::kDelayMs` (300 ms) without
+another one; selecting a rule or another active file starts at once.
+Closing the editor (`done()`) and its destructor call `stop()`, which
+cancels and waits for the worker, before any widget is deleted.
+`logsquirl_plugin_shutdown()` stops the preview of an open editor
+(`PluginState::editor`) and closes it.
+
 No exception may leave an entry point or host callback; they run their work
 through `guarded()`, which logs the failure instead.
 
@@ -89,6 +100,8 @@ through `guarded()`, which logs the failure instead.
 | **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
 | **RuleListView** | `rulelistview.h/.cpp` | The rule list: drag & drop and Ctrl+Shift+Up/Down to reorder rules |
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
+| **RulePreviewer** | `rulepreviewer.h/.cpp` | Runs the live preview: debounced, on a worker thread, outdated results dropped |
+| **RulePreviewView** | `rulepreviewview.h/.cpp` | The preview section of the detail panel: first match with highlights, values, count |
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
 | **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
@@ -175,6 +188,26 @@ in a detail panel on the right.
   number; OK and Apply stay disabled while there are any. Each pattern is
   compiled once per dialog and its error cached
   (`FooterEditor::patternCompilations()`, `ruleValidations()`).
+- **Live preview**: the panel's last section, a `RulePreviewView`, shows
+  `FooterScanner::preview()` of the selected rule against the active file,
+  which the plugin passes in with `FooterEditor::setActiveFile()` when the
+  editor opens and whenever the host switches files, along with the
+  footer's line limit (`setMaxLines()`). `preview()` uses the scanner's
+  own compiling, line reading, limits and matching (`matchOf()`, which
+  `valueOf()` is built on), so it cannot disagree with the footer. It
+  reads on after the first match to the limits, to count the matching
+  lines, and reports the first match's line number (from 1), its line
+  (at most 64 KiB) with the spans of the line pattern's match and of the
+  value, which limit stopped the scan before the end of the file, and
+  which enabled rule of the key supplies the key's value, and from which
+  line. A disabled rule is previewed too, but never supplies the key.
+  Without an active file, an invalid pattern or no line pattern, it
+  returns a status that the view explains; without a file this is
+  decided on the GUI thread, as nothing is read. Every change of the model
+  schedules a preview (`FooterEditor::schedulePreview()`). Tests make the
+  timing deterministic with `RulePreviewer::flush()` and replace the
+  preview function (`setPreviewFunction()`) to hold a preview on the
+  worker (`tests/rulepreview_test.cpp`).
 
 ### Simple mode
 

@@ -354,3 +354,44 @@ SCENARIO( "FooterScanner previews within the scan limits", "[footerscanner][prev
         }
     }
 }
+
+SCENARIO( "FooterScanner's preview reads lines as the footer's scan does",
+          "[footerscanner][preview]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/agree.log";
+    const QList<FooterEntry> entries = { { "Build", "build=(\\S+)", "", true, {} },
+                                         { "Build", "legacy build (\\S+)", "", true, {} } };
+    const FooterScanner scanner( entries );
+
+    GIVEN( "a last line without a line break that supplies the key" )
+    {
+        writeBytes( path, "noise\nlegacy build 7" );
+        const auto preview = FooterScanner::preview( path, entries, 1 );
+        const auto scan = scanner.scanFrom( path, {} );
+
+        THEN( "both take the value from it, and the preview counts it as a line" )
+        {
+            REQUIRE( scan.values.value( "Build" ) == *preview.keyValue );
+            REQUIRE( preview.keyLineNumber == 2 );
+            REQUIRE( preview.lines == 2 );
+            REQUIRE( scan.progress.lines == 1 ); // not remembered: still being written
+        }
+    }
+
+    GIVEN( "a line limit that stops both at the same line" )
+    {
+        writeBytes( path, "a\nb\nbuild=late\n" );
+        const auto preview = FooterScanner::preview( path, entries, 0, 2 );
+        const auto scan = scanner.scanFrom( path, {}, 2 );
+
+        THEN( "neither sees the line after the limit" )
+        {
+            REQUIRE_FALSE( preview.value );
+            REQUIRE( scan.values.isEmpty() );
+            REQUIRE( preview.lines == scan.progress.lines );
+            REQUIRE( preview.lineLimitReached );
+        }
+    }
+}

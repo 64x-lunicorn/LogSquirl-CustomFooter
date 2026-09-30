@@ -222,10 +222,12 @@ private:
     /// Compile a rule; empty and with @p problem set if it cannot be used.
     static std::optional<Rule> compile( const FooterEntry& entry, int index, QString* problem );
 
-    /// The value a rule extracts from a line, if it matches, and where.
+    /// The value a rule extracts from a line, if it matches, and where. Only
+    /// the preview needs where, once per preview.
     static std::optional<Match> matchOf( const Rule& rule, const QString& line );
 
-    /// The value a rule extracts from a line, if it matches.
+    /// The value a rule extracts from a line, if it matches; the scan's hot
+    /// path, so it computes nothing else.
     static std::optional<FooterValue> valueOf( const Rule& rule, const QString& line );
 
     /// Whether the file is still the one the progress was made on.

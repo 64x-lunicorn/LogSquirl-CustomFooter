@@ -30,21 +30,22 @@
 
 class QDialogButtonBox;
 class QLabel;
-class QTableView;
 class QToolButton;
 
 namespace custom_footer {
 
 class RuleDetailPanel;
 class RuleListModel;
+class RuleListView;
 
 /**
  * Modal dialog for editing footer extraction rules.
  *
  * Layout:
- *   - Left: the rule list (RuleListModel in a QTableView), one row per rule
+ *   - Left: the rule list (RuleListModel in a RuleListView), one row per rule
  *     with its enabled check box, key and line pattern, and below it the
- *     [+] [-] [↑] [↓] [Import] [Export] buttons
+ *     [+] [-] [↑] [↓] [Import] [Export] buttons. Rules are reordered with
+ *     ↑/↓, Ctrl+Shift+Up/Down in the list, or by dragging them
  *   - Right: the RuleDetailPanel for the selected rule, with all its fields
  *     and value mappings
  *   - Below: the problems of all rules, and OK / Cancel / Apply
@@ -128,7 +129,7 @@ private:
     int ruleValidations_ = 0;
 
     RuleListModel* model_ = nullptr;
-    QTableView* list_ = nullptr;
+    RuleListView* list_ = nullptr;
     RuleDetailPanel* panel_ = nullptr;
 
     QToolButton* addButton_ = nullptr;

@@ -38,6 +38,7 @@ add_library(logsquirl_custom_footer SHARED
     src/footereditor.cpp
     src/footerdisplaywidget.cpp
     src/rulelistmodel.cpp
+    src/rulelistview.cpp
     src/ruledetailpanel.cpp
 )
 

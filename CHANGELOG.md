@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for screen readers. The context menu of a value offers "Copy Value",
   "Copy Key and Value", and "Copy All" for every shown key and value, one
   per line.
+- **Reorder rules by drag & drop** — drag a rule to a new place in the
+  rule list; it takes its mappings, enabled state and validation marks
+  along and stays selected in the panel. Ctrl+Shift+Up / Ctrl+Shift+Down
+  (⇧⌘↑ / ⇧⌘↓ on macOS) move the selected rule as well, next to the ↑/↓
+  buttons. The rules are saved in the order of the list.
 
 ### Changed
 - **Rule editor** — the rules are now shown as a list, each with its

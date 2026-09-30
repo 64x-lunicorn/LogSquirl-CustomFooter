@@ -26,6 +26,8 @@
 #include <QList>
 #include <QString>
 
+#include <optional>
+
 namespace custom_footer {
 
 /// The colour marking what keeps the rules from being saved, in the rule
@@ -75,6 +77,11 @@ struct RuleProblems {
  * removed or moved. The list shows the enabled state as the check box of
  * the key column, the key, and the line pattern; the rest is edited in the
  * detail panel through setEntry().
+ *
+ * Rules are reordered by dragging them within the list: a drop moves the
+ * dragged rules with moveRows(), so nothing is left for the view to remove
+ * (RuleListView never removes rows after a drag). Only moves of rules
+ * dragged from this model are accepted; a rule is never copied.
  */
 class RuleListModel : public QAbstractTableModel {
     Q_OBJECT
@@ -114,10 +121,25 @@ public:
     bool moveRows( const QModelIndex& sourceParent, int sourceRow, int count,
                    const QModelIndex& destinationParent, int destinationChild ) override;
 
+    Qt::DropActions supportedDragActions() const override;
+    Qt::DropActions supportedDropActions() const override;
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData( const QModelIndexList& indexes ) const override;
+    bool canDropMimeData( const QMimeData* data, Qt::DropAction action, int row, int column,
+                          const QModelIndex& parent ) const override;
+    /// Move the dragged rules before @p row, or to the end without a row.
+    /// Only moves are accepted. Returns false when nothing moved.
+    bool dropMimeData( const QMimeData* data, Qt::DropAction action, int row, int column,
+                       const QModelIndex& parent ) override;
+
 Q_SIGNALS:
     /// The rule in @p row was enabled or disabled in the list. Not emitted
     /// for setEntry(), whose caller knows what it changed.
     void ruleChanged( int row );
+
+    /// Dragged rules are about to be moved by a drop. Emitted before the
+    /// move, so that a pending edit can still be stored in its rule.
+    void aboutToDropRules();
 
 private:
     struct Rule {
@@ -126,6 +148,18 @@ private:
     };
 
     void emitRowChanged( int row );
+
+    struct DraggedRows {
+        int first = 0;
+        int count = 0;
+    };
+    /// The dragged block of rows, or none if @p data is not a drag of
+    /// contiguous rows from this model.
+    std::optional<DraggedRows> draggedRows( const QMimeData* data ) const;
+
+    /// Marks this model's drags, so that no other list takes them. Random,
+    /// not an address, so the payload tells nothing about the process.
+    quint64 dragToken_;
 
     QList<Rule> rules_;
 };

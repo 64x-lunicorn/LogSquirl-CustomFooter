@@ -20,9 +20,15 @@
 #include "rulelistmodel.h"
 
 #include <QBrush>
+#include <QDataStream>
 #include <QFont>
+#include <QIODevice>
+#include <QMimeData>
 #include <QPalette>
+#include <QRandomGenerator>
 #include <QStringList>
+
+#include <algorithm>
 
 namespace custom_footer {
 
@@ -36,10 +42,16 @@ QString oneLine( QString text )
     return text;
 }
 
+/// The rows of a drag within the rule list: the drag token of the model
+/// they come from, so that no other list takes them, and the row numbers.
+const QString RuleRowsMimeType
+    = QStringLiteral( "application/x-logsquirl-custom-footer-rule-rows" );
+
 } // namespace
 
 RuleListModel::RuleListModel( QObject* parent )
     : QAbstractTableModel( parent )
+    , dragToken_( QRandomGenerator::global()->generate64() )
 {
 }
 
@@ -192,10 +204,12 @@ QVariant RuleListModel::headerData( int section, Qt::Orientation orientation, in
 Qt::ItemFlags RuleListModel::flags( const QModelIndex& index ) const
 {
     if ( !index.isValid() ) {
-        return Qt::NoItemFlags;
+        // Rules are dropped between rules, never onto one.
+        return Qt::ItemIsDropEnabled;
     }
     // Edited in the detail panel; only the enabled check box is in the list.
-    Qt::ItemFlags itemFlags = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemNeverHasChildren;
+    Qt::ItemFlags itemFlags = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsDragEnabled
+                              | Qt::ItemNeverHasChildren;
     if ( index.column() == KeyColumn ) {
         itemFlags |= Qt::ItemIsUserCheckable;
     }
@@ -250,6 +264,104 @@ bool RuleListModel::moveRows( const QModelIndex& sourceParent, int sourceRow, in
     }
     endMoveRows();
     return true;
+}
+
+Qt::DropActions RuleListModel::supportedDragActions() const
+{
+    return Qt::MoveAction;
+}
+
+Qt::DropActions RuleListModel::supportedDropActions() const
+{
+    return Qt::MoveAction;
+}
+
+QStringList RuleListModel::mimeTypes() const
+{
+    return { RuleRowsMimeType };
+}
+
+QMimeData* RuleListModel::mimeData( const QModelIndexList& indexes ) const
+{
+    // One index per dragged cell; each row once, in order.
+    QList<int> rows;
+    for ( const auto& index : indexes ) {
+        if ( index.isValid() && index.model() == this && !rows.contains( index.row() ) ) {
+            rows.append( index.row() );
+        }
+    }
+    if ( rows.isEmpty() ) {
+        return nullptr;
+    }
+    std::sort( rows.begin(), rows.end() );
+
+    QByteArray encoded;
+    QDataStream stream( &encoded, QIODevice::WriteOnly );
+    stream << dragToken_ << static_cast<qint32>( rows.size() );
+    for ( const int row : std::as_const( rows ) ) {
+        stream << static_cast<qint32>( row );
+    }
+    auto* data = new QMimeData;
+    data->setData( RuleRowsMimeType, encoded );
+    return data;
+}
+
+std::optional<RuleListModel::DraggedRows> RuleListModel::draggedRows( const QMimeData* data ) const
+{
+    if ( !data || !data->hasFormat( RuleRowsMimeType ) ) {
+        return std::nullopt;
+    }
+    QDataStream stream( data->data( RuleRowsMimeType ) );
+    quint64 token = 0;
+    qint32 size = 0;
+    stream >> token >> size;
+    if ( stream.status() != QDataStream::Ok || token != dragToken_ || size <= 0 ) {
+        return std::nullopt;
+    }
+    DraggedRows rows;
+    rows.count = size;
+    for ( qint32 i = 0; i < size; ++i ) {
+        qint32 row = -1;
+        stream >> row;
+        // The list selects one rule; a drag of several must be one block.
+        if ( stream.status() != QDataStream::Ok || row < 0 || row >= rules_.size()
+             || ( i > 0 && row != rows.first + i ) ) {
+            return std::nullopt;
+        }
+        if ( i == 0 ) {
+            rows.first = row;
+        }
+    }
+    return rows;
+}
+
+bool RuleListModel::canDropMimeData( const QMimeData* data, Qt::DropAction action, int, int,
+                                     const QModelIndex& parent ) const
+{
+    // Rules are only moved, and only between rules: none has children.
+    return action == Qt::MoveAction && !parent.isValid() && draggedRows( data ).has_value();
+}
+
+bool RuleListModel::dropMimeData( const QMimeData* data, Qt::DropAction action, int row, int,
+                                  const QModelIndex& parent )
+{
+    if ( action != Qt::MoveAction || parent.isValid() ) {
+        return false;
+    }
+    const auto dragged = draggedRows( data );
+    if ( !dragged ) {
+        return false;
+    }
+
+    // Without a row, e.g. below the last rule, the rules go to the end.
+    const int size = static_cast<int>( rules_.size() );
+    const int before = row < 0 ? size : std::min( row, size );
+    if ( before >= dragged->first && before <= dragged->first + dragged->count ) {
+        return false; // Dropped where it already is.
+    }
+
+    Q_EMIT aboutToDropRules();
+    return moveRows( QModelIndex(), dragged->first, dragged->count, QModelIndex(), before );
 }
 
 void RuleListModel::emitRowChanged( int row )

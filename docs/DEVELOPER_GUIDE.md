@@ -87,6 +87,7 @@ through `guarded()`, which logs the failure instead.
 | **FooterConfig** | `footerconfig.h/.cpp` | INI persistence + JSON import/export |
 | **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog: rule list, detail panel, validation |
 | **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
+| **RuleListView** | `rulelistview.h/.cpp` | The rule list: drag & drop and Ctrl+Shift+Up/Down to reorder rules |
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
@@ -133,7 +134,7 @@ in a detail panel on the right.
 - **`RuleListModel`** holds the rules. Each row is a whole `FooterEntry`,
   mappings included, plus its `RuleProblems`, so a rule's data and
   validation marks stay together whichever way rows are inserted, removed
-  or moved (`moveRows()`, which drag & drop can build on). The list shows
+  or moved (`moveRows()`). The list shows
   the enabled state as the check box of the key column, the key, and the
   line pattern elided to one line; everything else is edited in the panel.
 - **`RuleDetailPanel`** edits a copy of the selected rule and emits
@@ -146,6 +147,24 @@ in a detail panel on the right.
   fields take patterns of any length. The panel is a column of sections
   (fields, mappings), so a live preview or a simple mode for the patterns
   can be added as further sections.
+- **Reordering**: ↑/↓, Ctrl+Shift+Up/Down in the list (`RuleListView`
+  emits `moveUpRequested()` / `moveDownRequested()`; the keypad modifier,
+  which macOS sets on every arrow key, is ignored) and drag & drop all
+  move whole rows. A drag carries the dragged row numbers and a random
+  token of the model they come from (`mimeData()`), so no other list takes
+  them. `dropMimeData()` accepts only `Qt::MoveAction` and a row between
+  rules (none means the end), and moves the rows with `moveRows()`, so a
+  rule's mappings, enabled state and problems move with it, and the
+  current index, and so the panel, follows it. `RuleListView::startDrag()`
+  replaces `QAbstractItemView`'s, which would remove the selected rows
+  after a drag ending in a move, and those are then the moved rule itself.
+  Before a drop moves anything, the model emits `aboutToDropRules()`, on
+  which the editor commits the panel's pending edit. Tests
+  (`tests/ruledragdrop_test.cpp`) simulate drags with `mimeData()` and
+  `dropMimeData()`, and send drag and drop events to the view's viewport.
+  Offscreen, `QDrag::exec()` returns at once, so those events have no
+  source and the `InternalMove` view ignores them; the tests switch the
+  view to `DragDrop` to get past that check to the same drop handling.
 - **Validation** checks one rule: an invalid pattern, or an enabled rule
   with a line pattern but no key, becomes a problem of that field. An edit
   validates only the edited rule, and new rules are validated when they are

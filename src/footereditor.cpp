@@ -22,11 +22,13 @@
 #include "footerscanner.h"
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
+#include "rulelistview.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
@@ -57,7 +59,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     listLayout->setContentsMargins( 0, 0, 0, 0 );
 
     model_ = new RuleListModel( this );
-    list_ = new QTableView( listSide );
+    list_ = new RuleListView( listSide );
     list_->setObjectName( "ruleList" );
     list_->setModel( model_ );
     list_->setSelectionBehavior( QAbstractItemView::SelectRows );
@@ -93,13 +95,17 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     upButton_ = new QToolButton( listSide );
     upButton_->setObjectName( "moveUpButton" );
     upButton_->setText( "↑" ); // up arrow
-    upButton_->setToolTip( tr( "Move up" ) );
+    upButton_->setToolTip( tr( "Move up (%1), or drag the rule" )
+                               .arg( QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_Up )
+                                         .toString( QKeySequence::NativeText ) ) );
     toolLayout->addWidget( upButton_ );
 
     downButton_ = new QToolButton( listSide );
     downButton_->setObjectName( "moveDownButton" );
     downButton_->setText( "↓" ); // down arrow
-    downButton_->setToolTip( tr( "Move down" ) );
+    downButton_->setToolTip( tr( "Move down (%1), or drag the rule" )
+                                 .arg( QKeySequence( Qt::CTRL | Qt::SHIFT | Qt::Key_Down )
+                                           .toString( QKeySequence::NativeText ) ) );
     toolLayout->addWidget( downButton_ );
 
     toolLayout->addStretch();
@@ -138,6 +144,8 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( removeButton_, &QToolButton::clicked, this, &FooterEditor::removeEntry );
     connect( upButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryUp );
     connect( downButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryDown );
+    connect( list_, &RuleListView::moveUpRequested, this, &FooterEditor::moveEntryUp );
+    connect( list_, &RuleListView::moveDownRequested, this, &FooterEditor::moveEntryDown );
     connect( importButton_, &QToolButton::clicked, this, &FooterEditor::importRules );
     connect( exportButton_, &QToolButton::clicked, this, &FooterEditor::exportRules );
 
@@ -157,6 +165,10 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::updateButtons );
+    // A dragged rule takes a mapping still being typed with it. The
+    // selection, and so the panel, follows the dragged rule by itself.
+    connect( model_, &RuleListModel::aboutToDropRules, panel_,
+             &RuleDetailPanel::commitPendingEdit );
 
     // A mapping still being typed belongs to the rules that are saved.
     connect( buttonBox_, &QDialogButtonBox::accepted, this, [ this ] {

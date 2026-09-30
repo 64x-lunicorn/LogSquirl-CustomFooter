@@ -29,6 +29,7 @@ add_executable(logsquirl_custom_footer_tests
     footercontroller_test.cpp
     footerdisplaywidget_test.cpp
     footereditor_test.cpp
+    ruledragdrop_test.cpp
     configroundtrip_test.cpp
 )
 
@@ -53,6 +54,7 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/footereditor.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerdisplaywidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/rulelistmodel.cpp"
+        "${CMAKE_SOURCE_DIR}/src/rulelistview.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruledetailpanel.cpp"
 )
 

@@ -53,7 +53,8 @@ public:
     /// Longer lines are matched against their first kMaxLineBytes only.
     static constexpr qint64 kMaxLineBytes = 64 * 1024;
 
-    /// A scan stops after this many bytes, whatever maxLines says.
+    /// A scan stops after this many bytes, whatever maxLines says, even
+    /// inside a line.
     static constexpr qint64 kMaxScanBytes = 64 * 1024 * 1024;
 
     /// Bytes compared at the start and before the end of the scanned part of
@@ -97,7 +98,8 @@ public:
      *
      * @param filePath   Path to the log file.
      * @param maxLines   Maximum number of lines to scan (0 = unlimited).
-     * @param cancelled  Checked per line; when set, the scan returns nothing.
+     * @param cancelled  Checked per line, and while skipping over-long lines;
+     *                   when set, the scan returns nothing.
      * @return Map from entry key to matched value.
      */
     QMap<QString, QString> scanFile( const QString& filePath, int maxLines = kDefaultMaxLines,

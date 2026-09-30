@@ -450,6 +450,46 @@ SCENARIO( "FooterScanner bounds what it reads", "[footerscanner][edge]" )
         }
     }
 
+    GIVEN( "a single line longer than the scan limit, followed by a match" )
+    {
+        const auto filePath = tmpDir.path() + "/one-line.log";
+        QFile file( filePath );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        const QByteArray chunk( 1024 * 1024, 'x' );
+        for ( qint64 written = 0; written <= FooterScanner::kMaxScanBytes;
+              written += chunk.size() ) {
+            REQUIRE( file.write( chunk ) == chunk.size() );
+        }
+        file.write( "\nVIN: AFTER\n" );
+        file.close();
+
+        WHEN( "scanning without a line limit" )
+        {
+            const auto scan = FooterScanner( entries ).scanFrom( filePath, {}, 0 );
+
+            THEN( "the scan stops at the scan limit inside the line" )
+            {
+                REQUIRE( scan.values.isEmpty() );
+                REQUIRE( scan.progress.done );
+                REQUIRE( scan.progress.lines == 0 );
+                REQUIRE( scan.progress.offset <= FooterScanner::kMaxScanBytes );
+            }
+        }
+
+        WHEN( "scanning with a cancelled flag" )
+        {
+            const std::atomic_bool cancelled{ true };
+            const auto scan = FooterScanner( entries ).scanFrom( filePath, {}, 0, &cancelled );
+
+            THEN( "nothing is returned" )
+            {
+                REQUIRE( scan.values.isEmpty() );
+                REQUIRE_FALSE( scan.progress.done );
+                REQUIRE( scan.progress.offset == 0 );
+            }
+        }
+    }
+
     GIVEN( "a file with Windows line endings" )
     {
         const auto filePath = tmpDir.path() + "/crlf.log";

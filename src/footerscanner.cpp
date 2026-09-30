@@ -32,19 +32,36 @@ QString capturedValue( const QRegularExpressionMatch& match )
     return match.lastCapturedIndex() >= 1 ? match.captured( 1 ) : match.captured( 0 );
 }
 
+bool isCancelled( const std::atomic_bool* cancelled )
+{
+    return cancelled && cancelled->load( std::memory_order_relaxed );
+}
+
+enum class ReadResult {
+    Line,    ///< A line was read.
+    End,     ///< The end of the file was reached.
+    Stopped, ///< Cancelled, or stopAt was passed inside a line.
+};
+
 /// Read one line of at most maxBytes, skipping the rest of a longer one.
-/// Returns false at the end of the file. terminated tells whether the line
-/// ended with a line break, rather than with the end of the file.
-bool readBoundedLine( QFile& file, qint64 maxBytes, QByteArray& line, bool& terminated )
+/// terminated tells whether the line ended with a line break, rather than
+/// with the end of the file. Skipping the rest of a line stops once the file
+/// position reaches stopAt, or when the scan is cancelled, so that a huge
+/// line is not read to its end.
+ReadResult readBoundedLine( QFile& file, qint64 maxBytes, qint64 stopAt,
+                            const std::atomic_bool* cancelled, QByteArray& line, bool& terminated )
 {
     if ( file.atEnd() ) {
-        return false;
+        return ReadResult::End;
     }
 
     line = file.readLine( maxBytes + 1 );
     terminated = line.endsWith( '\n' );
     bool complete = terminated || file.atEnd();
     while ( !complete ) {
+        if ( file.pos() >= stopAt || isCancelled( cancelled ) ) {
+            return ReadResult::Stopped;
+        }
         const auto rest = file.readLine( maxBytes + 1 );
         terminated = rest.endsWith( '\n' );
         complete = rest.isEmpty() || terminated || file.atEnd();
@@ -54,7 +71,7 @@ bool readBoundedLine( QFile& file, qint64 maxBytes, QByteArray& line, bool& term
         line.chop( 1 );
     }
     line.truncate( maxBytes );
-    return true;
+    return ReadResult::Line;
 }
 
 /// Read size bytes at offset, or fewer at the end of the file.
@@ -147,14 +164,27 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
 
     // Values found in a last line without a line break.
     QMap<QString, QString> unterminated;
+    // The scan limit was reached inside a line, before its end.
+    bool stoppedInLine = false;
 
     if ( file.seek( progress.offset ) ) {
         QByteArray rawLine;
         bool terminated = false;
-        while ( progress.values.size() < keys_.size() && !limitReached()
-                && readBoundedLine( file, kMaxLineBytes, rawLine, terminated ) ) {
-            if ( cancelled && cancelled->load( std::memory_order_relaxed ) ) {
+        while ( progress.values.size() < keys_.size() && !limitReached() ) {
+            if ( isCancelled( cancelled ) ) {
                 return {};
+            }
+            const auto read = readBoundedLine( file, kMaxLineBytes, kMaxScanBytes, cancelled,
+                                               rawLine, terminated );
+            if ( read == ReadResult::End ) {
+                break;
+            }
+            if ( read == ReadResult::Stopped ) {
+                if ( isCancelled( cancelled ) ) {
+                    return {};
+                }
+                stoppedInLine = true;
+                break;
             }
 
             auto& values = terminated ? progress.values : unterminated;
@@ -179,7 +209,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         }
     }
 
-    progress.done = progress.values.size() == keys_.size() || limitReached();
+    progress.done = progress.values.size() == keys_.size() || limitReached() || stoppedInLine;
     progress.head = readAt( file, 0, qMin( progress.offset, kIdentityBytes ) );
     const auto tailSize = qMin( progress.offset, kIdentityBytes );
     progress.tail = readAt( file, progress.offset - tailSize, tailSize );

@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mappings in one form, replacing the five-column table and the separate
   mapping panel. Edits in the panel show up in the list as you type.
   Invalid patterns and a line pattern without a key are marked at their
-  field with the reason, and on the rule's row in the list. Adding,
-  removing, reordering, importing and exporting rules, and the saved
-  config, are unchanged.
+  field with the reason, and on the rule's row in the list. Return in a
+  field confirms it and Escape reverts it; neither closes the dialog.
+  Adding, removing, reordering, importing and exporting rules, and the
+  saved config, are unchanged.
 
 ## [0.3.0] — 2026-09-30
 

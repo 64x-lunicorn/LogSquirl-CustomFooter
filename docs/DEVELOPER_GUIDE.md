@@ -135,16 +135,22 @@ in a detail panel on the right.
 - **`RuleDetailPanel`** edits a copy of the selected rule and emits
   `edited()` on every change; the editor stores `entry()` into the selected
   row, which updates the list at once. `showEntry()` never emits `edited()`,
-  so showing a rule cannot change it. The panel is a column of sections
+  so showing a rule cannot change it. Return in a field only confirms it
+  and Escape reverts it, instead of closing the dialog. Actions that do not
+  take the focus (the tool buttons, OK and Apply) first call
+  `commitPendingEdit()`, so a mapping cell still being typed is kept. The
+  fields take patterns of any length. The panel is a column of sections
   (fields, mappings), so a live preview or a simple mode for the patterns
   can be added as further sections.
-- **Validation** runs after every change, over all rules: an invalid
-  pattern, or an enabled rule with a line pattern but no key, becomes a
-  problem of that field. Problems are marked at the field with the reason,
-  on the rule's row in the list, and below the list with the rule number;
-  OK and Apply stay disabled while there are any. Each pattern is compiled
-  once and its error cached (`FooterEditor::patternCompilations()`), so
-  editing, selecting or moving rules compiles only patterns that changed.
+- **Validation** checks one rule: an invalid pattern, or an enabled rule
+  with a line pattern but no key, becomes a problem of that field. An edit
+  validates only the edited rule, and new rules are validated when they are
+  added; removing or moving rules validates nothing and only renumbers the
+  problems. Problems are marked at the field with the reason, on the rule's
+  row in the list (`problemColor()`), and below the list with the rule
+  number; OK and Apply stay disabled while there are any. Each pattern is
+  compiled once per dialog and its error cached
+  (`FooterEditor::patternCompilations()`, `ruleValidations()`).
 
 The editor never changes rules it only shows: a config saved by 0.3.0 is
 saved back byte for byte (`tests/configroundtrip_test.cpp`).

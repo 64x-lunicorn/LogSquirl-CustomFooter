@@ -85,6 +85,57 @@ public:
         bool resumed = false;
     };
 
+    /// What one rule finds in a file, for the editor's live preview.
+    struct Preview {
+        enum class Status {
+            Scanned,        ///< The file was scanned; see the fields below.
+            NoFile,         ///< No file was given.
+            NoLinePattern,  ///< The rule has no line pattern, so it finds nothing.
+            InvalidPattern, ///< A pattern of the rule does not compile; see error.
+            Unreadable,     ///< The file could not be opened.
+            Cancelled,      ///< The preview was cancelled; nothing else is set.
+        };
+        Status status = Status::NoFile;
+        QString error;       ///< Why a pattern is invalid.
+        QString filePath;    ///< The file previewed.
+        QString key;         ///< The rule's key.
+        bool enabled = true; ///< Whether the rule is enabled; a disabled one supplies nothing.
+
+        /// The rule's first match, if any: the value the footer would show
+        /// from it, and the line it is in.
+        std::optional<FooterValue> value;
+        qint64 lineNumber = 0; ///< Of the first match, counting from 1.
+        QString line;          ///< The first matching line, as matched: at most kMaxLineBytes.
+        /// Where the line pattern matched in line, and where the value was
+        /// captured; -1 where the value was captured by an optional group
+        /// that did not take part.
+        qsizetype lineMatchStart = -1;
+        qsizetype lineMatchLength = 0;
+        qsizetype valueStart = -1;
+        qsizetype valueLength = 0;
+
+        /// Lines the rule takes a value from, within the limits.
+        qint64 matches = 0;
+        /// Lines scanned, including a last line without a line break.
+        qint64 lines = 0;
+        /// The scan stopped at maxLines, or at kMaxScanBytes, before the end
+        /// of the file.
+        bool lineLimitReached = false;
+        bool byteLimitReached = false;
+
+        /// Other enabled rules have the same key.
+        bool sharedKey = false;
+        /// The value the footer shows for the rule's key in this file, from
+        /// whichever of its rules supplies it, and the line it is in.
+        std::optional<FooterValue> keyValue;
+        qint64 keyLineNumber = 0;
+
+        bool limitReached() const
+        {
+            return lineLimitReached || byteLimitReached;
+        }
+    };
+
     explicit FooterScanner( const QList<FooterEntry>& entries );
 
     /// One message per skipped rule, in rule order.
@@ -125,6 +176,21 @@ public:
     Scan scanFrom( const QString& filePath, const Progress& from, int maxLines = kDefaultMaxLines,
                    const std::atomic_bool* cancelled = nullptr ) const;
 
+    /**
+     * Preview what the rule at @p rule of @p entries finds in a file, with
+     * the matching of scanFile() and its limits.
+     *
+     * Unlike a scan, the preview reads on to the limits after the first
+     * match, to count the matching lines. The rule is previewed even when
+     * disabled; which rule supplies its key's value is decided among the
+     * enabled rules with that key, as the footer does.
+     *
+     * @param cancelled  Checked per line, and while skipping over-long lines.
+     */
+    static Preview preview( const QString& filePath, const QList<FooterEntry>& entries, int rule,
+                            int maxLines = kDefaultMaxLines,
+                            const std::atomic_bool* cancelled = nullptr );
+
     /// The given values, once per key, at the position of the key's first rule.
     QList<FooterValue> footerValues( const Values& values ) const;
 
@@ -144,8 +210,23 @@ private:
         QList<ValueMapping> mappings;
     };
 
+    /// A rule's value in a line, and where it was found there.
+    struct Match {
+        FooterValue value;
+        qsizetype lineMatchStart = -1;
+        qsizetype lineMatchLength = 0;
+        qsizetype valueStart = -1;
+        qsizetype valueLength = 0;
+    };
+
+    /// Compile a rule; empty and with @p problem set if it cannot be used.
+    static std::optional<Rule> compile( const FooterEntry& entry, int index, QString* problem );
+
+    /// The value a rule extracts from a line, if it matches, and where.
+    static std::optional<Match> matchOf( const Rule& rule, const QString& line );
+
     /// The value a rule extracts from a line, if it matches.
-    std::optional<FooterValue> valueOf( const Rule& rule, const QString& line ) const;
+    static std::optional<FooterValue> valueOf( const Rule& rule, const QString& line );
 
     /// Whether the file is still the one the progress was made on.
     static bool continues( QFile& file, const Progress& from );

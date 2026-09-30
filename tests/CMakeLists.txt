@@ -49,6 +49,8 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/footerscanner.cpp"
         "${CMAKE_SOURCE_DIR}/src/footereditor.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerdisplaywidget.cpp"
+        "${CMAKE_SOURCE_DIR}/src/rulelistmodel.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ruledetailpanel.cpp"
 )
 
 target_link_libraries(logsquirl_custom_footer_tests

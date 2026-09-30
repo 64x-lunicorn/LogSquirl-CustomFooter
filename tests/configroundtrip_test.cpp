@@ -26,8 +26,10 @@
 
 #include "footerconfig.h"
 #include "footereditor.h"
+#include "rulelistmodel.h"
 
 #include <QFile>
+#include <QTableView>
 #include <QTemporaryDir>
 
 using namespace custom_footer;
@@ -57,10 +59,16 @@ void writeFile( const QString& path, const QByteArray& content )
     REQUIRE( file.write( content ) == content.size() );
 }
 
-/// Pass rules through the editor as the user would when only looking at them.
+/// Pass rules through the editor as the user would when only looking at
+/// them: every rule is selected and shown in the detail panel.
 QList<FooterEntry> throughEditor( const QList<FooterEntry>& entries )
 {
     FooterEditor editor( entries );
+    auto* list = editor.findChild<QTableView*>( "ruleList" );
+    REQUIRE( list );
+    for ( int row = 0; row < list->model()->rowCount(); ++row ) {
+        list->setCurrentIndex( list->model()->index( row, RuleListModel::KeyColumn ) );
+    }
     return editor.entries();
 }
 

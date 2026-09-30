@@ -22,28 +22,39 @@
 #include "footerentry.h"
 
 #include <QDialog>
-#include <QDialogButtonBox>
-#include <QGroupBox>
 #include <QHash>
-#include <QLabel>
 #include <QList>
-#include <QTableWidget>
-#include <QToolButton>
+#include <QString>
+
+class QDialogButtonBox;
+class QLabel;
+class QTableView;
+class QToolButton;
 
 namespace custom_footer {
+
+class RuleDetailPanel;
+class RuleListModel;
 
 /**
  * Modal dialog for editing footer extraction rules.
  *
  * Layout:
- *   - QTableWidget with five columns: Enabled, Key, Line Pattern, Value Pattern, Mappings
- *   - Toolbar row with [+] [-] [↑] [↓] [Import] [Export] buttons
- *   - Inline mapping editor panel below the table
- *   - QDialogButtonBox with OK / Cancel / Apply
+ *   - Left: the rule list (RuleListModel in a QTableView), one row per rule
+ *     with its enabled check box, key and line pattern, and below it the
+ *     [+] [-] [↑] [↓] [Import] [Export] buttons
+ *   - Right: the RuleDetailPanel for the selected rule, with all its fields
+ *     and value mappings
+ *   - Below: the problems of all rules, and OK / Cancel / Apply
+ *
+ * The rules live in the model, one row each with its mappings and problems,
+ * so they stay together whichever way the list changes. Edits in the panel
+ * are stored into the selected rule as they are made.
  *
  * Rules are validated as they are edited: an invalid pattern, or an enabled
- * rule with a line pattern but no key, is marked in its cell and blocks OK
- * and Apply. Rules may share a key: they are alternatives for its value.
+ * rule with a line pattern but no key, is marked at its field and in the
+ * list and blocks OK and Apply. Rules may share a key: they are
+ * alternatives for its value.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -76,21 +87,15 @@ private Q_SLOTS:
     void updateButtons();
     void importRules();
     void exportRules();
-    void showMappingsOfCurrentRule();
-    void addMapping();
-    void removeMapping();
-    void storeMappingsOfCurrentRule();
+    void showCurrentRule();
+    void storePanelInCurrentRule();
+    void ruleChanged( int row );
     void validate();
 
 private:
-    void populateTable( const QList<FooterEntry>& entries );
-    void setRow( int row, const FooterEntry& entry );
+    int currentRow() const;
+    void selectRow( int row );
     void moveEntry( int from, int to );
-
-    /// The mappings of a rule live in its Mappings cell, so they stay with
-    /// the rule's row whichever way the table changes.
-    QList<ValueMapping> mappingsOf( int row ) const;
-    void setMappings( int row, const QList<ValueMapping>& mappings );
 
     /// Why a pattern does not compile, remembered from the last validate(),
     /// so that validating compiles only the patterns edited since.
@@ -98,7 +103,13 @@ private:
     QHash<QString, QString> patternErrors_;
     int patternCompilations_ = 0;
 
-    QTableWidget* table_ = nullptr;
+    RuleListModel* model_ = nullptr;
+    QTableView* list_ = nullptr;
+    RuleDetailPanel* panel_ = nullptr;
+    /// Set while the panel's edits are stored, which must not show the rule
+    /// in the panel again.
+    bool storingPanel_ = false;
+
     QToolButton* addButton_ = nullptr;
     QToolButton* removeButton_ = nullptr;
     QToolButton* upButton_ = nullptr;
@@ -107,12 +118,6 @@ private:
     QToolButton* exportButton_ = nullptr;
     QLabel* problemLabel_ = nullptr;
     QDialogButtonBox* buttonBox_ = nullptr;
-
-    // Mapping editor panel, showing the mappings of the current rule.
-    QGroupBox* mappingGroup_ = nullptr;
-    QTableWidget* mappingTable_ = nullptr;
-    QToolButton* addMappingButton_ = nullptr;
-    QToolButton* removeMappingButton_ = nullptr;
 };
 
 } // namespace custom_footer

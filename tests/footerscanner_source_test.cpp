@@ -63,7 +63,7 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
 
         WHEN( "it is scanned" )
         {
-            const auto values = scanner.footerValues( scanner.scanFrom( path, {} ) );
+            const auto values = scanner.footerValues( scanner.scanFrom( path, {} ).values );
 
             THEN( "each value carries its key, shown value, raw value and rule, in rule order" )
             {
@@ -82,7 +82,7 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
 
         WHEN( "it is scanned" )
         {
-            const auto values = scanner.footerValues( scanner.scanFrom( path, {} ) );
+            const auto values = scanner.footerValues( scanner.scanFrom( path, {} ).values );
 
             THEN( "the value names the alternative that supplied it" )
             {
@@ -102,7 +102,7 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
         {
             const auto next = scanner.scanFrom( path, first.progress );
             REQUIRE( next.resumed );
-            const auto values = scanner.footerValues( next );
+            const auto values = scanner.footerValues( next.values );
 
             THEN( "values from before and after keep their sources" )
             {
@@ -119,7 +119,7 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
 
         WHEN( "it is scanned" )
         {
-            const auto values = scanner.footerValues( scanner.scanFrom( path, {} ) );
+            const auto values = scanner.footerValues( scanner.scanFrom( path, {} ).values );
 
             THEN( "the value of that line has its source too" )
             {

@@ -86,8 +86,8 @@ SCENARIO( "FooterScanner continues a scan when the file grows", "[footerscanner]
             {
                 REQUIRE( next.resumed );
                 REQUIRE( next.progress.lines == 3 );
-                REQUIRE( next.values[ "VIN" ] == "ABC" );
-                REQUIRE( next.values[ "ID" ] == "7" );
+                REQUIRE( next.values[ "VIN" ].value == "ABC" );
+                REQUIRE( next.values[ "ID" ].value == "7" );
                 REQUIRE( next.progress.done );
             }
         }
@@ -122,7 +122,7 @@ SCENARIO( "FooterScanner continues a scan when the file grows", "[footerscanner]
             THEN( "only the appended bytes are scanned" )
             {
                 REQUIRE( next.resumed );
-                REQUIRE( next.values[ "ID" ] == "1" );
+                REQUIRE( next.values[ "ID" ].value == "1" );
             }
 
             THEN( "a fresh scan would find the changed line" )
@@ -139,7 +139,7 @@ SCENARIO( "FooterScanner continues a scan when the file grows", "[footerscanner]
 
         THEN( "the partial line is matched but not remembered" )
         {
-            REQUIRE( first.values[ "VIN" ] == "PART" );
+            REQUIRE( first.values[ "VIN" ].value == "PART" );
             REQUIRE_FALSE( first.progress.values.contains( "VIN" ) );
             REQUIRE( first.progress.lines == 1 );
             REQUIRE( first.progress.offset == 5 );
@@ -153,7 +153,7 @@ SCENARIO( "FooterScanner continues a scan when the file grows", "[footerscanner]
             THEN( "the complete value is found" )
             {
                 REQUIRE( next.resumed );
-                REQUIRE( next.values[ "VIN" ] == "PARTIAL" );
+                REQUIRE( next.values[ "VIN" ].value == "PARTIAL" );
                 REQUIRE( next.progress.done );
             }
         }
@@ -200,7 +200,7 @@ SCENARIO( "FooterScanner starts over when the file was replaced", "[footerscanne
             THEN( "it is scanned from the start" )
             {
                 REQUIRE_FALSE( next.resumed );
-                REQUIRE( next.values[ "VIN" ] == "NEW" );
+                REQUIRE( next.values[ "VIN" ].value == "NEW" );
                 REQUIRE_FALSE( next.values.contains( "ID" ) );
             }
         }
@@ -214,8 +214,8 @@ SCENARIO( "FooterScanner starts over when the file was replaced", "[footerscanne
             THEN( "it is scanned from the start" )
             {
                 REQUIRE_FALSE( next.resumed );
-                REQUIRE( next.values[ "VIN" ] == "REPLACED" );
-                REQUIRE( next.values[ "ID" ] == "new" );
+                REQUIRE( next.values[ "VIN" ].value == "REPLACED" );
+                REQUIRE( next.values[ "ID" ].value == "new" );
             }
         }
 

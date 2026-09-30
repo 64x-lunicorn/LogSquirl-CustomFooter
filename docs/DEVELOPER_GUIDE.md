@@ -100,7 +100,7 @@ through `guarded()`, which logs the failure instead.
 2. Rules sharing a key are **alternatives**: the key's value comes from the
    first line that any of them matches; if several match that line, the
    rule higher in the list wins. The key is shown once, at the position of
-   its first rule (`FooterScanner::inRuleOrder()`).
+   its first rule (`FooterScanner::footerValues()`).
 3. Read the log file line by line, up to `maxLines` lines and at most
    64 MiB, even inside a single huge line. Lines longer than 64 KiB are
    matched against their first 64 KiB.
@@ -112,9 +112,9 @@ through `guarded()`, which logs the failure instead.
      the whole match is the value.
    - **Value Mapping**: If mappings are defined for the rule, substitute the
      raw value with the matching display value (exact string comparison).
-5. Remember for each key the raw value and the index of the rule that
-   supplied it (`Scan::sources`); `FooterScanner::footerValues()` hands the
-   widget `FooterValue`s in rule order, for the tooltips.
+5. Each found value is a `FooterValue`: key, shown value, raw value and the
+   index of the rule that supplied it. `FooterScanner::footerValues()`
+   hands them to the widget in rule order, for display and tooltips.
 6. Stop early once every key has a value.
 7. **Incremental rescans**: `scanFrom()` returns the scan's progress (offset
    and count of the complete lines scanned, the values found, and bytes

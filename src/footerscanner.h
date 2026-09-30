@@ -25,7 +25,6 @@
 #include <QDateTime>
 #include <QList>
 #include <QMap>
-#include <QPair>
 #include <QRegularExpression>
 #include <QString>
 #include <QStringList>
@@ -62,30 +61,25 @@ public:
     /// a file, to tell whether it is still the file scanned before.
     static constexpr qint64 kIdentityBytes = 256;
 
-    /// Where a found value came from.
-    struct Source {
-        QString rawValue; ///< Before the mappings.
-        int rule = -1;    ///< Index of the rule in the entries.
-    };
+    /// Found values by key, each with its raw value and rule.
+    using Values = QMap<QString, FooterValue>;
 
     /// How far a file has been scanned, to continue there once it has grown.
     struct Progress {
         /// End of the last complete line scanned, or where the scan limit
         /// stopped the scan inside a line.
         qint64 offset = 0;
-        int lines = 0;                 ///< Complete lines scanned.
-        QMap<QString, QString> values; ///< Found in those lines.
-        QMap<QString, Source> sources; ///< Where those values came from.
-        bool done = false;             ///< Every key has a value, or a limit was reached.
-        QByteArray head;               ///< The file's first bytes, up to offset.
-        QByteArray tail;               ///< The bytes just before offset.
-        QDateTime birthTime;           ///< Invalid where the platform has none.
+        int lines = 0;       ///< Complete lines scanned.
+        Values values;       ///< Found in those lines.
+        bool done = false;   ///< Every key has a value, or a limit was reached.
+        QByteArray head;     ///< The file's first bytes, up to offset.
+        QByteArray tail;     ///< The bytes just before offset.
+        QDateTime birthTime; ///< Invalid where the platform has none.
     };
 
     struct Scan {
         /// Found so far, including in a last line that is not terminated yet.
-        QMap<QString, QString> values;
-        QMap<QString, Source> sources; ///< Where those values came from.
+        Values values;
         Progress progress;
         /// Whether the scan continued from the given progress.
         bool resumed = false;
@@ -111,7 +105,7 @@ public:
      * @param maxLines   Maximum number of lines to scan (0 = unlimited).
      * @param cancelled  Checked per line, and while skipping over-long lines;
      *                   when set, the scan returns nothing.
-     * @return Map from entry key to matched value.
+     * @return Map from entry key to matched value, as shown.
      */
     QMap<QString, QString> scanFile( const QString& filePath, int maxLines = kDefaultMaxLines,
                                      const std::atomic_bool* cancelled = nullptr ) const;
@@ -131,13 +125,8 @@ public:
     Scan scanFrom( const QString& filePath, const Progress& from, int maxLines = kDefaultMaxLines,
                    const std::atomic_bool* cancelled = nullptr ) const;
 
-    /// The given values as key-value pairs, once per key, at the position of
-    /// the key's first rule.
-    QList<QPair<QString, QString>> inRuleOrder( const QMap<QString, QString>& values ) const;
-
-    /// The values of a scan, once per key, at the position of the key's
-    /// first rule, with the raw value and the rule that supplied each.
-    QList<FooterValue> footerValues( const Scan& scan ) const;
+    /// The given values, once per key, at the position of the key's first rule.
+    QList<FooterValue> footerValues( const Values& values ) const;
 
     /// Compile the entries and scan a file in one go.
     static QMap<QString, QString> scan( const QString& filePath, const QList<FooterEntry>& entries,
@@ -155,8 +144,8 @@ private:
         QList<ValueMapping> mappings;
     };
 
-    /// The value a rule extracts from a line, if it matches, and its raw value.
-    std::optional<QPair<QString, Source>> valueOf( const Rule& rule, const QString& line ) const;
+    /// The value a rule extracts from a line, if it matches.
+    std::optional<FooterValue> valueOf( const Rule& rule, const QString& line ) const;
 
     /// Whether the file is still the one the progress was made on.
     static bool continues( QFile& file, const Progress& from );

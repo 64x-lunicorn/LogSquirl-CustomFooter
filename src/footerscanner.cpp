@@ -136,7 +136,12 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
 QMap<QString, QString> FooterScanner::scanFile( const QString& filePath, int maxLines,
                                                 const std::atomic_bool* cancelled ) const
 {
-    return scanFrom( filePath, {}, maxLines, cancelled ).values;
+    QMap<QString, QString> shown;
+    const auto values = scanFrom( filePath, {}, maxLines, cancelled ).values;
+    for ( auto it = values.begin(); it != values.end(); ++it ) {
+        shown.insert( it.key(), it->value );
+    }
+    return shown;
 }
 
 FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Progress& from,
@@ -159,7 +164,6 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         progress = from;
         if ( progress.done ) {
             scan.values = progress.values;
-            scan.sources = progress.sources;
             return scan;
         }
     }
@@ -171,9 +175,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         return ( maxLines > 0 && progress.lines >= maxLines ) || progress.offset >= kMaxScanBytes;
     };
 
-    // Values found in a last line without a line break, and their sources.
-    QMap<QString, QString> unterminated;
-    QMap<QString, Source> unterminatedSources;
+    // Values found in a last line without a line break.
+    Values unterminated;
     // The scan limit was reached inside a line, before its end.
     bool stoppedInLine = false;
 
@@ -200,10 +203,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
             }
 
             auto& values = terminated ? progress.values : unterminated;
-            auto& sources = terminated ? progress.sources : unterminatedSources;
             if ( !terminated ) {
                 values = progress.values;
-                sources = progress.sources;
             }
 
             const QString line = QString::fromUtf8( rawLine );
@@ -212,8 +213,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                     continue;
                 }
                 if ( const auto found = valueOf( rule, line ) ) {
-                    values.insert( rule.key, found->first );
-                    sources.insert( rule.key, found->second );
+                    values.insert( rule.key, *found );
                 }
             }
 
@@ -236,7 +236,6 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     progress.tail = readAt( file, progress.offset - tailSize, tailSize );
 
     scan.values = unterminated.isEmpty() ? progress.values : unterminated;
-    scan.sources = unterminated.isEmpty() ? progress.sources : unterminatedSources;
     return scan;
 }
 
@@ -255,8 +254,7 @@ bool FooterScanner::continues( QFile& file, const Progress& from )
            && readAt( file, from.offset - from.tail.size(), from.tail.size() ) == from.tail;
 }
 
-std::optional<QPair<QString, FooterScanner::Source>>
-FooterScanner::valueOf( const Rule& rule, const QString& line ) const
+std::optional<FooterValue> FooterScanner::valueOf( const Rule& rule, const QString& line ) const
 {
     const auto lineMatch = rule.lineRegex.match( line );
     if ( !lineMatch.hasMatch() ) {
@@ -283,32 +281,17 @@ FooterScanner::valueOf( const Rule& rule, const QString& line ) const
             break;
         }
     }
-    return qMakePair( value, Source{ rawValue, rule.index } );
+    return FooterValue{ rule.key, value, rawValue, rule.index };
 }
 
-QList<QPair<QString, QString>>
-FooterScanner::inRuleOrder( const QMap<QString, QString>& values ) const
-{
-    QList<QPair<QString, QString>> ordered;
-    for ( const auto& key : keys_ ) {
-        const auto it = values.find( key );
-        if ( it != values.end() ) {
-            ordered.append( { key, it.value() } );
-        }
-    }
-    return ordered;
-}
-
-QList<FooterValue> FooterScanner::footerValues( const Scan& scan ) const
+QList<FooterValue> FooterScanner::footerValues( const Values& values ) const
 {
     QList<FooterValue> ordered;
     for ( const auto& key : keys_ ) {
-        const auto it = scan.values.find( key );
-        if ( it == scan.values.end() ) {
-            continue;
+        const auto it = values.find( key );
+        if ( it != values.end() ) {
+            ordered.append( it.value() );
         }
-        const auto source = scan.sources.value( key, { it.value(), -1 } );
-        ordered.append( { key, it.value(), source.rawValue, source.rule } );
     }
     return ordered;
 }

@@ -262,9 +262,10 @@ SCENARIO( "FooterScanner treats rules sharing a key as alternatives", "[footersc
 
             THEN( "the ordered values show the key once" )
             {
-                const auto ordered = scanner.inRuleOrder( results );
+                const auto ordered
+                    = scanner.footerValues( scanner.scanFrom( filePath, {} ).values );
                 REQUIRE( ordered.size() == 1 );
-                REQUIRE( ordered[ 0 ].first == "VIN" );
+                REQUIRE( ordered[ 0 ].key == "VIN" );
             }
 
             THEN( "nothing is reported" )
@@ -307,13 +308,13 @@ SCENARIO( "FooterScanner treats rules sharing a key as alternatives", "[footersc
         WHEN( "only the later alternative matches" )
         {
             const FooterScanner scanner( entries );
-            const auto ordered = scanner.inRuleOrder( scanner.scanFile( filePath ) );
+            const auto ordered = scanner.footerValues( scanner.scanFrom( filePath, {} ).values );
 
             THEN( "the key is shown at the position of its first rule" )
             {
                 REQUIRE( ordered.size() == 2 );
-                REQUIRE( ordered[ 0 ] == qMakePair( QString( "Version" ), QString( "2.0" ) ) );
-                REQUIRE( ordered[ 1 ] == qMakePair( QString( "ID" ), QString( "42" ) ) );
+                REQUIRE( ordered[ 0 ] == FooterValue{ "Version", "2.0", "2.0", 2 } );
+                REQUIRE( ordered[ 1 ] == FooterValue{ "ID", "42", "42", 1 } );
             }
         }
     }
@@ -396,13 +397,14 @@ SCENARIO( "FooterScanner orders values by rule definition", "[footerscanner][edg
 
         WHEN( "ordering the values" )
         {
-            const auto ordered = scanner.inRuleOrder( { { "Alpha", "1" }, { "Zeta", "2" } } );
+            const auto ordered = scanner.footerValues(
+                { { "Alpha", { "Alpha", "1", "1", 1 } }, { "Zeta", { "Zeta", "2", "2", 0 } } } );
 
             THEN( "they follow the rule order, not the key order" )
             {
                 REQUIRE( ordered.size() == 2 );
-                REQUIRE( ordered[ 0 ] == qMakePair( QString( "Zeta" ), QString( "2" ) ) );
-                REQUIRE( ordered[ 1 ] == qMakePair( QString( "Alpha" ), QString( "1" ) ) );
+                REQUIRE( ordered[ 0 ].key == "Zeta" );
+                REQUIRE( ordered[ 1 ].key == "Alpha" );
             }
         }
     }
@@ -530,8 +532,8 @@ SCENARIO( "FooterScanner bounds what it reads", "[footerscanner][edge]" )
 
             THEN( "the start of the crossing line is still matched, and the scan is done" )
             {
-                REQUIRE( scan.values[ "VIN" ] == "EARLY" );
-                REQUIRE( scan.progress.values[ "VIN" ] == "EARLY" );
+                REQUIRE( scan.values[ "VIN" ].value == "EARLY" );
+                REQUIRE( scan.progress.values[ "VIN" ].value == "EARLY" );
                 REQUIRE( scan.progress.done );
             }
         }

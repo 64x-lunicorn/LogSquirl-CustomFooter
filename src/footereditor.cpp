@@ -19,6 +19,7 @@
 
 #include "footereditor.h"
 #include "footerconfig.h"
+#include "footerscanner.h"
 
 #include <QCheckBox>
 #include <QFileDialog>
@@ -26,6 +27,7 @@
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
@@ -55,14 +57,17 @@ public:
     {
         return checkbox_->isChecked();
     }
-    void setChecked( bool checked )
+    QCheckBox* checkbox() const
     {
-        checkbox_->setChecked( checked );
+        return checkbox_;
     }
 
 private:
     QCheckBox* checkbox_;
 };
+
+/// Background for cells whose content keeps the rules from being saved.
+const QColor kProblemColor( 220, 50, 50, 70 );
 
 } // namespace
 
@@ -162,7 +167,12 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     mappingGroup_->setEnabled( false );
     mainLayout->addWidget( mappingGroup_, 2 );
 
-    // ── Button Box ───────────────────────────────────────────────────────
+    // ── Problems + Button Box ────────────────────────────────────────────
+    problemLabel_ = new QLabel( this );
+    problemLabel_->setWordWrap( true );
+    problemLabel_->hide();
+    mainLayout->addWidget( problemLabel_ );
+
     buttonBox_ = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply, this );
     mainLayout->addWidget( buttonBox_ );
@@ -175,6 +185,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( importButton_, &QToolButton::clicked, this, &FooterEditor::importRules );
     connect( exportButton_, &QToolButton::clicked, this, &FooterEditor::exportRules );
 
+    connect( table_, &QTableWidget::itemChanged, this, &FooterEditor::validate );
     connect( table_, &QTableWidget::currentCellChanged, this, [ this ]( int, int, int, int ) {
         showMappingsOfCurrentRule();
         updateButtons();
@@ -268,6 +279,7 @@ void FooterEditor::removeEntry()
 
     showMappingsOfCurrentRule();
     updateButtons();
+    validate();
 }
 
 void FooterEditor::moveEntryUp()
@@ -393,6 +405,54 @@ void FooterEditor::storeMappingsOfCurrentRule()
     setMappings( row, mappings );
 }
 
+void FooterEditor::validate()
+{
+    QStringList problems;
+    QSet<QString> enabledKeys;
+
+    // Marking a cell changes its item: do not validate again for that.
+    const QSignalBlocker blocker( table_ );
+    for ( int row = 0; row < table_->rowCount(); ++row ) {
+        const auto mark = [ this, row, &problems ]( int column, const QString& problem ) {
+            auto* item = table_->item( row, column );
+            if ( !item ) {
+                return;
+            }
+            item->setToolTip( problem );
+            item->setBackground( problem.isEmpty() ? QBrush() : QBrush( kProblemColor ) );
+            if ( !problem.isEmpty() ) {
+                problems.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
+            }
+        };
+
+        const auto* keyItem = table_->item( row, 1 );
+        const auto key = keyItem ? keyItem->text() : QString();
+        const auto* checkbox = static_cast<CenteredCheckbox*>( table_->cellWidget( row, 0 ) );
+        QString keyProblem;
+        if ( checkbox && checkbox->isChecked() ) {
+            if ( enabledKeys.contains( key ) ) {
+                keyProblem
+                    = tr( "the key \"%1\" is already used by an enabled rule above" ).arg( key );
+            }
+            enabledKeys.insert( key );
+        }
+        mark( 1, keyProblem );
+
+        const auto patternProblem = [ this, row ]( int column, const QString& what ) {
+            const auto* item = table_->item( row, column );
+            const auto error = FooterScanner::patternError( item ? item->text() : QString() );
+            return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
+        };
+        mark( 2, patternProblem( 2, tr( "invalid line pattern" ) ) );
+        mark( 3, patternProblem( 3, tr( "invalid value pattern" ) ) );
+    }
+
+    problemLabel_->setText( problems.join( '\n' ) );
+    problemLabel_->setVisible( !problems.isEmpty() );
+    buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( problems.isEmpty() );
+    buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( problems.isEmpty() );
+}
+
 // ── Private helpers ──────────────────────────────────────────────────────
 
 void FooterEditor::populateTable( const QList<FooterEntry>& entries )
@@ -405,11 +465,14 @@ void FooterEditor::populateTable( const QList<FooterEntry>& entries )
     // The current cell may stay where it was while its rule is replaced.
     showMappingsOfCurrentRule();
     updateButtons();
+    validate();
 }
 
 void FooterEditor::setRow( int row, const FooterEntry& entry )
 {
-    table_->setCellWidget( row, 0, new CenteredCheckbox( entry.enabled, table_ ) );
+    auto* checkbox = new CenteredCheckbox( entry.enabled, table_ );
+    connect( checkbox->checkbox(), &QCheckBox::toggled, this, &FooterEditor::validate );
+    table_->setCellWidget( row, 0, checkbox );
     table_->setItem( row, 1, new QTableWidgetItem( entry.key ) );
     table_->setItem( row, 2, new QTableWidgetItem( entry.linePattern ) );
     table_->setItem( row, 3, new QTableWidgetItem( entry.valuePattern ) );

@@ -39,6 +39,10 @@ namespace custom_footer {
  *   - Toolbar row with [+] [-] [↑] [↓] [Import] [Export] buttons
  *   - Inline mapping editor panel below the table
  *   - QDialogButtonBox with OK / Cancel / Apply
+ *
+ * Rules are validated as they are edited: an invalid pattern, or a key an
+ * earlier enabled rule already uses, is marked in its cell and blocks OK and
+ * Apply.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -68,6 +72,7 @@ private Q_SLOTS:
     void addMapping();
     void removeMapping();
     void storeMappingsOfCurrentRule();
+    void validate();
 
 private:
     void populateTable( const QList<FooterEntry>& entries );
@@ -86,6 +91,7 @@ private:
     QToolButton* downButton_ = nullptr;
     QToolButton* importButton_ = nullptr;
     QToolButton* exportButton_ = nullptr;
+    QLabel* problemLabel_ = nullptr;
     QDialogButtonBox* buttonBox_ = nullptr;
 
     // Mapping editor panel, showing the mappings of the current rule.

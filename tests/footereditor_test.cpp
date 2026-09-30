@@ -251,3 +251,79 @@ SCENARIO( "FooterEditor keeps the mapping panel live after an import", "[footere
         }
     }
 }
+
+SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]" )
+{
+    GIVEN( "an editor with two valid rules" )
+    {
+        FooterEditor editor( { entryWithMapping( "A" ), entryWithMapping( "B" ) } );
+        EditorUi ui( editor );
+        REQUIRE( ui.canAccept() );
+
+        WHEN( "a line pattern becomes invalid" )
+        {
+            ui.rules->item( 0, 2 )->setText( "[unclosed" );
+
+            THEN( "the cell explains the error and the rules cannot be saved" )
+            {
+                REQUIRE_FALSE( ui.rules->item( 0, 2 )->toolTip().isEmpty() );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+
+            AND_WHEN( "it is fixed again" )
+            {
+                ui.rules->item( 0, 2 )->setText( "[closed]" );
+
+                THEN( "the rules can be saved" )
+                {
+                    REQUIRE( ui.rules->item( 0, 2 )->toolTip().isEmpty() );
+                    REQUIRE( ui.canAccept() );
+                }
+            }
+        }
+
+        WHEN( "a value pattern becomes invalid" )
+        {
+            ui.rules->item( 1, 3 )->setText( "(" );
+
+            THEN( "the rules cannot be saved" )
+            {
+                REQUIRE_FALSE( ui.rules->item( 1, 3 )->toolTip().isEmpty() );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+        }
+
+        WHEN( "the second rule takes the key of the first" )
+        {
+            ui.rules->item( 1, 1 )->setText( "A" );
+
+            THEN( "the duplicate key is marked and the rules cannot be saved" )
+            {
+                REQUIRE_FALSE( ui.rules->item( 1, 1 )->toolTip().isEmpty() );
+                REQUIRE( ui.rules->item( 0, 1 )->toolTip().isEmpty() );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+
+            AND_WHEN( "one of them is disabled" )
+            {
+                ui.setEnabled( 0, false );
+
+                THEN( "the rules can be saved" )
+                {
+                    REQUIRE( ui.canAccept() );
+                }
+            }
+        }
+    }
+
+    GIVEN( "rules loaded with an invalid pattern" )
+    {
+        FooterEditor editor( { { "Bad", "(", "", true, {} } } );
+        EditorUi ui( editor );
+
+        THEN( "they cannot be saved until fixed" )
+        {
+            REQUIRE_FALSE( ui.canAccept() );
+        }
+    }
+}

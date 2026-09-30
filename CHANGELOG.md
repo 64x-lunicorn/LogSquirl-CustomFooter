@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Duplicate keys** — when several enabled rules share a key, the first rule
   in the list owns it; later ones are ignored and reported in the host log.
   Previously the key was shown twice and the last rule won.
+- **Rule validation in the editor** — invalid patterns and keys already used
+  by an enabled rule above are marked in their cell, with the reason in the
+  tooltip and below the table; OK and Apply stay disabled until they are
+  fixed.
 
 ### Fixed
 - **Mappings lost when removing a rule** — removing the selected rule could

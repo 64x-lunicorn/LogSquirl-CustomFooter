@@ -181,10 +181,13 @@ in a detail panel on the right.
 templates can build simple rules too:
 
 - **`simpleLinePattern(SimpleRule)`** generates the line pattern:
-  `QRegularExpression::escape()` of the text before the value, `\s*`, and
-  the value as capture group 1 — `(\S+)` up to whitespace, `(.*\S)` up to
-  the end of the line, or `([^c]*[^c\s])` up to the character `c` (escaped),
-  so the value never starts or ends with whitespace. A simple rule has no
+  the text before the value, `\s*`, and the value as capture group 1 —
+  `(\S+)` up to whitespace, `(.*\S)` up to the end of the line, or
+  `([^c]*[^c\s])` up to the character `c`, so the value never starts or
+  ends with whitespace. Escaping is minimal, so generated patterns read like
+  hand-written ones: the text escapes only the PCRE2 metacharacters
+  `\ ^ $ . | ? * + ( ) [ ] { }` (patterns never use extended mode, so
+  spaces and `#` stay literal), `c` only `\ ] ^ -`, and NUL is `\x{0}`. A simple rule has no
   value pattern, so the scanner's single-stage path applies. Without a
   text, or without the end character, the pattern is empty: the rule is
   incomplete, like a new one. `applySimpleRule()` sets both patterns of a

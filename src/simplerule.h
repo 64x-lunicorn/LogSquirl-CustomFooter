@@ -60,8 +60,10 @@ struct SimpleRule {
 };
 
 /**
- * The line pattern of a simple rule: the escaped text, optional whitespace,
- * and the value as the first capturing group. Simple rules need no value
+ * The line pattern of a simple rule: the text, optional whitespace, and the
+ * value as the first capturing group. Only the metacharacters
+ * `\ ^ $ . | ? * + ( ) [ ] { }` of the text are escaped, and only
+ * `\ ] ^ -` of an end character, so `VIN:` becomes `VIN:\s*(\S+)`. Simple rules need no value
  * pattern.
  *
  * Without a text, or with ValueEnd::Character but no character, the pattern

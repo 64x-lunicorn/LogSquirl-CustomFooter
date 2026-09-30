@@ -79,18 +79,18 @@ SCENARIO( "Simple rules generate a line pattern and no value pattern", "[simpler
     {
         THEN( "each way the value can end has its own capture" )
         {
-            REQUIRE( simpleLinePattern( rule( "VIN:" ) ) == "VIN\\:\\s*(\\S+)" );
+            REQUIRE( simpleLinePattern( rule( "VIN:" ) ) == "VIN:\\s*(\\S+)" );
             REQUIRE( simpleLinePattern( rule( "VIN:", ValueEnd::EndOfLine ) )
-                     == "VIN\\:\\s*(.*\\S)" );
+                     == "VIN:\\s*(.*\\S)" );
             REQUIRE( simpleLinePattern( rule( "VIN:", ValueEnd::Character, ',' ) )
-                     == "VIN\\:\\s*([^\\,]*[^\\,\\s])" );
+                     == "VIN:\\s*([^,]*[^,\\s])" );
         }
 
         THEN( "the rule gets no value pattern" )
         {
             FooterEntry entry{ "VIN", "old", "old value", true, {} };
             applySimpleRule( rule( "VIN:" ), entry );
-            REQUIRE( entry.linePattern == "VIN\\:\\s*(\\S+)" );
+            REQUIRE( entry.linePattern == "VIN:\\s*(\\S+)" );
             REQUIRE( entry.valuePattern.isEmpty() );
             REQUIRE( entry.key == "VIN" );
         }
@@ -262,8 +262,8 @@ SCENARIO( "Rules are simple only if their patterns are regenerated exactly", "[s
               { QString( "VIN:" ), QString( "[.(\\$^*+?{|)]" ), QString( "a b" ),
                 QString::fromUtf8( "Gr\xC3\xB6\xC3\x9F"
                                    "e" ),
-                QString( "x" ), QString( QChar() ) + "nul", QString( "\\s*(\\S+)" ),
-                QString::fromUtf8( "emoji \xF0\x9F\x98\x80:" ) } ) {
+                QString( "x" ), QString( QChar() ) + "nul", QString( QChar() ) + "12",
+                QString( "\\s*(\\S+)" ), QString::fromUtf8( "emoji \xF0\x9F\x98\x80:" ) } ) {
             rules.append( rule( text ) );
             rules.append( rule( text, ValueEnd::EndOfLine ) );
             for ( const QChar c : QString( ",;]^\\- x" ) ) {
@@ -304,27 +304,31 @@ SCENARIO( "Rules are simple only if their patterns are regenerated exactly", "[s
     {
         THEN( "they are advanced" )
         {
-            for ( const QString pattern : { "VIN:\\s*(\\S+)",       // colon not escaped
-                                            "VIN\\:\\s+(\\S+)",     // \s+ instead of \s*
-                                            "VIN\\:(\\S+)",         // no whitespace
-                                            "VIN\\:\\s*(\\S+)$",    // anchored
-                                            "^VIN\\:\\s*(\\S+)",    // anchored
-                                            "VIN\\:\\s*(\\S+) ",    // trailing space
-                                            "VIN\\:\\s*(\\w+)",     // other capture
-                                            "VIN\\:\\s*(.+?)\\s*$", // another end of line
-                                            "VIN\\:\\s*(.*\\S)$",   // anchored
-                                            "VIN\\:\\s*([^\\,]+)",  // another end at a character
-                                            "VIN\\:\\s*([^,]*[^,\\s])",     // character not escaped
-                                            "VIN\\:\\s*([^\\,]*[^\\;\\s])", // two characters
-                                            "VIN\\:\\s*([^\\,;]*[^\\,;\\s])", // two characters
-                                            "VIN\\:\\s*([^]*[^\\s])",         // no character
-                                            "\\s*(\\S+)",                     // no text
-                                            "VIN\\\\:\\s*(\\S+)\\",           // trailing backslash
-                                            "[Vv]IN\\:\\s*(\\S+)",            // a class in the text
-                                            "VIN\\x3a\\s*(\\S+)", // another escape in the text
-                                            "VIN\\:\\s*(\\S+)|x", // alternative
-                                            "isComponentProtectionEnabled",
-                                            "build=(\\d+)" } ) {
+            for ( const QString pattern :
+                  { "VIN\\:\\s*(\\S+)",           // needless escape
+                    "VIN\\ ID:\\s*(\\S+)",        // needless escape of a space
+                    "VIN:\\s+(\\S+)",             // \s+ instead of \s*
+                    "VIN:(\\S+)",                 // no whitespace
+                    "VIN:\\s*(\\S+)$",            // anchored
+                    "^VIN:\\s*(\\S+)",            // anchored
+                    "VIN:\\s*(\\S+) ",            // trailing space
+                    "VIN:\\s*(\\w+)",             // other capture
+                    "VIN:\\s*(.+?)\\s*$",         // another end of line
+                    "VIN:\\s*(.*\\S)$",           // anchored
+                    "VIN:\\s*([^,]+)",            // another end at a character
+                    "VIN:\\s*([^\\,]*[^\\,\\s])", // needless escape in the class
+                    "VIN:\\s*([^,]*[^;\\s])",     // two characters
+                    "VIN:\\s*([^,;]*[^,;\\s])",   // two characters
+                    "VIN:\\s*([^]*[^\\s])",       // no character
+                    "VIN:\\s*([^]]*[^]\\s])",     // ] not escaped
+                    "\\s*(\\S+)",                 // no text
+                    "VIN.\\s*(\\S+)",             // unescaped dot
+                    "VIN\\\\:\\s*(\\S+)\\",       // trailing backslash
+                    "[Vv]IN:\\s*(\\S+)",          // a class in the text
+                    "VIN\\x3a\\s*(\\S+)",         // another escape in the text
+                    "VIN:\\s*(\\S+)|x",           // alternative
+                    "isComponentProtectionEnabled",
+                    "build=(\\d+)" } ) {
                 INFO( pattern.toStdString() );
                 REQUIRE_FALSE( simpleRuleOf( pattern, QString() ) );
             }
@@ -338,7 +342,7 @@ SCENARIO( "Rules are simple only if their patterns are regenerated exactly", "[s
 
     GIVEN( "a rule that is simple" )
     {
-        FooterEntry entry{ "VIN", "VIN\\:\\s*(\\S+)", "", true, {} };
+        FooterEntry entry{ "VIN", "VIN:\\s*(\\S+)", "", true, {} };
 
         THEN( "it is classified from the entry too" )
         {
@@ -346,6 +350,73 @@ SCENARIO( "Rules are simple only if their patterns are regenerated exactly", "[s
             REQUIRE( classified.has_value() );
             REQUIRE( classified->textBefore == "VIN:" );
             REQUIRE( classified->valueEnd == ValueEnd::Whitespace );
+        }
+    }
+}
+
+SCENARIO( "Simple rules escape only what is special", "[simplerule]" )
+{
+    GIVEN( "the most common hand-written rule" )
+    {
+        THEN( "it is simple" )
+        {
+            const auto classified = simpleRuleOf( "VIN:\\s*(\\S+)", QString() );
+            REQUIRE( classified.has_value() );
+            REQUIRE( *classified == rule( "VIN:" ) );
+        }
+    }
+
+    GIVEN( "text with a space and a hash" )
+    {
+        const auto simple = rule( "Serial #: " );
+
+        THEN( "the pattern keeps them as they are, and matches" )
+        {
+            REQUIRE( simpleLinePattern( simple ) == "Serial #: \\s*(\\S+)" );
+            REQUIRE( extract( simple, "boot Serial #: SN-42 ok" ) == QString( "SN-42" ) );
+            REQUIRE( extract( simple, "boot Serial #:SN-42" ) == std::nullopt );
+            REQUIRE( simpleRuleOf( simpleLinePattern( simple ), QString() ) == simple );
+        }
+    }
+
+    GIVEN( "non-ASCII text" )
+    {
+        const auto text = QString::fromUtf8( "Gr\xC3\xB6\xC3\x9F"
+                                             "e:" );
+
+        THEN( "it is not escaped, and matches" )
+        {
+            REQUIRE( simpleLinePattern( rule( text ) ) == text + "\\s*(\\S+)" );
+            REQUIRE( extract( rule( text ), "x " + text + " 12 cm" ) == QString( "12" ) );
+            REQUIRE( simpleRuleOf( text + "\\s*(\\S+)", QString() ) == rule( text ) );
+        }
+    }
+
+    GIVEN( "metacharacters in the text" )
+    {
+        THEN( "each is escaped once" )
+        {
+            REQUIRE( simpleLinePattern( rule( "\\^$.|?*+()[]{}" ) )
+                     == "\\\\\\^\\$\\.\\|\\?\\*\\+\\(\\)\\[\\]\\{\\}\\s*(\\S+)" );
+        }
+    }
+
+    GIVEN( "end characters special in a character class" )
+    {
+        THEN( "only those are escaped, and each ends the value" )
+        {
+            const QList<QPair<QChar, QString>> classes{ { ']', "\\]" }, { '-', "\\-" },
+                                                        { '^', "\\^" }, { '\\', "\\\\" },
+                                                        { '.', "." },   { '[', "[" },
+                                                        { ',', "," } };
+            for ( const auto& [ c, escaped ] : classes ) {
+                INFO( QString( c ).toStdString() );
+                const auto simple = rule( "k=", ValueEnd::Character, c );
+                REQUIRE( simpleLinePattern( simple )
+                         == "k=\\s*([^" + escaped + "]*[^" + escaped + "\\s])" );
+                REQUIRE( extract( simple, QString( "k= ab %1cd" ).arg( c ) ) == QString( "ab" ) );
+                REQUIRE( simpleRuleOf( simpleLinePattern( simple ), QString() ) == simple );
+            }
         }
     }
 }

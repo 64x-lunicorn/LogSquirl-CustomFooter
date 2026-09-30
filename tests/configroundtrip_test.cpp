@@ -316,14 +316,14 @@ SCENARIO( "Simple and advanced rules pass through the editor unchanged",
     REQUIRE( dir.isValid() );
 
     // Simple rules with each way to end the value and special characters,
-    // rules that only look simple, and an empty rule.
+    // rules that only look simple (needless escapes, a value pattern), and an empty rule.
     const QList<FooterEntry> rules{
-        { "VIN", "VIN\\:\\s*(\\S+)", "", true, {} },
-        { "Model", "Model\\ \\(x\\)\\:\\s*(.*\\S)", "", false, {} },
-        { "User", "user\\=\\s*([^\\,]*[^\\,\\s])", "", true, { ValueMapping{ "a", "b" } } },
-        { "Path", "C\\:\\\\\\[\\$\\]\\s*(\\S+)", "", true, {} },
-        { "Near", "VIN:\\s*(\\S+)", "", true, {} },
-        { "Two", "id\\:\\s*(\\S+)", ":(\\S+)", true, {} },
+        { "VIN", "VIN:\\s*(\\S+)", "", true, {} },
+        { "Model", "Model \\(x\\):\\s*(.*\\S)", "", false, {} },
+        { "User", "user=\\s*([^,]*[^,\\s])", "", true, { ValueMapping{ "a", "b" } } },
+        { "Path", "C:\\\\\\[\\$\\]\\s*(\\S+)", "", true, {} },
+        { "Near", "VIN\\:\\s*(\\S+)", "", true, {} },
+        { "Two", "id:\\s*(\\S+)", ":(\\S+)", true, {} },
         { "", "", "", true, {} },
     };
     const QList<bool> simple{ true, true, true, true, false, false, true };

@@ -104,7 +104,8 @@ Most rules need no regex. In **simple mode** a rule is described by:
 
 The line pattern is generated from these and shown read-only; a simple rule
 needs no value pattern. `VIN:` with the value ending at whitespace becomes
-`VIN\:\s*(\S+)`. New rules start in simple mode.
+`VIN:\s*(\S+)`: only regex metacharacters are escaped. New rules start in
+simple mode, and a hand-written rule like `VIN:\s*(\S+)` opens in it.
 
 Check **Advanced** to edit the line and value patterns directly; the
 generated patterns are kept. Switching back is offered only while the

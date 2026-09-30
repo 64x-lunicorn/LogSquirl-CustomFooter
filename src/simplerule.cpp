@@ -19,11 +19,45 @@
 
 #include "simplerule.h"
 
-#include <QRegularExpression>
-
 namespace custom_footer {
 
 namespace {
+
+/// How escaped() writes NUL.
+const QLatin1String kNul( "\\x{0}" );
+
+/// Escape the characters of @p text that are in @p special with a
+/// backslash, and NUL as `\x{0}`, which no digit after it can extend;
+/// everything else stays readable as it is.
+QString escaped( const QString& text, QLatin1String special )
+{
+    QString result;
+    result.reserve( text.size() );
+    for ( const QChar c : text ) {
+        if ( c.isNull() ) {
+            result.append( kNul );
+            continue;
+        }
+        if ( special.contains( c ) ) {
+            result.append( QLatin1Char( '\\' ) );
+        }
+        result.append( c );
+    }
+    return result;
+}
+
+/// The metacharacters of PCRE2 outside a character class. Patterns are
+/// never compiled in extended mode, so whitespace and `#` are literal.
+QString escapedText( const QString& text )
+{
+    return escaped( text, QLatin1String( "\\^$.|?*+()[]{}" ) );
+}
+
+/// The characters special inside a character class.
+QString escapedInClass( QChar c )
+{
+    return escaped( QString( c ), QLatin1String( "\\]^-" ) );
+}
 
 /// Whitespace between the text and the value.
 const QLatin1String kGap( "\\s*" );
@@ -39,7 +73,7 @@ QString valuePart( ValueEnd valueEnd, QChar endCharacter )
         return kGap + QLatin1String( "(.*\\S)" );
     case ValueEnd::Character: {
         // Up to the last non-space before the character, as above.
-        const auto end = QRegularExpression::escape( QString( endCharacter ) );
+        const auto end = escapedInClass( endCharacter );
         return kGap + QLatin1String( "([^" ) + end + QLatin1String( "]*[^" ) + end
                + QLatin1String( "\\s])" );
     }
@@ -47,22 +81,27 @@ QString valuePart( ValueEnd valueEnd, QChar endCharacter )
     return {};
 }
 
-/// The text QRegularExpression::escape() made @p escaped from. Other
-/// escapes come back as the character after the backslash; comparing the
-/// escaped result with @p escaped tells those apart.
-std::optional<QString> unescape( const QString& escaped )
+/// The text escaped() made @p pattern from. Other escapes come back as the
+/// character after the backslash; escaping the result again and comparing
+/// it with @p pattern tells those apart.
+std::optional<QString> unescape( const QString& pattern )
 {
     QString text;
-    text.reserve( escaped.size() );
-    for ( qsizetype i = 0; i < escaped.size(); ++i ) {
-        if ( escaped.at( i ) != QLatin1Char( '\\' ) ) {
-            text.append( escaped.at( i ) );
+    text.reserve( pattern.size() );
+    for ( qsizetype i = 0; i < pattern.size(); ++i ) {
+        if ( pattern.at( i ) != QLatin1Char( '\\' ) ) {
+            text.append( pattern.at( i ) );
             continue;
         }
-        if ( ++i == escaped.size() ) {
+        if ( QStringView( pattern ).mid( i ).startsWith( kNul ) ) {
+            text.append( QChar() );
+            i += kNul.size() - 1;
+            continue;
+        }
+        if ( ++i == pattern.size() ) {
             return std::nullopt;
         }
-        text.append( escaped.at( i ) == QLatin1Char( '0' ) ? QChar() : escaped.at( i ) );
+        text.append( pattern.at( i ) );
     }
     return text;
 }
@@ -117,8 +156,7 @@ QString simpleLinePattern( const SimpleRule& rule )
          || ( rule.valueEnd == ValueEnd::Character && rule.endCharacter.isNull() ) ) {
         return {};
     }
-    return QRegularExpression::escape( rule.textBefore )
-           + valuePart( rule.valueEnd, rule.endCharacter );
+    return escapedText( rule.textBefore ) + valuePart( rule.valueEnd, rule.endCharacter );
 }
 
 void applySimpleRule( const SimpleRule& rule, FooterEntry& entry )

@@ -189,7 +189,7 @@ SCENARIO( "FooterEditor starts a new rule in simple mode", "[footereditor][simpl
                 const auto entries = editor.entries();
                 REQUIRE( entries.size() == 1 );
                 REQUIRE( entries[ 0 ].key == "VIN" );
-                REQUIRE( entries[ 0 ].linePattern == "VIN\\:\\s*(\\S+)" );
+                REQUIRE( entries[ 0 ].linePattern == "VIN:\\s*(\\S+)" );
                 REQUIRE( entries[ 0 ].valuePattern.isEmpty() );
                 REQUIRE( ui.linePattern->text() == entries[ 0 ].linePattern );
                 REQUIRE( ui.valuePattern->text().isEmpty() );
@@ -212,7 +212,7 @@ SCENARIO( "FooterEditor starts a new rule in simple mode", "[footereditor][simpl
 
             THEN( "the value is the rest of the line" )
             {
-                REQUIRE( editor.entries()[ 0 ].linePattern == "Model\\ name\\:\\s*(.*\\S)" );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "Model name:\\s*(.*\\S)" );
                 REQUIRE( footerValues( editor.entries(), kSampleLog ).value( "Model" )
                          == "Golf GTI 2.0" );
             }
@@ -238,7 +238,7 @@ SCENARIO( "FooterEditor starts a new rule in simple mode", "[footereditor][simpl
 
                 THEN( "the value ends there" )
                 {
-                    REQUIRE( editor.entries()[ 0 ].linePattern == "user\\=\\s*([^\\;]*[^\\;\\s])" );
+                    REQUIRE( editor.entries()[ 0 ].linePattern == "user=\\s*([^;]*[^;\\s])" );
                     REQUIRE( footerValues( editor.entries(), kSampleLog ).value( "User" )
                              == "Jane Doe, id=7" );
                 }
@@ -278,7 +278,7 @@ SCENARIO( "FooterEditor starts a new rule in simple mode", "[footereditor][simpl
             THEN( "the text and the patterns go back to the confirmed text" )
             {
                 REQUIRE( ui.textBefore->text() == "VIN:" );
-                REQUIRE( editor.entries()[ 0 ].linePattern == "VIN\\:\\s*(\\S+)" );
+                REQUIRE( editor.entries()[ 0 ].linePattern == "VIN:\\s*(\\S+)" );
             }
         }
     }
@@ -289,7 +289,7 @@ SCENARIO( "FooterEditor switches rules between simple and advanced mode",
 {
     GIVEN( "a simple rule and an advanced one" )
     {
-        const FooterEntry simple{ "VIN", "VIN\\:\\s*(\\S+)", "", true, {} };
+        const FooterEntry simple{ "VIN", "VIN:\\s*(\\S+)", "", true, {} };
         const FooterEntry advancedRule{ "Build", "build=(\\d+)", "", true, {} };
         FooterEditor editor( { simple, advancedRule } );
         SimpleUi ui( editor );
@@ -370,7 +370,7 @@ SCENARIO( "FooterEditor switches rules between simple and advanced mode",
 
                 AND_WHEN( "the pattern is given the simple form again" )
                 {
-                    ui.linePattern->setText( "id\\=\\s*(.*\\S)" );
+                    ui.linePattern->setText( "id=\\s*(.*\\S)" );
 
                     THEN( "switching back is offered, and fills in the simple fields" )
                     {
@@ -379,7 +379,7 @@ SCENARIO( "FooterEditor switches rules between simple and advanced mode",
                         REQUIRE( ui.inSimpleMode() );
                         REQUIRE( ui.textBefore->text() == "id=" );
                         REQUIRE( ui.shownValueEnd() == ValueEnd::EndOfLine );
-                        REQUIRE( editor.entries()[ 0 ].linePattern == "id\\=\\s*(.*\\S)" );
+                        REQUIRE( editor.entries()[ 0 ].linePattern == "id=\\s*(.*\\S)" );
                     }
                 }
             }
@@ -412,7 +412,7 @@ SCENARIO( "FooterEditor switches rules between simple and advanced mode",
         WHEN( "the advanced rule's pattern gets the simple form" )
         {
             ui.select( 1 );
-            ui.linePattern->setText( "build\\=\\s*([^\\,]*[^\\,\\s])" );
+            ui.linePattern->setText( "build=\\s*([^,]*[^,\\s])" );
 
             THEN( "it can be switched to simple mode, with its fields" )
             {
@@ -431,7 +431,7 @@ SCENARIO( "FooterEditor switches rules between simple and advanced mode",
 
             THEN( "the list shows the generated pattern, and the other rule is unchanged" )
             {
-                REQUIRE( ui.listPattern( 0 ) == "Vehicle\\ ID\\:\\s*(\\S+)" );
+                REQUIRE( ui.listPattern( 0 ) == "Vehicle ID:\\s*(\\S+)" );
                 REQUIRE( editor.entries()[ 1 ].linePattern == advancedRule.linePattern );
             }
         }
@@ -444,11 +444,11 @@ SCENARIO( "FooterEditor opens rules of existing configs in the right mode",
     GIVEN( "rules with each simple form, and ones that only look simple" )
     {
         FooterEditor editor( {
-            { "A", "a\\:\\s*(\\S+)", "", true, {} },
-            { "B", "b\\:\\s*(.*\\S)", "", false, {} },
-            { "C", "c\\:\\s*([^\\;]*[^\\;\\s])", "", true, { ValueMapping{ "x", "y" } } },
-            { "D", "d:\\s*(\\S+)", "", true, {} },
-            { "E", "e\\:\\s*(\\S+)", "(\\S+)", true, {} },
+            { "A", "a:\\s*(\\S+)", "", true, {} },
+            { "B", "b:\\s*(.*\\S)", "", false, {} },
+            { "C", "c:\\s*([^;]*[^;\\s])", "", true, { ValueMapping{ "x", "y" } } },
+            { "D", "d\\:\\s*(\\S+)", "", true, {} }, // needless escape
+            { "E", "e:\\s*(\\S+)", "(\\S+)", true, {} },
             { "F", "", "", true, {} },
         } );
         SimpleUi ui( editor );

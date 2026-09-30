@@ -40,7 +40,7 @@ FooterController::FooterController( FooterDisplayWidget* widget, const QString& 
     // long as it keeps changing.
     rescanTimer_.setSingleShot( true );
     rescanTimer_.setInterval( kRescanDelayMs );
-    connect( &rescanTimer_, &QTimer::timeout, this, &FooterController::rescan );
+    connect( &rescanTimer_, &QTimer::timeout, this, &FooterController::requestScan );
     connect( &fileWatcher_, &QFileSystemWatcher::fileChanged, this, [ this ] {
         // The file may have been renamed away, and some watchers would keep
         // following it: the rescan watches whatever is at the path then.
@@ -76,15 +76,17 @@ void FooterController::setActiveFile( const QString& filePath )
 
         // The previous file's values must not pass for this file's while it is scanned.
         show( {} );
+        restartScan();
+        return;
     }
-    rescan();
+    requestScan();
 }
 
 void FooterController::reloadConfig()
 {
     loadConfig();
     progress_ = {};
-    rescan();
+    restartScan();
 }
 
 void FooterController::loadConfig()
@@ -97,17 +99,39 @@ void FooterController::loadConfig()
     }
 }
 
-void FooterController::rescan()
+void FooterController::requestScan()
 {
-    rescanTimer_.stop();
+    if ( !scanning_ ) {
+        startScan();
+        return;
+    }
 
-    // Whatever runs now is outdated.
-    const auto generation = ++generation_;
+    // Let the running scan of this file finish, or on a busy log no scan
+    // would ever finish; then scan on from where it stopped.
+    rescanTimer_.stop();
+    rescanPending_ = true;
+    watchActiveFile();
+}
+
+void FooterController::restartScan()
+{
+    // Whatever runs now is outdated; starting a scan makes sure it is not shown.
     if ( cancelRunning_ ) {
         cancelRunning_->store( true );
         cancelRunning_.reset();
     }
+    scanning_ = false;
+    rescanPending_ = false;
 
+    startScan();
+}
+
+void FooterController::startScan()
+{
+    rescanTimer_.stop();
+    rescanPending_ = false;
+
+    const auto generation = ++generation_;
     if ( activeFile_.isEmpty() ) {
         show( {} );
         return;
@@ -116,6 +140,7 @@ void FooterController::rescan()
 
     auto cancelled = std::make_shared<std::atomic_bool>( false );
     cancelRunning_ = cancelled;
+    scanning_ = true;
 
     // The watcher lives on this thread, so its finished() is delivered here.
     using Scan = FooterScanner::Scan;
@@ -126,6 +151,12 @@ void FooterController::rescan()
             const auto scan = watcher->result();
             progress_ = scan.progress;
             show( scanner_->inRuleOrder( scan.values ) );
+
+            scanning_ = false;
+            cancelRunning_.reset();
+            if ( rescanPending_ ) {
+                startScan();
+            }
         }
     } );
     watcher->setFuture( QtConcurrent::run(
@@ -143,6 +174,9 @@ void FooterController::rescan()
 
 void FooterController::watchActiveFile()
 {
+    if ( activeFile_.isEmpty() ) {
+        return;
+    }
     if ( !QFileInfo::exists( activeFile_ ) ) {
         // Rotated away or not created yet: wait in its directory for it.
         fileWatcher_.removePath( activeFile_ );

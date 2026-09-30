@@ -267,3 +267,86 @@ SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]
         }
     }
 }
+
+SCENARIO( "FooterController shows the values of a log that changes faster than it is scanned",
+          "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+
+    // The VIN is on the first line, but the other rules never match: every
+    // scan reads the whole file, which takes longer than the rescan delay.
+    QList<FooterEntry> entries;
+    entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+    for ( int i = 0; i < 3; ++i ) {
+        entries.append( { QString( "Never%1" ).arg( i ),
+                          QString( "^NEVER-%1-MATCHES-(\\d+)$" ).arg( i ),
+                          "",
+                          true,
+                          {} } );
+    }
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), entries ) );
+    REQUIRE( FooterConfig::saveMaxLines( configDir.path(), 0 ) );
+
+    const auto busy = logDir.path() + "/busy.log";
+    const QByteArray line( "2026-01-01 INFO some ordinary log line with nothing to find\n" );
+    writeFile( busy, "VIN: BUSY\n" + line.repeated( 400000 ) );
+
+    // Append to the log every few milliseconds while waiting.
+    QElapsedTimer sinceAppend;
+    sinceAppend.start();
+    const auto appendWhile = [ & ]( const std::function<bool()>& condition ) {
+        return waitFor(
+            [ & ] {
+                if ( sinceAppend.elapsed() >= 50 ) {
+                    writeFile( busy, line, true );
+                    sinceAppend.restart();
+                }
+                return condition();
+            },
+            30000 );
+    };
+
+    FooterDisplayWidget widget;
+    FooterController controller( &widget, configDir.path() );
+
+    GIVEN( "a busy log becomes active" )
+    {
+        controller.setActiveFile( busy );
+
+        WHEN( "lines keep being appended faster than the file is scanned" )
+        {
+            THEN( "its values are shown nonetheless" )
+            {
+                REQUIRE( appendWhile( [ & ] { return shownText( widget ).contains( "BUSY" ); } ) );
+
+                AND_THEN( "values appended while it was scanned follow" )
+                {
+                    writeFile( busy, "NEVER-0-MATCHES-4711\n", true );
+                    REQUIRE(
+                        appendWhile( [ & ] { return shownText( widget ).contains( "4711" ); } ) );
+                }
+            }
+        }
+
+        WHEN( "it is made active again and again while it is scanned" )
+        {
+            THEN( "its values are shown nonetheless" )
+            {
+                QElapsedTimer sinceActivated;
+                sinceActivated.start();
+                REQUIRE( waitFor(
+                    [ & ] {
+                        if ( sinceActivated.elapsed() >= 100 ) {
+                            controller.setActiveFile( busy );
+                            sinceActivated.restart();
+                        }
+                        return shownText( widget ).contains( "BUSY" );
+                    },
+                    30000 ) );
+            }
+        }
+    }
+}

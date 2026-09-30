@@ -20,15 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are fixed. The scanner skips such rules and reports them in the host log;
   rules without a line pattern are ignored.
 - **Background scanning** — the active file is now scanned on a worker
-  thread instead of blocking the window; a scan still running when the file
-  changes again is cancelled and its values are never shown. The rules are
+  thread instead of blocking the window; a scan still running when another
+  file becomes active, or the rules are applied, is cancelled and its values
+  are never shown. The rules are
   read once and again only when they are applied, instead of twice on every
   file switch. The footer is cleared as soon as another file becomes active.
 - **Follow mode** — the active file is watched and scanned again shortly
   after it changes, so values that appear later in a growing log show up
   without switching files. Only the lines appended since the last scan are
   read, and none once every key has a value; a file that was truncated or
-  replaced is scanned from its start. When the file is rotated away, its
+  replaced is scanned from its start. A change while the file is scanned
+  does not restart the scan: it finishes, and one more scan then covers
+  every change made meanwhile, so a log that grows faster than it can be
+  scanned still shows its values. When the file is rotated away, its
   directory is watched until it is recreated.
 
 ### Fixed

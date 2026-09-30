@@ -38,8 +38,12 @@ namespace custom_footer {
  * Keeps a FooterDisplayWidget up to date with the active log file.
  *
  * The rules are loaded and compiled once, and again on reloadConfig(). Scans
- * run on a worker thread; a scan's values are shown only if no newer scan was
- * requested meanwhile. The active file is watched, so the values follow a
+ * run on a worker thread. Another active file, or reloaded rules, cancel the
+ * running scan, whose values are then never shown. A change of the active
+ * file does not: the running scan finishes and shows its values, and one
+ * more scan then covers every change made meanwhile, so that the values of a
+ * log that changes faster than it is scanned still show up. The active file
+ * is watched, so the values follow a
  * growing log: once scanned, a file that only grew is scanned on from where
  * the last scan stopped, and not at all once every key has a value. A file
  * that was truncated or replaced is scanned from its start. While the active
@@ -65,7 +69,8 @@ public:
         return configDir_;
     }
 
-    /// Show the values of this file; an empty path clears the footer.
+    /// Show the values of this file; an empty path clears the footer. For
+    /// the file already active, it is scanned again for changes.
     void setActiveFile( const QString& filePath );
 
     /// Load the rules again, e.g. after they were saved, and rescan.
@@ -75,7 +80,11 @@ private:
     using Values = QList<QPair<QString, QString>>;
 
     void loadConfig();
-    void rescan();
+    /// Scan the active file for changes, after a running scan of it.
+    void requestScan();
+    /// Cancel a running scan and scan the active file afresh.
+    void restartScan();
+    void startScan();
     void watchActiveFile();
     void unwatch();
     void show( const Values& values );
@@ -95,8 +104,12 @@ private:
     QString watchedDir_;
     QTimer rescanTimer_;
 
-    /// Counts scan requests; a finished scan is shown only if it is the last.
+    /// Counts started scans; a finished scan is shown only if it is the last.
     quint64 generation_ = 0;
+    /// A scan of the active file runs, and is not cancelled.
+    bool scanning_ = false;
+    /// The active file is to be scanned again once the running scan finished.
+    bool rescanPending_ = false;
     std::shared_ptr<std::atomic_bool> cancelRunning_;
 
     /// One worker thread: a new scan waits for the cancelled one to stop.

@@ -135,11 +135,39 @@ static void saveEntries( const QList<custom_footer::FooterEntry>& entries )
     controller->reloadConfig();
 }
 
+/// The host's active file, or an empty string without one.
+static QString activeFilePath()
+{
+    const auto& st = custom_footer::g_state;
+    if ( !st.api || !st.handle ) {
+        return {};
+    }
+    const char* filePath = st.api->get_active_file_path( st.handle );
+    return filePath ? QString::fromUtf8( filePath ) : QString();
+}
+
 /// Open the rule editor as a modal dialog over the given parent.
 static void showEditorDialog( QWidget* parent )
 {
-    custom_footer::FooterEditor editor( custom_footer::FooterConfig::loadEntries( configDir() ),
-                                        parent );
+    const auto dir = configDir();
+    custom_footer::FooterEditor editor( custom_footer::FooterConfig::loadEntries( dir ), parent );
+    editor.setMaxLines( custom_footer::FooterConfig::loadMaxLines( dir ) );
+    editor.setActiveFile( activeFilePath() );
+
+    // Known while open, so that the preview follows the active file and
+    // shutdown can stop it; forgotten however the dialog ends.
+    struct OpenEditor {
+        explicit OpenEditor( custom_footer::FooterEditor* editor )
+        {
+            custom_footer::g_state.editor = editor;
+        }
+        ~OpenEditor()
+        {
+            custom_footer::g_state.editor = nullptr;
+        }
+        OpenEditor( const OpenEditor& ) = delete;
+        OpenEditor& operator=( const OpenEditor& ) = delete;
+    } open( &editor );
 
     // Apply button: save and rescan without closing the dialog.
     QObject::connect( &editor, &custom_footer::FooterEditor::applied,
@@ -154,9 +182,12 @@ static void showEditorDialog( QWidget* parent )
 static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
     guarded( "scanning the active file", [ filePath ] {
+        const auto path = filePath ? QString::fromUtf8( filePath ) : QString();
         if ( custom_footer::g_state.controller ) {
-            custom_footer::g_state.controller->setActiveFile(
-                filePath ? QString::fromUtf8( filePath ) : QString() );
+            custom_footer::g_state.controller->setActiveFile( path );
+        }
+        if ( custom_footer::g_state.editor ) {
+            custom_footer::g_state.editor->setActiveFile( path );
         }
     } );
 }
@@ -221,8 +252,7 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
         api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
 
         // Initial scan if a file is already open.
-        const char* activeFile = api->get_active_file_path( handle );
-        st.controller->setActiveFile( activeFile ? QString::fromUtf8( activeFile ) : QString() );
+        st.controller->setActiveFile( activeFilePath() );
 
         api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin ready." );
     } );
@@ -241,6 +271,11 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         custom_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
 
         // First stop scanning: the host unloads the library after this returns.
+        // An open editor's preview is stopped too, and the editor closed.
+        if ( st.editor ) {
+            st.editor->stopPreview();
+            st.editor->reject();
+        }
         delete st.controller;
         st.controller = nullptr;
 

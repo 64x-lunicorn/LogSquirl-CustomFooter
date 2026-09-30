@@ -26,7 +26,9 @@
 
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
+#include "footereditor.h"
 #include "logsquirl_plugin_api.h"
+#include "rulepreviewer.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -167,6 +169,60 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             THEN( "it is parented to the widget the host passed" )
             {
                 REQUIRE( editorParent == &hostWindow );
+            }
+        }
+
+        WHEN( "the rule editor is open while the host switches files" )
+        {
+            QString openedWith;
+            QString followed;
+            QTimer::singleShot( 0, [ &openedWith, &followed, &logDir ] {
+                if ( auto* editor
+                     = qobject_cast<FooterEditor*>( QApplication::activeModalWidget() ) ) {
+                    openedWith = editor->activeFile();
+                    const auto second = ( logDir.path() + "/second.log" ).toUtf8();
+                    host().activeFileCallback( host().activeFileUserData, second.constData() );
+                    followed = editor->activeFile();
+                    editor->reject();
+                }
+            } );
+            logsquirl_plugin_configure( nullptr );
+
+            THEN( "its preview uses the host's active file, and follows it" )
+            {
+                REQUIRE( openedWith == logDir.path() + "/first.log" );
+                REQUIRE( followed == logDir.path() + "/second.log" );
+            }
+        }
+
+        WHEN( "the plugin is shut down while the rule editor is open" )
+        {
+            QPointer<FooterEditor> openEditor;
+            bool busyBefore = false;
+            bool busyAfter = true;
+            bool visibleAfter = true;
+            QTimer::singleShot( 0, [ & ] {
+                openEditor = qobject_cast<FooterEditor*>( QApplication::activeModalWidget() );
+                auto* previewer = openEditor
+                                      ? openEditor->findChild<RulePreviewer*>( "rulePreviewer" )
+                                      : nullptr;
+                if ( previewer ) {
+                    // A preview of the active file is scheduled or running.
+                    openEditor->setActiveFile( openEditor->activeFile() );
+                    busyBefore = previewer->isBusy();
+                    logsquirl_plugin_shutdown();
+                    busyAfter = previewer->isBusy();
+                    visibleAfter = openEditor->isVisible();
+                }
+            } );
+            logsquirl_plugin_configure( nullptr );
+
+            THEN( "its preview was stopped, and the editor closed and deleted" )
+            {
+                REQUIRE( busyBefore );
+                REQUIRE_FALSE( busyAfter );
+                REQUIRE_FALSE( visibleAfter );
+                REQUIRE_FALSE( openEditor );
             }
         }
 

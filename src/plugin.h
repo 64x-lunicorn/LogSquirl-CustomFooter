@@ -28,6 +28,7 @@
 namespace custom_footer {
 
 class FooterController;
+class FooterEditor;
 
 /// Global plugin state — bridges C ABI entry points to C++ implementation.
 struct PluginState {
@@ -37,6 +38,9 @@ struct PluginState {
 
     FooterDisplayWidget* footerWidget = nullptr; ///< Registered in footer bar.
     FooterController* controller = nullptr;      ///< Fills footerWidget.
+    /// The rule editor while it is open, to keep its preview on the active
+    /// file and to stop the preview on shutdown.
+    FooterEditor* editor = nullptr;
 };
 
 extern PluginState g_state;

@@ -20,6 +20,7 @@
 #pragma once
 
 #include "footerentry.h"
+#include "footervalue.h"
 
 #include <QDateTime>
 #include <QList>
@@ -61,6 +62,12 @@ public:
     /// a file, to tell whether it is still the file scanned before.
     static constexpr qint64 kIdentityBytes = 256;
 
+    /// Where a found value came from.
+    struct Source {
+        QString rawValue; ///< Before the mappings.
+        int rule = -1;    ///< Index of the rule in the entries.
+    };
+
     /// How far a file has been scanned, to continue there once it has grown.
     struct Progress {
         /// End of the last complete line scanned, or where the scan limit
@@ -68,6 +75,7 @@ public:
         qint64 offset = 0;
         int lines = 0;                 ///< Complete lines scanned.
         QMap<QString, QString> values; ///< Found in those lines.
+        QMap<QString, Source> sources; ///< Where those values came from.
         bool done = false;             ///< Every key has a value, or a limit was reached.
         QByteArray head;               ///< The file's first bytes, up to offset.
         QByteArray tail;               ///< The bytes just before offset.
@@ -77,6 +85,7 @@ public:
     struct Scan {
         /// Found so far, including in a last line that is not terminated yet.
         QMap<QString, QString> values;
+        QMap<QString, Source> sources; ///< Where those values came from.
         Progress progress;
         /// Whether the scan continued from the given progress.
         bool resumed = false;
@@ -126,6 +135,10 @@ public:
     /// the key's first rule.
     QList<QPair<QString, QString>> inRuleOrder( const QMap<QString, QString>& values ) const;
 
+    /// The values of a scan, once per key, at the position of the key's
+    /// first rule, with the raw value and the rule that supplied each.
+    QList<FooterValue> footerValues( const Scan& scan ) const;
+
     /// Compile the entries and scan a file in one go.
     static QMap<QString, QString> scan( const QString& filePath, const QList<FooterEntry>& entries,
                                         int maxLines = kDefaultMaxLines );
@@ -135,14 +148,15 @@ public:
 
 private:
     struct Rule {
+        int index = -1; ///< In the entries.
         QString key;
         QRegularExpression lineRegex;
         QRegularExpression valueRegex; // empty pattern = not used
         QList<ValueMapping> mappings;
     };
 
-    /// The value a rule extracts from a line, if it matches.
-    std::optional<QString> valueOf( const Rule& rule, const QString& line ) const;
+    /// The value a rule extracts from a line, if it matches, and its raw value.
+    std::optional<QPair<QString, Source>> valueOf( const Rule& rule, const QString& line ) const;
 
     /// Whether the file is still the one the progress was made on.
     static bool continues( QFile& file, const Progress& from );

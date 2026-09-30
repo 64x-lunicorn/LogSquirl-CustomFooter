@@ -21,6 +21,7 @@ add_executable(logsquirl_custom_footer_tests
     footerscanner_test.cpp
     footerscanner_edge_test.cpp
     footerscanner_resume_test.cpp
+    footerscanner_source_test.cpp
     footerconfig_test.cpp
     footerconfig_maxlines_test.cpp
     footercontroller_test.cpp

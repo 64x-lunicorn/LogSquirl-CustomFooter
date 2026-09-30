@@ -118,6 +118,7 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
         }
 
         Rule rule;
+        rule.index = i;
         rule.key = entry.key;
         rule.lineRegex.setPattern( entry.linePattern );
         if ( !entry.valuePattern.isEmpty() ) {
@@ -158,6 +159,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         progress = from;
         if ( progress.done ) {
             scan.values = progress.values;
+            scan.sources = progress.sources;
             return scan;
         }
     }
@@ -169,8 +171,9 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         return ( maxLines > 0 && progress.lines >= maxLines ) || progress.offset >= kMaxScanBytes;
     };
 
-    // Values found in a last line without a line break.
+    // Values found in a last line without a line break, and their sources.
     QMap<QString, QString> unterminated;
+    QMap<QString, Source> unterminatedSources;
     // The scan limit was reached inside a line, before its end.
     bool stoppedInLine = false;
 
@@ -197,8 +200,10 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
             }
 
             auto& values = terminated ? progress.values : unterminated;
+            auto& sources = terminated ? progress.sources : unterminatedSources;
             if ( !terminated ) {
                 values = progress.values;
+                sources = progress.sources;
             }
 
             const QString line = QString::fromUtf8( rawLine );
@@ -206,8 +211,9 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                 if ( values.contains( rule.key ) ) {
                     continue;
                 }
-                if ( const auto value = valueOf( rule, line ) ) {
-                    values.insert( rule.key, *value );
+                if ( const auto found = valueOf( rule, line ) ) {
+                    values.insert( rule.key, found->first );
+                    sources.insert( rule.key, found->second );
                 }
             }
 
@@ -230,6 +236,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     progress.tail = readAt( file, progress.offset - tailSize, tailSize );
 
     scan.values = unterminated.isEmpty() ? progress.values : unterminated;
+    scan.sources = unterminated.isEmpty() ? progress.sources : unterminatedSources;
     return scan;
 }
 
@@ -248,7 +255,8 @@ bool FooterScanner::continues( QFile& file, const Progress& from )
            && readAt( file, from.offset - from.tail.size(), from.tail.size() ) == from.tail;
 }
 
-std::optional<QString> FooterScanner::valueOf( const Rule& rule, const QString& line ) const
+std::optional<QPair<QString, FooterScanner::Source>>
+FooterScanner::valueOf( const Rule& rule, const QString& line ) const
 {
     const auto lineMatch = rule.lineRegex.match( line );
     if ( !lineMatch.hasMatch() ) {
@@ -268,12 +276,14 @@ std::optional<QString> FooterScanner::valueOf( const Rule& rule, const QString& 
     }
 
     // Apply value mappings (exact string match).
+    QString value = rawValue;
     for ( const auto& mapping : rule.mappings ) {
         if ( rawValue == mapping.pattern ) {
-            return mapping.displayValue;
+            value = mapping.displayValue;
+            break;
         }
     }
-    return rawValue;
+    return qMakePair( value, Source{ rawValue, rule.index } );
 }
 
 QList<QPair<QString, QString>>
@@ -285,6 +295,20 @@ FooterScanner::inRuleOrder( const QMap<QString, QString>& values ) const
         if ( it != values.end() ) {
             ordered.append( { key, it.value() } );
         }
+    }
+    return ordered;
+}
+
+QList<FooterValue> FooterScanner::footerValues( const Scan& scan ) const
+{
+    QList<FooterValue> ordered;
+    for ( const auto& key : keys_ ) {
+        const auto it = scan.values.find( key );
+        if ( it == scan.values.end() ) {
+            continue;
+        }
+        const auto source = scan.sources.value( key, { it.value(), -1 } );
+        ordered.append( { key, it.value(), source.rawValue, source.rule } );
     }
     return ordered;
 }

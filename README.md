@@ -80,7 +80,7 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
 
 Rules are edited in *Plugins → Custom Footer…*. The dialog lists the rules on
 the left, each with its enabled check box, key and line pattern, with buttons
-to add, remove, reorder, import and export them. The panel on the right shows
+to add (also from a template), remove, reorder, import and export them. The panel on the right shows
 the selected rule: its key, line pattern, value pattern and value mappings.
 Changes show up in the list as you type.
 
@@ -119,6 +119,27 @@ patterns still have exactly the form simple mode generates. When the editor
 opens, a rule whose patterns have that form is shown in simple mode, every
 other rule in advanced mode. Simple rules are saved as their patterns, so the
 config and JSON formats do not change.
+
+### Rule templates
+
+**From template…** next to the add button adds a ready-made rule to adjust
+instead of writing one. The new rule goes after the others and is selected;
+no existing rule changes.
+
+| Template | Key | Finds | Mode |
+|----------|-----|-------|------|
+| Version | `Version` | The number after `version` or `ver` in any case, with an optional `:` or `=` and `v` (`version 1.2.3`, `Version: v2.0.1-rc1` → `2.0.1-rc1`, `ver=1.2`), or after a `v` starting a word when it has a dot (`v1.2.3`). A `-rc1` or `+build.5` suffix is part of it. | Advanced |
+| Build number | `Build` | The word after `Build:` (`Build: 1234`) | Simple |
+| Serial number | `Serial number` | The word after `Serial number:` | Simple |
+| IPv4 address | `IP address` | The first address in a line, four numbers 0–255 without leading zeros, not part of a longer dotted sequence | Advanced |
+| Timestamp (ISO 8601) | `Timestamp` | The first date and time in a line: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or offset | Advanced |
+| `key=value` | the key you give | The value after `<key>=`, up to the next whitespace, as in logfmt | Simple |
+
+Simple templates match their text as written, case included, so change
+`Build:` to what your log says. For `key=value` lists separated by `;` or
+`,` instead of spaces, set **Value ends at** to that character. If a rule
+with the template's key exists already, the dialog says so: the new rule
+becomes an alternative for that key.
 
 ### How rules are applied
 

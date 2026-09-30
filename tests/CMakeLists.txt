@@ -24,12 +24,16 @@ add_executable(logsquirl_custom_footer_tests
     footerscanner_edge_test.cpp
     footerscanner_resume_test.cpp
     footerscanner_source_test.cpp
+    footerscanner_preview_test.cpp
     footerconfig_test.cpp
     footerconfig_maxlines_test.cpp
     footercontroller_test.cpp
+    activefilewatcher_test.cpp
     footerdisplaywidget_test.cpp
     footereditor_test.cpp
+    editorlifetime_test.cpp
     ruledragdrop_test.cpp
+    rulepreview_test.cpp
     configroundtrip_test.cpp
     simplerule_test.cpp
     simplemode_test.cpp
@@ -53,6 +57,7 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/plugin.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerconfig.cpp"
         "${CMAKE_SOURCE_DIR}/src/footercontroller.cpp"
+        "${CMAKE_SOURCE_DIR}/src/activefilewatcher.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerscanner.cpp"
         "${CMAKE_SOURCE_DIR}/src/footereditor.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerdisplaywidget.cpp"
@@ -62,6 +67,8 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/simplerule.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruletemplate.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruletemplatedialog.cpp"
+        "${CMAKE_SOURCE_DIR}/src/rulepreviewer.cpp"
+        "${CMAKE_SOURCE_DIR}/src/rulepreviewview.cpp"
 )
 
 target_link_libraries(logsquirl_custom_footer_tests

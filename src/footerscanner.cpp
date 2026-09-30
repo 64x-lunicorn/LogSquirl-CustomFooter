@@ -22,6 +22,9 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include <algorithm>
+#include <utility>
+
 namespace custom_footer {
 
 namespace {
@@ -87,6 +90,94 @@ QByteArray readAt( QFile& file, qint64 offset, qint64 size )
     return file.seek( offset ) ? file.read( size ) : QByteArray();
 }
 
+/// A raw value as shown: the display value of the first mapping of exactly
+/// this raw value, or the raw value itself.
+QString mapped( const QList<ValueMapping>& mappings, const QString& rawValue )
+{
+    for ( const auto& mapping : mappings ) {
+        if ( rawValue == mapping.pattern ) {
+            return mapping.displayValue;
+        }
+    }
+    return rawValue;
+}
+
+/// How a line read by forEachLine() ended.
+enum class LineKind {
+    Complete,     ///< With a line break.
+    Unterminated, ///< The file's last line, without a line break: it may still be being written.
+    Stopped,      ///< The scan limit was reached inside it; only its start was read.
+};
+
+/// Where reading lines stands: the end of the last complete line, or where
+/// the scan limit stopped reading inside a line; and the complete lines read.
+struct LinePosition {
+    qint64 offset = 0;
+    int lines = 0;
+
+    bool limitReached( int maxLines ) const
+    {
+        return ( maxLines > 0 && lines >= maxLines ) || offset >= FooterScanner::kMaxScanBytes;
+    }
+};
+
+/**
+ * Read the lines of a file from position.offset, within the scan limits, and
+ * pass each to onLine( line, kind, lineNumber ), which returns whether to
+ * read on. The one place that decides how lines are read, counted and
+ * limited, for the footer's scans and the editor's previews alike.
+ *
+ * A complete line advances the position past it. A last line without a
+ * line break is passed but not counted. A line the scan limit stopped in is
+ * passed with its start, the position set to where reading stopped, and no
+ * more lines are read. Returns false when cancelled.
+ */
+template <typename OnLine>
+bool forEachLine( QFile& file, LinePosition& position, int maxLines,
+                  const std::atomic_bool* cancelled, OnLine&& onLine )
+{
+    if ( !file.seek( position.offset ) ) {
+        return true;
+    }
+    QByteArray rawLine;
+    bool terminated = false;
+    while ( !position.limitReached( maxLines ) ) {
+        if ( isCancelled( cancelled ) ) {
+            return false;
+        }
+        const auto read
+            = readBoundedLine( file, FooterScanner::kMaxLineBytes, FooterScanner::kMaxScanBytes,
+                               cancelled, rawLine, terminated );
+        if ( read == ReadResult::End ) {
+            break;
+        }
+        auto kind = terminated ? LineKind::Complete : LineKind::Unterminated;
+        if ( read == ReadResult::Stopped ) {
+            if ( isCancelled( cancelled ) ) {
+                return false;
+            }
+            kind = LineKind::Stopped;
+        }
+
+        const bool readOn = onLine( QString::fromUtf8( rawLine ), kind,
+                                    static_cast<qint64>( position.lines ) + 1 );
+        if ( kind == LineKind::Stopped ) {
+            // Remember where the scan stopped, so that a rescan knows the
+            // file and does not read the line again.
+            position.offset = file.pos();
+            break;
+        }
+        if ( kind == LineKind::Complete ) {
+            ++position.lines;
+            position.offset = file.pos();
+        }
+        if ( !readOn ) {
+            break;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
@@ -106,31 +197,43 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
             continue;
         }
 
-        const auto lineError = patternError( entry.linePattern );
-        if ( !lineError.isEmpty() ) {
-            problems_.append( describe( QStringLiteral( "line pattern: %1" ).arg( lineError ) ) );
+        QString problem;
+        auto rule = compile( entry, i, &problem );
+        if ( !rule ) {
+            problems_.append( describe( problem ) );
             continue;
         }
-        const auto valueError = patternError( entry.valuePattern );
-        if ( !valueError.isEmpty() ) {
-            problems_.append( describe( QStringLiteral( "value pattern: %1" ).arg( valueError ) ) );
-            continue;
-        }
-
-        Rule rule;
-        rule.index = i;
-        rule.key = entry.key;
-        rule.lineRegex.setPattern( entry.linePattern );
-        if ( !entry.valuePattern.isEmpty() ) {
-            rule.valueRegex.setPattern( entry.valuePattern );
-        }
-        rule.mappings = entry.mappings;
 
         if ( !keys_.contains( entry.key ) ) {
             keys_.append( entry.key );
         }
-        rules_.append( std::move( rule ) );
+        rules_.append( std::move( *rule ) );
     }
+}
+
+std::optional<FooterScanner::Rule> FooterScanner::compile( const FooterEntry& entry, int index,
+                                                           QString* problem )
+{
+    const auto lineError = patternError( entry.linePattern );
+    if ( !lineError.isEmpty() ) {
+        *problem = QStringLiteral( "line pattern: %1" ).arg( lineError );
+        return std::nullopt;
+    }
+    const auto valueError = patternError( entry.valuePattern );
+    if ( !valueError.isEmpty() ) {
+        *problem = QStringLiteral( "value pattern: %1" ).arg( valueError );
+        return std::nullopt;
+    }
+
+    Rule rule;
+    rule.index = index;
+    rule.key = entry.key;
+    rule.lineRegex.setPattern( entry.linePattern );
+    if ( !entry.valuePattern.isEmpty() ) {
+        rule.valueRegex.setPattern( entry.valuePattern );
+    }
+    rule.mappings = entry.mappings;
+    return rule;
 }
 
 QMap<QString, QString> FooterScanner::scanFile( const QString& filePath, int maxLines,
@@ -171,66 +274,44 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         progress.birthTime = QFileInfo( file ).birthTime();
     }
 
-    const auto limitReached = [ &progress, maxLines ] {
-        return ( maxLines > 0 && progress.lines >= maxLines ) || progress.offset >= kMaxScanBytes;
-    };
-
     // Values found in a last line without a line break.
     Values unterminated;
     // The scan limit was reached inside a line, before its end.
     bool stoppedInLine = false;
 
-    if ( file.seek( progress.offset ) ) {
-        QByteArray rawLine;
-        bool terminated = false;
-        while ( progress.values.size() < keys_.size() && !limitReached() ) {
-            if ( isCancelled( cancelled ) ) {
-                return {};
-            }
-            const auto read = readBoundedLine( file, kMaxLineBytes, kMaxScanBytes, cancelled,
-                                               rawLine, terminated );
-            if ( read == ReadResult::End ) {
-                break;
-            }
-            if ( read == ReadResult::Stopped ) {
-                if ( isCancelled( cancelled ) ) {
-                    return {};
-                }
-                // The start of the line was read: match it like that of any
-                // over-long line, then stop there.
-                stoppedInLine = true;
-                terminated = true;
-            }
-
-            auto& values = terminated ? progress.values : unterminated;
-            if ( !terminated ) {
-                values = progress.values;
-            }
-
-            const QString line = QString::fromUtf8( rawLine );
-            for ( const auto& rule : rules_ ) {
-                if ( values.contains( rule.key ) ) {
-                    continue;
-                }
-                if ( const auto found = valueOf( rule, line ) ) {
-                    values.insert( rule.key, *found );
-                }
-            }
-
-            if ( stoppedInLine ) {
-                // Remember where the scan stopped, so that a rescan knows
-                // the file and does not read the line again.
-                progress.offset = file.pos();
-                break;
-            }
-            if ( terminated ) {
-                ++progress.lines;
-                progress.offset = file.pos();
-            }
+    LinePosition position{ progress.offset, progress.lines };
+    if ( progress.values.size() < keys_.size() ) {
+        const bool completed
+            = forEachLine( file, position, maxLines, cancelled,
+                           [ this, &progress, &unterminated,
+                             &stoppedInLine ]( const QString& line, LineKind kind, qint64 ) {
+                               stoppedInLine = kind == LineKind::Stopped;
+                               // The start of a line the limit stopped in is matched like
+                               // that of any over-long line.
+                               const bool terminated = kind != LineKind::Unterminated;
+                               auto& values = terminated ? progress.values : unterminated;
+                               if ( !terminated ) {
+                                   values = progress.values;
+                               }
+                               for ( const auto& rule : rules_ ) {
+                                   if ( values.contains( rule.key ) ) {
+                                       continue;
+                                   }
+                                   if ( auto found = valueOf( rule, line ) ) {
+                                       values.insert( rule.key, std::move( *found ) );
+                                   }
+                               }
+                               return progress.values.size() < keys_.size();
+                           } );
+        if ( !completed ) {
+            return {};
         }
     }
+    progress.offset = position.offset;
+    progress.lines = position.lines;
 
-    progress.done = progress.values.size() == keys_.size() || limitReached() || stoppedInLine;
+    progress.done = progress.values.size() == keys_.size() || position.limitReached( maxLines )
+                    || stoppedInLine;
     progress.head = readAt( file, 0, qMin( progress.offset, kIdentityBytes ) );
     const auto tailSize = qMin( progress.offset, kIdentityBytes );
     progress.tail = readAt( file, progress.offset - tailSize, tailSize );
@@ -254,34 +335,189 @@ bool FooterScanner::continues( QFile& file, const Progress& from )
            && readAt( file, from.offset - from.tail.size(), from.tail.size() ) == from.tail;
 }
 
-std::optional<FooterValue> FooterScanner::valueOf( const Rule& rule, const QString& line ) const
+std::optional<FooterScanner::Matches> FooterScanner::matchesOf( const Rule& rule,
+                                                                const QString& line )
 {
-    const auto lineMatch = rule.lineRegex.match( line );
-    if ( !lineMatch.hasMatch() ) {
+    Matches matches;
+    matches.line = rule.lineRegex.match( line );
+    if ( !matches.line.hasMatch() ) {
+        return std::nullopt;
+    }
+    if ( rule.valueRegex.pattern().isEmpty() ) {
+        matches.value = matches.line;
+    }
+    else {
+        matches.value = rule.valueRegex.match( line );
+        if ( !matches.value.hasMatch() ) {
+            return std::nullopt;
+        }
+    }
+    return matches;
+}
+
+std::optional<FooterValue> FooterScanner::valueOf( const Rule& rule, const QString& line )
+{
+    // The footer's hot path: the value, without where it was found.
+    const auto matches = matchesOf( rule, line );
+    if ( !matches ) {
+        return std::nullopt;
+    }
+    const auto rawValue = capturedValue( matches->value );
+    return FooterValue{ rule.key, mapped( rule.mappings, rawValue ), rawValue, rule.index };
+}
+
+std::optional<FooterScanner::Match> FooterScanner::matchOf( const Rule& rule, const QString& line )
+{
+    const auto matches = matchesOf( rule, line );
+    if ( !matches ) {
         return std::nullopt;
     }
 
-    QString rawValue;
-    if ( rule.valueRegex.pattern().isEmpty() ) {
-        rawValue = capturedValue( lineMatch );
-    }
-    else {
-        const auto valueMatch = rule.valueRegex.match( line );
-        if ( !valueMatch.hasMatch() ) {
-            return std::nullopt;
-        }
-        rawValue = capturedValue( valueMatch );
+    Match match;
+    match.lineMatchStart = matches->line.capturedStart( 0 );
+    match.lineMatchLength = matches->line.capturedLength( 0 );
+    const int group = matches->value.lastCapturedIndex() >= 1 ? 1 : 0;
+    match.valueStart = matches->value.capturedStart( group );
+    match.valueLength = match.valueStart < 0 ? 0 : matches->value.capturedLength( group );
+
+    const auto rawValue = capturedValue( matches->value );
+    match.value = FooterValue{ rule.key, mapped( rule.mappings, rawValue ), rawValue, rule.index };
+    return match;
+}
+
+FooterScanner::Preview FooterScanner::preview( const QString& filePath,
+                                               const QList<FooterEntry>& entries, int rule,
+                                               int maxLines, const std::atomic_bool* cancelled )
+{
+    Preview preview;
+    preview.filePath = filePath;
+    if ( rule < 0 || rule >= entries.size() ) {
+        return preview;
     }
 
-    // Apply value mappings (exact string match).
-    QString value = rawValue;
-    for ( const auto& mapping : rule.mappings ) {
-        if ( rawValue == mapping.pattern ) {
-            value = mapping.displayValue;
-            break;
-        }
+    const auto& entry = entries[ rule ];
+    preview.enabled = entry.enabled;
+    preview.key = entry.key;
+    if ( entry.linePattern.isEmpty() ) {
+        preview.status = Preview::Status::NoLinePattern;
+        return preview;
     }
-    return FooterValue{ rule.key, value, rawValue, rule.index };
+    QString problem;
+    const auto selected = compile( entry, rule, &problem );
+    if ( !selected ) {
+        preview.status = Preview::Status::InvalidPattern;
+        preview.error = problem;
+        return preview;
+    }
+    if ( filePath.isEmpty() ) {
+        preview.status = Preview::Status::NoFile;
+        return preview;
+    }
+
+    // The rules the footer would take the key's value from: the enabled and
+    // valid ones with this key, in list order, as the constructor keeps them.
+    QList<Rule> keyRules;
+    if ( !entry.key.trimmed().isEmpty() ) {
+        QList<FooterEntry> sameKey = entries;
+        for ( auto& other : sameKey ) {
+            other.enabled = other.enabled && other.key == entry.key;
+        }
+        keyRules = FooterScanner( sameKey ).rules_;
+        preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
+                                         [ rule ]( const Rule& r ) { return r.index != rule; } );
+    }
+
+    QFile file( filePath );
+    if ( !file.open( QIODevice::ReadOnly ) ) {
+        preview.status = Preview::Status::Unreadable;
+        return preview;
+    }
+
+    const auto cancel = [] {
+        Preview cancelledPreview;
+        cancelledPreview.status = Preview::Status::Cancelled;
+        return cancelledPreview;
+    };
+
+    LinePosition position;
+    bool partialLine = false;
+    bool stoppedInLine = false;
+    const bool completed
+        = forEachLine( file, position, maxLines, cancelled,
+                       [ & ]( const QString& line, LineKind kind, qint64 lineNumber ) {
+                           partialLine = kind != LineKind::Complete;
+                           stoppedInLine = kind == LineKind::Stopped;
+
+                           // Where the first match is, is only needed once.
+                           std::optional<FooterValue> own;
+                           if ( preview.matches == 0 ) {
+                               if ( auto match = matchOf( *selected, line ) ) {
+                                   own = match->value;
+                                   preview.value = std::move( match->value );
+                                   preview.lineNumber = lineNumber;
+                                   preview.line = line;
+                                   preview.lineMatchStart = match->lineMatchStart;
+                                   preview.lineMatchLength = match->lineMatchLength;
+                                   preview.valueStart = match->valueStart;
+                                   preview.valueLength = match->valueLength;
+                               }
+                           }
+                           else {
+                               own = valueOf( *selected, line );
+                           }
+                           if ( own ) {
+                               ++preview.matches;
+                           }
+
+                           if ( !preview.keyValue ) {
+                               for ( const auto& keyRule : std::as_const( keyRules ) ) {
+                                   // The rule itself, when it is one of the key's: matched above.
+                                   auto value
+                                       = keyRule.index == rule ? own : valueOf( keyRule, line );
+                                   if ( value ) {
+                                       preview.keyValue = std::move( value );
+                                       preview.keyLineNumber = lineNumber;
+                                       break;
+                                   }
+                               }
+                           }
+                           return true;
+                       } );
+    if ( !completed ) {
+        return cancel();
+    }
+
+    // Counting a last line that is unterminated, or that the limit stopped in.
+    preview.lines = position.lines + ( partialLine ? 1 : 0 );
+    const bool more = !file.atEnd();
+    preview.byteLimitReached = more && ( stoppedInLine || position.offset >= kMaxScanBytes );
+    preview.lineLimitReached
+        = more && !preview.byteLimitReached && maxLines > 0 && position.lines >= maxLines;
+
+    auto& read = preview.read;
+    read.offset = position.offset;
+    read.lines = position.lines;
+    read.done = preview.limitReached();
+    read.birthTime = QFileInfo( file ).birthTime();
+    read.head = readAt( file, 0, qMin( read.offset, kIdentityBytes ) );
+    const auto tailSize = qMin( read.offset, kIdentityBytes );
+    read.tail = readAt( file, read.offset - tailSize, tailSize );
+    preview.fileSize = file.size();
+
+    preview.status = Preview::Status::Scanned;
+    return preview;
+}
+
+bool FooterScanner::fileUnchangedFor( const QString& filePath, const Preview& preview )
+{
+    if ( preview.status != Preview::Status::Scanned || preview.filePath != filePath ) {
+        return false;
+    }
+    QFile file( filePath );
+    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, preview.read ) ) {
+        return false;
+    }
+    return preview.limitReached() || file.size() == preview.fileSize;
 }
 
 QList<FooterValue> FooterScanner::footerValues( const Values& values ) const

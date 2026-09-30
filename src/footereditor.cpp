@@ -23,6 +23,8 @@
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
+#include "rulepreviewer.h"
+#include "rulepreviewview.h"
 #include "ruletemplatedialog.h"
 #include "simplerule.h"
 
@@ -120,11 +122,13 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     toolLayout->addStretch();
 
     importButton_ = new QToolButton( listSide );
+    importButton_->setObjectName( "importButton" );
     importButton_->setText( tr( "Import" ) );
     importButton_->setToolTip( tr( "Import rules from a JSON file" ) );
     toolLayout->addWidget( importButton_ );
 
     exportButton_ = new QToolButton( listSide );
+    exportButton_->setObjectName( "exportButton" );
     exportButton_->setText( tr( "Export" ) );
     exportButton_->setToolTip( tr( "Export rules to a JSON file" ) );
     toolLayout->addWidget( exportButton_ );
@@ -180,6 +184,21 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( model_, &RuleListModel::aboutToDropRules, panel_,
              &RuleDetailPanel::commitPendingEdit );
 
+    // ── The live preview (#16) ───────────────────────────────────────────
+    // Any change of the rules may change what the selected rule finds, or
+    // which rule of its key supplies the value.
+    previewer_ = new RulePreviewer( this );
+    connect( previewer_, &RulePreviewer::updating, panel_->previewView(),
+             &RulePreviewView::showUpdating );
+    connect( previewer_, &RulePreviewer::previewed, panel_->previewView(),
+             &RulePreviewView::showPreview );
+    // Edits schedule it where they are stored, once per edit; not on every
+    // dataChanged(), which validation marks emit too.
+    connect( model_, &RuleListModel::rowsInserted, this, [ this ] { schedulePreview(); } );
+    connect( model_, &RuleListModel::rowsRemoved, this, [ this ] { schedulePreview(); } );
+    connect( model_, &RuleListModel::rowsMoved, this, [ this ] { schedulePreview(); } );
+    connect( model_, &RuleListModel::modelReset, this, [ this ] { schedulePreview(); } );
+
     // A mapping still being typed belongs to the rules that are saved.
     connect( buttonBox_, &QDialogButtonBox::accepted, this, [ this ] {
         panel_->commitPendingEdit();
@@ -199,6 +218,25 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     showCurrentRule();
 }
 
+FooterEditor::~FooterEditor()
+{
+    // While the dialog and its children are torn down, a mapping cell being
+    // edited would commit as it loses the focus, and reach this editor half
+    // destroyed. Commit it now, while everything is whole, then cut the
+    // children off from this editor before any of them dies.
+    closing_ = true;
+    panel_->commitPendingEdit();
+    disconnect( panel_, nullptr, this, nullptr );
+    disconnect( model_, nullptr, this, nullptr );
+    disconnect( list_, nullptr, this, nullptr );
+    disconnect( list_->selectionModel(), nullptr, this, nullptr );
+    if ( templateDialog_ ) {
+        disconnect( templateDialog_, nullptr, this, nullptr );
+    }
+    // No preview may run on while, or after, the widgets are deleted.
+    previewer_->stop();
+}
+
 // ── Public accessors ─────────────────────────────────────────────────────
 
 QList<FooterEntry> FooterEditor::entries() const
@@ -212,6 +250,30 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
     if ( currentRow() < 0 && model_->rowCount() > 0 ) {
         selectRow( 0 );
     }
+}
+
+void FooterEditor::setActiveFile( const QString& filePath )
+{
+    previewer_->setActiveFile( filePath );
+}
+
+QString FooterEditor::activeFile() const
+{
+    return previewer_->activeFile();
+}
+
+void FooterEditor::setMaxLines( int maxLines )
+{
+    previewer_->setMaxLines( maxLines );
+}
+
+void FooterEditor::done( int result )
+{
+    // Closing may still commit a mapping cell being edited, as its editor
+    // loses the focus; closing_ keeps that from starting a preview.
+    closing_ = true;
+    previewer_->stop();
+    QDialog::done( result );
 }
 
 // ── Slots ────────────────────────────────────────────────────────────────
@@ -298,19 +360,29 @@ void FooterEditor::updateButtons()
     downButton_->setEnabled( row >= 0 && row < count - 1 );
 }
 
+// The file dialogs and messages are opened with open(), never run in a
+// nested event loop of their own: the plugin may be shut down while they
+// are open, and deleting the editor deletes them.
+
 void FooterEditor::importRules()
 {
     panel_->commitPendingEdit();
-    const auto filePath = QFileDialog::getOpenFileName(
-        this, tr( "Import Rules" ), QString(), tr( "JSON Files (*.json);;All Files (*)" ) );
-    if ( filePath.isEmpty() ) {
-        return;
-    }
+    auto* dialog = new QFileDialog( this, tr( "Import Rules" ), QString(),
+                                    tr( "JSON Files (*.json);;All Files (*)" ) );
+    dialog->setObjectName( "importDialog" );
+    dialog->setAcceptMode( QFileDialog::AcceptOpen );
+    dialog->setFileMode( QFileDialog::ExistingFile );
+    dialog->setAttribute( Qt::WA_DeleteOnClose );
+    connect( dialog, &QFileDialog::fileSelected, this, &FooterEditor::importFrom );
+    dialog->open();
+}
 
+void FooterEditor::importFrom( const QString& filePath )
+{
     QString error;
     const auto imported = FooterConfig::importFromJson( filePath, &error );
     if ( imported.isEmpty() && !error.isEmpty() ) {
-        QMessageBox::warning( this, tr( "Import Error" ), error );
+        showError( tr( "Import Error" ), error, "importErrorBox" );
         return;
     }
 
@@ -320,17 +392,30 @@ void FooterEditor::importRules()
 void FooterEditor::exportRules()
 {
     panel_->commitPendingEdit();
-    const auto filePath = QFileDialog::getSaveFileName(
-        this, tr( "Export Rules" ), QStringLiteral( "footer_rules.json" ),
-        tr( "JSON Files (*.json);;All Files (*)" ) );
-    if ( filePath.isEmpty() ) {
-        return;
-    }
+    auto* dialog = new QFileDialog( this, tr( "Export Rules" ), QString(),
+                                    tr( "JSON Files (*.json);;All Files (*)" ) );
+    dialog->setObjectName( "exportDialog" );
+    dialog->setAcceptMode( QFileDialog::AcceptSave );
+    dialog->selectFile( QStringLiteral( "footer_rules.json" ) );
+    dialog->setAttribute( Qt::WA_DeleteOnClose );
+    connect( dialog, &QFileDialog::fileSelected, this, &FooterEditor::exportTo );
+    dialog->open();
+}
 
+void FooterEditor::exportTo( const QString& filePath )
+{
     if ( !FooterConfig::exportToJson( filePath, entries() ) ) {
-        QMessageBox::warning( this, tr( "Export Error" ),
-                              tr( "Could not write to file: %1" ).arg( filePath ) );
+        showError( tr( "Export Error" ), tr( "Could not write to file: %1" ).arg( filePath ),
+                   "exportErrorBox" );
     }
+}
+
+void FooterEditor::showError( const QString& title, const QString& text, const QString& objectName )
+{
+    auto* box = new QMessageBox( QMessageBox::Warning, title, text, QMessageBox::Ok, this );
+    box->setObjectName( objectName );
+    box->setAttribute( Qt::WA_DeleteOnClose );
+    box->open();
 }
 
 void FooterEditor::showCurrentRule()
@@ -344,6 +429,10 @@ void FooterEditor::showCurrentRule()
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
+
+    // Another rule: no need to wait for typing to pause. Coalesced with the
+    // change that follows, e.g. the removal of the rule selected before.
+    schedulePreview( RulePreviewer::Start::Soon );
 }
 
 void FooterEditor::storePanelInCurrentRule()
@@ -356,6 +445,7 @@ void FooterEditor::storePanelInCurrentRule()
     model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
     validateRow( row );
     showProblems();
+    schedulePreview();
 }
 
 void FooterEditor::ruleChanged( int row )
@@ -367,6 +457,8 @@ void FooterEditor::ruleChanged( int row )
     }
     validateRow( row );
     showProblems();
+    // Another rule of the key may supply its value now.
+    schedulePreview();
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────
@@ -480,6 +572,34 @@ void FooterEditor::showProblems()
     problemLabel_->setVisible( !valid );
     buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
     buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
+}
+
+void FooterEditor::schedulePreview( RulePreviewer::Start start )
+{
+    if ( closing_ ) {
+        return;
+    }
+    const int row = currentRow();
+    if ( row < 0 ) {
+        previewer_->clear();
+        panel_->previewView()->showNoRule();
+        return;
+    }
+    // A rule without a pattern because of a problem, e.g. an unfinished
+    // simple rule: the problem says more than "no line pattern".
+    const auto problems = model_->problems( row );
+    if ( model_->entry( row ).linePattern.isEmpty() && !problems.isEmpty() ) {
+        previewer_->clear();
+        for ( const auto& problem : { problems.endCharacter, problems.key, problems.linePattern,
+                                      problems.valuePattern } ) {
+            if ( !problem.isEmpty() ) {
+                panel_->previewView()->showRuleProblem( problem );
+                break;
+            }
+        }
+        return;
+    }
+    previewer_->schedule( model_->entries(), row, start );
 }
 
 QString FooterEditor::patternError( const QString& pattern )

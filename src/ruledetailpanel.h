@@ -38,6 +38,8 @@ class QToolButton;
 
 namespace custom_footer {
 
+class RulePreviewView;
+
 /**
  * The form for one rule: enabled, key, line pattern, value pattern and the
  * value mappings, each field with the reason it keeps the rules from being
@@ -95,6 +97,12 @@ public:
     /// the focus. Buttons without focus, such as tool buttons, and OK on
     /// macOS, do not end the edit themselves.
     void commitPendingEdit();
+
+    /// The live preview section, below the rule's fields.
+    RulePreviewView* previewView() const
+    {
+        return preview_;
+    }
 
 protected:
     /// Return and Enter in a field only confirm it, and Escape reverts it,
@@ -161,6 +169,8 @@ private:
     QTableWidget* mappingTable_ = nullptr;
     QToolButton* addMappingButton_ = nullptr;
     QToolButton* removeMappingButton_ = nullptr;
+
+    RulePreviewView* preview_ = nullptr;
 };
 
 } // namespace custom_footer

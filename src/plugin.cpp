@@ -47,6 +47,9 @@
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
 
+#include <QApplication>
+#include <QEvent>
+#include <QPointer>
 #include <QString>
 
 #include <exception>
@@ -135,28 +138,197 @@ static void saveEntries( const QList<custom_footer::FooterEntry>& entries )
     controller->reloadConfig();
 }
 
-/// Open the rule editor as a modal dialog over the given parent.
-static void showEditorDialog( QWidget* parent )
+/// The host's active file, or an empty string without one.
+static QString activeFilePath()
 {
-    custom_footer::FooterEditor editor( custom_footer::FooterConfig::loadEntries( configDir() ),
-                                        parent );
+    const auto& st = custom_footer::g_state;
+    if ( !st.api || !st.handle ) {
+        return {};
+    }
+    const char* filePath = st.api->get_active_file_path( st.handle );
+    return filePath ? QString::fromUtf8( filePath ) : QString();
+}
+
+namespace {
+
+/**
+ * Keeps the editor over an application-modal window that blocks the
+ * editor's own window, e.g. the host's Plugins dialog, and moves it back
+ * over its own window when that modal window is hidden, with its content,
+ * so that the editor is not deleted with it. A child of the editor, so it
+ * goes with the editor; it posts nothing.
+ */
+class ModalGuest : public QObject {
+public:
+    ModalGuest( custom_footer::FooterEditor* editor, QWidget* modal, QWidget* home )
+        : QObject( editor )
+        , editor_( editor )
+        , modal_( modal )
+        , home_( home )
+    {
+        modal->installEventFilter( this );
+    }
+
+    ~ModalGuest() override
+    {
+        leave();
+    }
+
+    ModalGuest( const ModalGuest& ) = delete;
+    ModalGuest& operator=( const ModalGuest& ) = delete;
+
+protected:
+    bool eventFilter( QObject* watched, QEvent* event ) override
+    {
+        if ( watched == modal_ && event->type() == QEvent::Hide ) {
+            guarded( "moving the rule editor", [ this ] { returnHome(); } );
+        }
+        return QObject::eventFilter( watched, event );
+    }
+
+private:
+    void returnHome()
+    {
+        auto* modal = modal_.data();
+        leave();
+        if ( editor_->parentWidget() != modal ) {
+            return;
+        }
+        const bool wasOpen = editor_->isVisible();
+        editor_->setParent( home_, editor_->windowFlags() );
+        if ( wasOpen ) {
+            editor_->open();
+        }
+    }
+
+    void leave()
+    {
+        if ( modal_ ) {
+            modal_->removeEventFilter( this );
+            modal_.clear();
+        }
+    }
+
+    custom_footer::FooterEditor* editor_;
+    QPointer<QWidget> modal_;
+    QPointer<QWidget> home_;
+};
+
+/// The application-modal window that blocks the editor, if one does: not
+/// the editor, nor one of its own dialogs, nor a window it is already over.
+QWidget* blockingModal( QWidget* editor )
+{
+    auto* modal = QApplication::activeModalWidget();
+    if ( !modal ) {
+        return nullptr;
+    }
+    for ( auto* widget = modal; widget; widget = widget->parentWidget() ) {
+        if ( widget == editor ) {
+            return nullptr;
+        }
+    }
+    for ( auto* widget = editor->parentWidget(); widget; widget = widget->parentWidget() ) {
+        if ( widget == modal ) {
+            return nullptr;
+        }
+    }
+    return modal;
+}
+
+/**
+ * Put the editor over @p home, the window the host opens it from, or over
+ * the application-modal window blocking that one, where it is usable.
+ * Moving keeps its window flags and its content, edits included.
+ */
+void placeEditor( custom_footer::FooterEditor* editor, QWidget* home )
+{
+    if ( !home ) {
+        home = editor->parentWidget();
+    }
+    const auto children = editor->children();
+    for ( auto* child : children ) {
+        delete dynamic_cast<ModalGuest*>( child );
+    }
+    auto* modal = blockingModal( editor );
+    auto* over = modal ? modal : home;
+    if ( over && editor->parentWidget() != over ) {
+        editor->setParent( over, editor->windowFlags() );
+    }
+    if ( modal ) {
+        new ModalGuest( editor, modal, home );
+    }
+}
+
+} // namespace
+
+/**
+ * Open the rule editor over the given parent, or raise it if it is open.
+ *
+ * It is not run with exec(): a nested event loop would keep this plugin's
+ * frames on the stack, and the host may shut the plugin down and unload it
+ * from within that loop. The editor lives on the heap instead, OK and Apply
+ * are handled through its signals, and shutdown deletes it at once.
+ */
+static void openEditor( QWidget* parent )
+{
+    auto& st = custom_footer::g_state;
+    if ( st.editor && !st.editor->isVisible() ) {
+        // Closed, and only waiting to be deleted: a new one is opened.
+        delete st.editor.data();
+    }
+    if ( st.editor ) {
+        // Opened again, maybe from another window, or while the host's
+        // Plugins dialog blocks the window the editor is over.
+        placeEditor( st.editor, parent );
+        if ( !st.editor->isVisible() ) {
+            st.editor->open();
+        }
+        st.editor->raise();
+        st.editor->activateWindow();
+        return;
+    }
+
+    const auto dir = configDir();
+    const auto entries = custom_footer::FooterConfig::loadEntries( dir );
+    const auto maxLines = custom_footer::FooterConfig::loadMaxLines( dir );
+    const auto activeFile = activeFilePath();
+
+    // Tracked at once, so that whatever throws from here on leaves no
+    // editor, with its timers, that shutdown would not delete.
+    auto* editor = new custom_footer::FooterEditor( entries, parent );
+    st.editor = editor;
+    editor->setMaxLines( maxLines );
+    editor->setActiveFile( activeFile );
+    placeEditor( editor, parent );
 
     // Apply button: save and rescan without closing the dialog.
-    QObject::connect( &editor, &custom_footer::FooterEditor::applied,
-                      [ &editor ]() { saveEntries( editor.entries() ); } );
+    QObject::connect( editor, &custom_footer::FooterEditor::applied, editor, [ editor ] {
+        guarded( "saving the rules", [ editor ] { saveEntries( editor->entries() ); } );
+    } );
+    QObject::connect( editor, &QDialog::finished, editor, [ editor ]( int result ) {
+        guarded( "saving the rules", [ editor, result ] {
+            if ( result == QDialog::Accepted ) {
+                saveEntries( editor->entries() );
+            }
+        } );
+        // Deleted later, as it is still in its own signal; shutdown deletes
+        // it at once if that comes first.
+        editor->deleteLater();
+    } );
 
-    if ( editor.exec() == QDialog::Accepted ) {
-        saveEntries( editor.entries() );
-    }
+    editor->open();
 }
 
 /// Called by the host when the active file changes.
 static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
     guarded( "scanning the active file", [ filePath ] {
+        const auto path = filePath ? QString::fromUtf8( filePath ) : QString();
         if ( custom_footer::g_state.controller ) {
-            custom_footer::g_state.controller->setActiveFile(
-                filePath ? QString::fromUtf8( filePath ) : QString() );
+            custom_footer::g_state.controller->setActiveFile( path );
+        }
+        if ( auto* editor = custom_footer::g_state.editor.data() ) {
+            editor->setActiveFile( path );
         }
     } );
 }
@@ -166,7 +338,7 @@ static void onEditorMenuAction( void* /* userData */ )
 {
     guarded( "the rule editor", [] {
         const auto* footer = custom_footer::g_state.footerWidget;
-        showEditorDialog( footer ? footer->window() : nullptr );
+        openEditor( footer ? footer->window() : nullptr );
     } );
 }
 
@@ -221,8 +393,7 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
         api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
 
         // Initial scan if a file is already open.
-        const char* activeFile = api->get_active_file_path( handle );
-        st.controller->setActiveFile( activeFile ? QString::fromUtf8( activeFile ) : QString() );
+        st.controller->setActiveFile( activeFilePath() );
 
         api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin ready." );
     } );
@@ -241,6 +412,15 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         custom_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
 
         // First stop scanning: the host unloads the library after this returns.
+        // The editor too, open or closed but not yet deleted: deleting it
+        // stops its preview and waits for it, and drops its timers and
+        // pending events. Nothing of the plugin is on the stack here, as
+        // the editor and its file dialogs and messages run in the host's
+        // event loop, not in one of ours. The one nested loop left is a
+        // drag of a rule in the list (QDrag::exec(), which cannot be
+        // avoided); a shutdown during a drag cannot be triggered from the
+        // UI, as the drag holds the mouse until it ends.
+        delete st.editor.data();
         delete st.controller;
         st.controller = nullptr;
 
@@ -261,7 +441,7 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
     // The editor is opened via the Plugins menu action.
     // configure() also opens it as a convenience, over the host's window.
     guarded( "the rule editor",
-             [ parent_widget ] { showEditorDialog( static_cast<QWidget*>( parent_widget ) ); } );
+             [ parent_widget ] { openEditor( static_cast<QWidget*>( parent_widget ) ); } );
 }
 
 } // extern "C"

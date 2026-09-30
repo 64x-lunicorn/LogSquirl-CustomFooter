@@ -26,17 +26,22 @@
 
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
+#include "footereditor.h"
 #include "logsquirl_plugin_api.h"
+#include "plugin.h"
+#include "rulepreviewer.h"
 
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLineEdit>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QWidget>
 
 extern "C" int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
@@ -82,6 +87,20 @@ LogSquirlHostApi fakeApi()
               host().activeFileUserData = userData;
           };
     return api;
+}
+
+template <typename Predicate>
+bool processUntil( Predicate done, int boundMs = 10000 )
+{
+    QElapsedTimer timer;
+    timer.start();
+    while ( !done() ) {
+        if ( timer.elapsed() > boundMs ) {
+            return false;
+        }
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    }
+    return true;
 }
 
 bool waitForText( const QString& text, int timeoutMs = 5000 )
@@ -155,18 +174,239 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
         WHEN( "the rule editor is opened through configure()" )
         {
             QWidget hostWindow;
-            QWidget* editorParent = nullptr;
-            QTimer::singleShot( 0, [ &editorParent ] {
-                if ( auto* dialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() ) ) {
-                    editorParent = dialog->parentWidget();
-                    dialog->reject();
-                }
-            } );
             logsquirl_plugin_configure( &hostWindow );
+            QPointer<FooterEditor> editor = g_state.editor;
 
-            THEN( "it is parented to the widget the host passed" )
+            THEN( "it is open without blocking, parented to the widget the host passed" )
             {
-                REQUIRE( editorParent == &hostWindow );
+                REQUIRE( editor );
+                REQUIRE( editor->isVisible() );
+                REQUIRE( editor->parentWidget() == &hostWindow );
+            }
+
+            AND_WHEN( "it is opened again" )
+            {
+                logsquirl_plugin_configure( &hostWindow );
+
+                THEN( "the same editor is kept" )
+                {
+                    REQUIRE( g_state.editor == editor );
+                }
+            }
+
+            AND_WHEN( "it is opened again from another window, e.g. the plugin dialog" )
+            {
+                QWidget pluginDialog;
+                logsquirl_plugin_configure( &pluginDialog );
+
+                THEN( "the same editor moves over that window, still an open dialog" )
+                {
+                    REQUIRE( g_state.editor == editor );
+                    REQUIRE( editor->parentWidget() == &pluginDialog );
+                    REQUIRE( editor->isWindow() );
+                    REQUIRE( editor->isVisible() );
+                    REQUIRE( editor->isModal() );
+                }
+            }
+
+            AND_WHEN( "it is closed and opened again before it was deleted" )
+            {
+                editor->reject();
+                logsquirl_plugin_configure( &hostWindow );
+
+                THEN( "a new editor is open" )
+                {
+                    REQUIRE_FALSE( editor );
+                    REQUIRE( g_state.editor );
+                    REQUIRE( g_state.editor->isVisible() );
+                }
+            }
+
+            AND_WHEN( "it is closed" )
+            {
+                editor->reject();
+                QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+                THEN( "it is deleted" )
+                {
+                    REQUIRE_FALSE( editor );
+                    REQUIRE_FALSE( g_state.editor );
+                }
+            }
+        }
+
+        WHEN( "the host's application-modal plugin dialog is open over the main window" )
+        {
+            // As in LogSquirl: configure() always gets the main window, even
+            // while the Plugins dialog blocks it.
+            QWidget mainWindow;
+            mainWindow.show();
+            auto* pluginDialog = new QDialog( &mainWindow );
+            QPointer<QDialog> pluginDialogAlive = pluginDialog;
+            pluginDialog->setWindowModality( Qt::ApplicationModal );
+            pluginDialog->show();
+            REQUIRE( QApplication::activeModalWidget() == pluginDialog );
+
+            logsquirl_plugin_configure( &mainWindow );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+
+            THEN( "the editor opens over the plugin dialog, where it is usable" )
+            {
+                REQUIRE( editor->parentWidget() == pluginDialog );
+                REQUIRE( editor->isWindow() );
+                REQUIRE( editor->isVisible() );
+            }
+
+            AND_WHEN( "the plugin dialog closes while the editor has unsaved edits" )
+            {
+                editor->findChild<QLineEdit*>( "keyEdit" )->setText( "Edited" );
+                pluginDialog->accept();
+
+                THEN( "the editor moves back over the main window, edits and all" )
+                {
+                    REQUIRE( editor );
+                    REQUIRE( editor->parentWidget() == &mainWindow );
+                    REQUIRE( editor->isVisible() );
+                    REQUIRE( editor->entries().at( 0 ).key == "Edited" );
+                }
+            }
+
+            AND_WHEN( "the plugin dialog is deleted while open" )
+            {
+                delete pluginDialog;
+
+                THEN( "the editor survives, over the main window" )
+                {
+                    REQUIRE( editor );
+                    REQUIRE( editor->parentWidget() == &mainWindow );
+                }
+            }
+            delete pluginDialogAlive.data();
+        }
+
+        WHEN( "the editor is open when the plugin dialog opens and opens it again" )
+        {
+            QWidget mainWindow;
+            mainWindow.show();
+            logsquirl_plugin_configure( &mainWindow );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            REQUIRE( editor->parentWidget() == &mainWindow );
+
+            QDialog pluginDialog( &mainWindow );
+            pluginDialog.setWindowModality( Qt::ApplicationModal );
+            pluginDialog.show();
+            logsquirl_plugin_configure( &mainWindow );
+
+            THEN( "the same editor moves over the plugin dialog" )
+            {
+                REQUIRE( g_state.editor == editor );
+                REQUIRE( editor->parentWidget() == &pluginDialog );
+                REQUIRE( editor->isVisible() );
+            }
+            pluginDialog.reject();
+        }
+
+        WHEN( "the rule editor is open while the host switches files" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            const auto openedWith = editor->activeFile();
+            const auto second = ( logDir.path() + "/second.log" ).toUtf8();
+            host().activeFileCallback( host().activeFileUserData, second.constData() );
+
+            THEN( "its preview uses the host's active file, and follows it" )
+            {
+                REQUIRE( openedWith == logDir.path() + "/first.log" );
+                REQUIRE( editor->activeFile() == logDir.path() + "/second.log" );
+            }
+        }
+
+        WHEN( "the plugin is shut down from the event loop while the editor is previewing" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            QPointer<RulePreviewer> previewer = editor->findChild<RulePreviewer*>();
+            REQUIRE( previewer );
+            REQUIRE( previewer->isBusy() );
+            QList<QPointer<QTimer>> timers;
+            for ( auto* timer : editor->findChildren<QTimer*>() ) {
+                timers.append( timer );
+            }
+            REQUIRE_FALSE( timers.isEmpty() );
+
+            // As a host would: from its event loop, with no plugin frame on the stack.
+            bool shutDown = false;
+            QTimer::singleShot( 0, [ &shutDown ] {
+                logsquirl_plugin_shutdown();
+                shutDown = true;
+            } );
+            REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
+
+            THEN( "the editor, its previewer and all their timers are gone at once" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( previewer );
+                for ( const auto& timer : timers ) {
+                    REQUIRE_FALSE( timer );
+                }
+                REQUIRE_FALSE( g_state.editor );
+            }
+        }
+
+        WHEN( "the plugin is shut down from the event loop while the import dialog is open" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            auto* import = editor->findChild<QToolButton*>( "importButton" );
+            REQUIRE( import );
+            import->click();
+            QPointer<QDialog> dialog = editor->findChild<QDialog*>( "importDialog" );
+            REQUIRE( dialog );
+            REQUIRE( dialog->isVisible() );
+
+            bool shutDown = false;
+            QTimer::singleShot( 0, [ &shutDown ] {
+                logsquirl_plugin_shutdown();
+                shutDown = true;
+            } );
+            REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
+
+            THEN( "the editor and its dialog are gone, and shutdown returned" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( dialog );
+                REQUIRE_FALSE( g_state.editor );
+            }
+        }
+
+        WHEN( "the plugin is shut down from the event loop while the template dialog is open" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            auto* fromTemplate = editor->findChild<QToolButton*>( "templateButton" );
+            REQUIRE( fromTemplate );
+            fromTemplate->click();
+            QPointer<QDialog> dialog = editor->findChild<QDialog*>( "ruleTemplateDialog" );
+            REQUIRE( dialog );
+            REQUIRE( dialog->isVisible() );
+
+            bool shutDown = false;
+            QTimer::singleShot( 0, [ &shutDown ] {
+                logsquirl_plugin_shutdown();
+                shutDown = true;
+            } );
+            REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
+
+            THEN( "the editor and the template dialog are gone" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( dialog );
             }
         }
 

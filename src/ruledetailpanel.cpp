@@ -18,6 +18,7 @@
  */
 
 #include "ruledetailpanel.h"
+#include "rulepreviewview.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -196,6 +197,10 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     form->addRow( mappingLabel, mappings );
 
     panelLayout->addLayout( form, 1 );
+
+    // ── The live preview (#16) ───────────────────────────────────────────
+    preview_ = new RulePreviewView( this );
+    panelLayout->addWidget( preview_ );
 
     // ── Connections ──────────────────────────────────────────────────────
     connect( enabledCheck_, &QCheckBox::toggled, this, &RuleDetailPanel::edited );

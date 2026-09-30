@@ -90,6 +90,18 @@ buttons, or with Ctrl+Shift+Up / Ctrl+Shift+Down (⇧⌘↑ / ⇧⌘↓ on macOS
 the list has the focus. A rule keeps its mappings, enabled state and
 validation marks wherever it is moved, and stays selected.
 
+Below the fields, a **live preview** shows what the selected rule finds in
+the active log file, without applying it: the first matching line and its
+number, with the line pattern's match and the value highlighted; the raw
+value and the value after mappings; and how many lines match, e.g. "12
+matching lines in the first 100,000 lines", within the same limits as the
+footer. For a key that several rules share, it says whether this rule or
+another one supplies the value in this file. It updates shortly after you
+stop typing and scans in the background, so the editor never waits for
+it, and it follows the log as it grows. Without an open log file, while
+a pattern is invalid, or while a simple rule is unfinished, it explains
+why instead.
+
 Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
 ### Simple and advanced mode

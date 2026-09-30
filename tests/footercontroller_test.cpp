@@ -24,6 +24,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "activefilewatcher.h"
 #include "footerconfig.h"
 #include "footercontroller.h"
 #include "footerdisplaywidget.h"
@@ -381,6 +382,56 @@ SCENARIO( "FooterController shows where each value came from", "[footercontrolle
             REQUIRE( waitFor( [ & ] { return widget.values().size() == 2; } ) );
             REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0 } );
             REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
+        }
+    }
+}
+
+SCENARIO( "FooterController does not rescan a file it only read", "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                          { "Missing", "never=(\\S+)", "", true, {} } } ) );
+    const auto path = logDir.path() + "/read.log";
+    writeFile( path, "VIN: READ\n" );
+
+    FooterDisplayWidget widget;
+    FooterController controller( &widget, configDir.path() );
+    auto* fileWatcher = controller.findChild<ActiveFileWatcher*>();
+    REQUIRE( fileWatcher );
+
+    GIVEN( "a scanned file, with a key still missing" )
+    {
+        controller.setActiveFile( path );
+        REQUIRE( waitFor( [ &widget ] { return shownText( widget ) == "VIN: READ"; } ) );
+        const int scans = controller.scansStarted();
+
+        WHEN( "the system reports a change that was only the scan reading the file" )
+        {
+            // As Linux and Windows may, e.g. for its access time.
+            REQUIRE( QMetaObject::invokeMethod( fileWatcher, "fileChanged", Qt::DirectConnection,
+                                                Q_ARG( QString, path ) ) );
+
+            THEN( "no rescan is scheduled" )
+            {
+                REQUIRE_FALSE( fileWatcher->isPending() );
+                REQUIRE( controller.scansStarted() == scans );
+            }
+        }
+
+        WHEN( "the file grew, and the system reports it" )
+        {
+            writeFile( path, "more\n", true );
+            REQUIRE( QMetaObject::invokeMethod( fileWatcher, "fileChanged", Qt::DirectConnection,
+                                                Q_ARG( QString, path ) ) );
+
+            THEN( "it is scanned again" )
+            {
+                REQUIRE( fileWatcher->isPending() );
+            }
         }
     }
 }

@@ -75,6 +75,11 @@ struct RuleProblems {
  * removed or moved. The list shows the enabled state as the check box of
  * the key column, the key, and the line pattern; the rest is edited in the
  * detail panel through setEntry().
+ *
+ * Rules are reordered by dragging them within the list: a drop moves the
+ * dragged rules with moveRows(), whatever drop action the platform reports,
+ * so a rule is never copied, and nothing is left for the view to remove.
+ * Only rules dragged from this model are accepted.
  */
 class RuleListModel : public QAbstractTableModel {
     Q_OBJECT
@@ -114,10 +119,25 @@ public:
     bool moveRows( const QModelIndex& sourceParent, int sourceRow, int count,
                    const QModelIndex& destinationParent, int destinationChild ) override;
 
+    Qt::DropActions supportedDragActions() const override;
+    Qt::DropActions supportedDropActions() const override;
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData( const QModelIndexList& indexes ) const override;
+    bool canDropMimeData( const QMimeData* data, Qt::DropAction action, int row, int column,
+                          const QModelIndex& parent ) const override;
+    /// Move the dragged rules before @p row, or to the rule @p parent when
+    /// dropped onto it, or to the end. Returns false when nothing moved.
+    bool dropMimeData( const QMimeData* data, Qt::DropAction action, int row, int column,
+                       const QModelIndex& parent ) override;
+
 Q_SIGNALS:
     /// The rule in @p row was enabled or disabled in the list. Not emitted
     /// for setEntry(), whose caller knows what it changed.
     void ruleChanged( int row );
+
+    /// Dragged rules are about to be moved by a drop. Emitted before the
+    /// move, so that a pending edit can still be stored in its rule.
+    void aboutToDropRules();
 
 private:
     struct Rule {
@@ -126,6 +146,10 @@ private:
     };
 
     void emitRowChanged( int row );
+
+    /// The first dragged row and how many follow it, or false if @p data
+    /// is not a drag of contiguous rows from this model.
+    bool draggedRows( const QMimeData* data, int* first, int* count ) const;
 
     QList<Rule> rules_;
 };

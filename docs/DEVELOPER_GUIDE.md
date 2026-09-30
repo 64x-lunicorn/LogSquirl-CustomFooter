@@ -47,14 +47,15 @@ sequenceDiagram
     Note over Host,Plugin: User clicks "Custom Footer…" in Plugins menu
 
     Host->>Plugin: onEditorMenuAction() callback
-    Plugin->>Plugin: Open FooterEditor dialog over the main window
-    Plugin->>Plugin: User edits rules, clicks OK
+    Plugin->>Plugin: Open FooterEditor over the main window with open(), and return
+    Plugin->>Plugin: User edits rules, clicks OK (FooterEditor::finished)
     Plugin->>Plugin: FooterConfig::saveEntries()
     Plugin->>Plugin: FooterController::reloadConfig()
 
     Note over Host,Plugin: Host unloads the plugin
 
     Host->>Plugin: logsquirl_plugin_shutdown()
+    Plugin->>Plugin: Delete an open rule editor, cancel and wait for its preview
     Plugin->>Plugin: Cancel and wait for a running scan
     Plugin->>Host: api->unregister_footer_widget(footerWidget)
 ```
@@ -77,12 +78,28 @@ The rule editor's live preview has a worker thread of its own, owned by
 `RulePreviewer`, with the same rules: every request (an edit, another
 selected rule, another active file) bumps its generation counter and
 cancels the running preview, and a result is emitted only for the latest
-request. Requests start after `RulePreviewer::kDelayMs` (300 ms) without
-another one; selecting a rule or another active file starts at once.
-Closing the editor (`done()`) and its destructor call `stop()`, which
-cancels and waits for the worker, before any widget is deleted.
-`logsquirl_plugin_shutdown()` stops the preview of an open editor
-(`PluginState::editor`) and closes it.
+request. An edit starts a preview after `RulePreviewer::kDelayMs` (300 ms)
+without another one; another rule or active file starts one with the next
+pass of the event loop (`Start::Soon`), coalesced with the change that
+follows, so removing the selected rule previews once, on the remaining
+rules. The active file is watched like the footer's: a change on disk
+previews it again after `kRescanDelayMs`, and a running preview of the
+file is not cancelled for it but followed by one more. Setting the same
+active file again counts as such a change.
+
+The editor never runs in a nested event loop: `exec()` would keep plugin
+frames on the stack, and the host may shut the plugin down, and unload
+it, from within that loop. `openEditor()` in `plugin.cpp` creates it on
+the heap, parented to the host's window, opens it with `open()`, and
+handles OK and Apply through `finished()` and `applied()`; a closed
+editor is deleted later. `PluginState::editor` is a `QPointer` to it
+until it is deleted, and `logsquirl_plugin_shutdown()` deletes it at
+once: its destructor stops the preview (`RulePreviewer::stop()` cancels,
+waits for the worker, stops its timers and deletes pending result
+watchers), and deleting the objects drops their timers and posted
+events. Closing the editor (`done()`) stops the preview for good; an edit
+committed while it closes, such as an open mapping cell losing the
+focus, starts none (`FooterEditor::closing_`).
 
 No exception may leave an entry point or host callback; they run their work
 through `guarded()`, which logs the failure instead.
@@ -193,8 +210,12 @@ in a detail panel on the right.
   which the plugin passes in with `FooterEditor::setActiveFile()` when the
   editor opens and whenever the host switches files, along with the
   footer's line limit (`setMaxLines()`). `preview()` uses the scanner's
-  own compiling, line reading, limits and matching (`matchOf()`, which
-  `valueOf()` is built on), so it cannot disagree with the footer. It
+  own compiling, matching (`valueOf()`) and line reading: `forEachLine()`
+  reads, counts and limits lines for `scanFrom()` and `preview()` alike,
+  so the preview cannot disagree with the footer. Only the first match
+  is matched again with `matchOf()`, for its offsets, which the footer's
+  scan never computes; a rule that is also one of its key's rules is
+  matched once per line. It
   reads on after the first match to the limits, to count the matching
   lines, and reports the first match's line number (from 1), its line
   (at most 64 KiB) with the spans of the line pattern's match and of the
@@ -203,10 +224,16 @@ in a detail panel on the right.
   line. A disabled rule is previewed too, but never supplies the key.
   Without an active file, an invalid pattern or no line pattern, it
   returns a status that the view explains; without a file this is
-  decided on the GUI thread, as nothing is read. Every change of the model
-  schedules a preview (`FooterEditor::schedulePreview()`). Tests make the
-  timing deterministic with `RulePreviewer::flush()` and replace the
-  preview function (`setPreviewFunction()`) to hold a preview on the
+  decided on the GUI thread, as nothing is read. A rule without a line
+  pattern because of a problem, such as an unfinished simple rule, shows
+  that problem and is not scanned. Each change schedules one preview
+  (`FooterEditor::schedulePreview()`): an edit where it is stored, a
+  rule enabled in the list, and rows inserted, removed or moved; not
+  every `dataChanged()`, which validation marks emit too. The long line
+  around the first match is cut between whole characters, never inside a
+  surrogate pair. Tests set the pauses to 0 (`setDelays()`) or start
+  a preview with `flush()`, so they wait for no real time, and replace
+  the preview function (`setPreviewFunction()`) to hold a preview on the
   worker (`tests/rulepreview_test.cpp`).
 
 ### Simple mode

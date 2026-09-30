@@ -76,6 +76,13 @@ public:
     /// Load the rules again, e.g. after they were saved, and rescan.
     void reloadConfig();
 
+    /// Whether the active file is missing and its directory is watched for
+    /// it to be created again.
+    bool isWaitingForActiveFile() const
+    {
+        return !watchedDir_.isEmpty();
+    }
+
 private:
     using Values = QList<QPair<QString, QString>>;
 

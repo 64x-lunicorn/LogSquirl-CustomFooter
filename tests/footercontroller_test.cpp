@@ -211,7 +211,7 @@ SCENARIO( "FooterController scans the active file in the background", "[footerco
         WHEN( "it is rotated away and recreated only later" )
         {
             REQUIRE( QFile::rename( rotating, rotating + ".1" ) );
-            settle( 3 * FooterController::kRescanDelayMs );
+            REQUIRE( waitFor( [ & ] { return controller.isWaitingForActiveFile(); } ) );
             writeFile( rotating, "VIN: RECREATED\n" );
 
             THEN( "the recreated file is scanned" )

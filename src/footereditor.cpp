@@ -504,14 +504,16 @@ void FooterEditor::moveEntry( int from, int to )
     table_->setCurrentCell( to, 1 );
 }
 
-QString FooterEditor::patternError( const QString& pattern, QHash<QString, QString>& errors ) const
+QString FooterEditor::patternError( const QString& pattern, QHash<QString, QString>& errors )
 {
     auto it = errors.constFind( pattern );
     if ( it == errors.constEnd() ) {
-        const auto known = patternErrors_.constFind( pattern );
-        it = errors.insert( pattern, known != patternErrors_.constEnd()
-                                         ? known.value()
-                                         : FooterScanner::patternError( pattern ) );
+        auto known = patternErrors_.constFind( pattern );
+        if ( known == patternErrors_.constEnd() ) {
+            ++patternCompilations_;
+            known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
+        }
+        it = errors.insert( pattern, known.value() );
     }
     return it.value();
 }

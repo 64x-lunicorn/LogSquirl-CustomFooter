@@ -28,7 +28,6 @@
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QElapsedTimer>
 #include <QGroupBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -352,9 +351,10 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
     }
 }
 
-SCENARIO( "FooterEditor stays responsive with many rules", "[footereditor]" )
+SCENARIO( "FooterEditor compiles each pattern only once", "[footereditor]" )
 {
-    // Patterns that take a while to compile, all of them distinct.
+    // 400 distinct patterns: validating all rules on every change would
+    // compile them hundreds of thousands of times.
     QList<FooterEntry> entries;
     for ( int i = 0; i < 200; ++i ) {
         const auto key = QString( "Key%1" ).arg( i );
@@ -368,10 +368,13 @@ SCENARIO( "FooterEditor stays responsive with many rules", "[footereditor]" )
 
     GIVEN( "an editor with 200 rules" )
     {
-        QElapsedTimer timer;
-        timer.start();
         FooterEditor editor( entries );
         EditorUi ui( editor );
+
+        THEN( "each pattern has been compiled once" )
+        {
+            REQUIRE( editor.patternCompilations() == 400 );
+        }
 
         WHEN( "a rule is moved up many times" )
         {
@@ -380,9 +383,9 @@ SCENARIO( "FooterEditor stays responsive with many rules", "[footereditor]" )
                 ui.moveUp->click();
             }
 
-            THEN( "the editor keeps up and the rules are unchanged but for the order" )
+            THEN( "no pattern is compiled again and the rules are unchanged but for the order" )
             {
-                REQUIRE( timer.elapsed() < 3000 );
+                REQUIRE( editor.patternCompilations() == 400 );
                 REQUIRE( ui.rules->item( 179, 1 )->text() == "Key199" );
                 REQUIRE( editor.entries().size() == 200 );
                 REQUIRE( ui.canAccept() );
@@ -392,8 +395,9 @@ SCENARIO( "FooterEditor stays responsive with many rules", "[footereditor]" )
             {
                 ui.rules->item( 179, 3 )->setText( "(" );
 
-                THEN( "only that rule is marked" )
+                THEN( "only that pattern is compiled, and only that rule is marked" )
                 {
+                    REQUIRE( editor.patternCompilations() == 401 );
                     REQUIRE_FALSE( ui.rules->item( 179, 3 )->toolTip().isEmpty() );
                     REQUIRE( ui.rules->item( 178, 3 )->toolTip().isEmpty() );
                     REQUIRE( ui.rules->item( 180, 3 )->toolTip().isEmpty() );
@@ -403,8 +407,9 @@ SCENARIO( "FooterEditor stays responsive with many rules", "[footereditor]" )
                     {
                         ui.moveUp->click();
 
-                        THEN( "the mark moves with it" )
+                        THEN( "the mark moves with it, without compiling again" )
                         {
+                            REQUIRE( editor.patternCompilations() == 401 );
                             REQUIRE_FALSE( ui.rules->item( 178, 3 )->toolTip().isEmpty() );
                             REQUIRE( ui.rules->item( 179, 3 )->toolTip().isEmpty() );
                             REQUIRE_FALSE( ui.canAccept() );

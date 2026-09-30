@@ -57,6 +57,13 @@ public:
     /// Append entries after the existing ones, as an import does.
     void appendEntries( const QList<FooterEntry>& entries );
 
+    /// How many patterns validation has compiled so far. Unchanged patterns
+    /// are not compiled again; tests check that with this.
+    int patternCompilations() const
+    {
+        return patternCompilations_;
+    }
+
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
     void applied();
@@ -87,8 +94,9 @@ private:
 
     /// Why a pattern does not compile, remembered from the last validate(),
     /// so that validating compiles only the patterns edited since.
-    QString patternError( const QString& pattern, QHash<QString, QString>& errors ) const;
+    QString patternError( const QString& pattern, QHash<QString, QString>& errors );
     QHash<QString, QString> patternErrors_;
+    int patternCompilations_ = 0;
 
     QTableWidget* table_ = nullptr;
     QToolButton* addButton_ = nullptr;

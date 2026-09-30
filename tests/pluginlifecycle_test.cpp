@@ -40,6 +40,7 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QWidget>
 
 extern "C" int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
@@ -192,6 +193,34 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
                 }
             }
 
+            AND_WHEN( "it is opened again from another window, e.g. the plugin dialog" )
+            {
+                QWidget pluginDialog;
+                logsquirl_plugin_configure( &pluginDialog );
+
+                THEN( "the same editor moves over that window, still an open dialog" )
+                {
+                    REQUIRE( g_state.editor == editor );
+                    REQUIRE( editor->parentWidget() == &pluginDialog );
+                    REQUIRE( editor->isWindow() );
+                    REQUIRE( editor->isVisible() );
+                    REQUIRE( editor->isModal() );
+                }
+            }
+
+            AND_WHEN( "it is closed and opened again before it was deleted" )
+            {
+                editor->reject();
+                logsquirl_plugin_configure( &hostWindow );
+
+                THEN( "a new editor is open" )
+                {
+                    REQUIRE_FALSE( editor );
+                    REQUIRE( g_state.editor );
+                    REQUIRE( g_state.editor->isVisible() );
+                }
+            }
+
             AND_WHEN( "it is closed" )
             {
                 editor->reject();
@@ -250,6 +279,33 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
                 for ( const auto& timer : timers ) {
                     REQUIRE_FALSE( timer );
                 }
+                REQUIRE_FALSE( g_state.editor );
+            }
+        }
+
+        WHEN( "the plugin is shut down from the event loop while the import dialog is open" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            QPointer<FooterEditor> editor = g_state.editor;
+            REQUIRE( editor );
+            auto* import = editor->findChild<QToolButton*>( "importButton" );
+            REQUIRE( import );
+            import->click();
+            QPointer<QDialog> dialog = editor->findChild<QDialog*>( "importDialog" );
+            REQUIRE( dialog );
+            REQUIRE( dialog->isVisible() );
+
+            bool shutDown = false;
+            QTimer::singleShot( 0, [ &shutDown ] {
+                logsquirl_plugin_shutdown();
+                shutDown = true;
+            } );
+            REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
+
+            THEN( "the editor and its dialog are gone, and shutdown returned" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( dialog );
                 REQUIRE_FALSE( g_state.editor );
             }
         }

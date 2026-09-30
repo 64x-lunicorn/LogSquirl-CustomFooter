@@ -157,18 +157,35 @@ static QString activeFilePath()
 static void openEditor( QWidget* parent )
 {
     auto& st = custom_footer::g_state;
+    if ( st.editor && !st.editor->isVisible() ) {
+        // Closed, and only waiting to be deleted: a new one is opened.
+        delete st.editor.data();
+    }
     if ( st.editor ) {
+        if ( parent && st.editor->parentWidget() != parent ) {
+            // Opened from another window, e.g. the host's application-modal
+            // plugin dialog, which would block an editor over the main
+            // window: move it over that window, as a dialog still.
+            const auto flags = st.editor->windowFlags();
+            st.editor->setParent( parent, flags );
+            st.editor->open();
+        }
         st.editor->raise();
         st.editor->activateWindow();
         return;
     }
 
     const auto dir = configDir();
-    auto* editor = new custom_footer::FooterEditor( custom_footer::FooterConfig::loadEntries( dir ),
-                                                    parent );
-    editor->setMaxLines( custom_footer::FooterConfig::loadMaxLines( dir ) );
-    editor->setActiveFile( activeFilePath() );
+    const auto entries = custom_footer::FooterConfig::loadEntries( dir );
+    const auto maxLines = custom_footer::FooterConfig::loadMaxLines( dir );
+    const auto activeFile = activeFilePath();
+
+    // Tracked at once, so that whatever throws from here on leaves no
+    // editor, with its timers, that shutdown would not delete.
+    auto* editor = new custom_footer::FooterEditor( entries, parent );
     st.editor = editor;
+    editor->setMaxLines( maxLines );
+    editor->setActiveFile( activeFile );
 
     // Apply button: save and rescan without closing the dialog.
     QObject::connect( editor, &custom_footer::FooterEditor::applied, editor, [ editor ] {
@@ -284,7 +301,11 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         // The editor too, open or closed but not yet deleted: deleting it
         // stops its preview and waits for it, and drops its timers and
         // pending events. Nothing of the plugin is on the stack here, as
-        // the editor runs in the host's event loop, not in one of ours.
+        // the editor and its file dialogs and messages run in the host's
+        // event loop, not in one of ours. The one nested loop left is a
+        // drag of a rule in the list (QDrag::exec(), which cannot be
+        // avoided); a shutdown during a drag cannot be triggered from the
+        // UI, as the drag holds the mouse until it ends.
         delete st.editor.data();
         delete st.controller;
         st.controller = nullptr;

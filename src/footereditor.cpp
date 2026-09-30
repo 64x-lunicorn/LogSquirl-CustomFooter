@@ -23,6 +23,7 @@
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
+#include "ruletemplatedialog.h"
 #include "simplerule.h"
 
 #include <QDialogButtonBox>
@@ -87,6 +88,13 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     addButton_->setToolTip( tr( "Add rule" ) );
     toolLayout->addWidget( addButton_ );
 
+    templateButton_ = new QToolButton( listSide );
+    templateButton_->setObjectName( "templateButton" );
+    templateButton_->setText( tr( "From template…" ) );
+    templateButton_->setToolTip(
+        tr( "Add a ready-made rule, e.g. for a version or an IP address" ) );
+    toolLayout->addWidget( templateButton_ );
+
     removeButton_ = new QToolButton( listSide );
     removeButton_->setObjectName( "removeRuleButton" );
     removeButton_->setText( "−" ); // minus sign
@@ -142,6 +150,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
     // ── Connections ──────────────────────────────────────────────────────
     connect( addButton_, &QToolButton::clicked, this, &FooterEditor::addEntry );
+    connect( templateButton_, &QToolButton::clicked, this, &FooterEditor::addFromTemplate );
     connect( removeButton_, &QToolButton::clicked, this, &FooterEditor::removeEntry );
     connect( upButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryUp );
     connect( downButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryDown );
@@ -210,10 +219,32 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
 void FooterEditor::addEntry()
 {
     panel_->commitPendingEdit();
-    const int row = model_->rowCount();
-    model_->appendEntries( { FooterEntry() } );
-    selectRow( row );
-    panel_->focusKey();
+    appendAndSelect( FooterEntry() );
+}
+
+void FooterEditor::addFromTemplate()
+{
+    panel_->commitPendingEdit();
+    if ( !templateDialog_ ) {
+        templateDialog_ = new RuleTemplateDialog( this );
+        connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRule );
+    }
+    QStringList keys;
+    for ( const auto& entry : model_->entries() ) {
+        keys.append( entry.key );
+    }
+    templateDialog_->reset( keys );
+    // Not exec(): the dialog stays window-modal, and tests can drive it.
+    templateDialog_->open();
+}
+
+void FooterEditor::addTemplateRule()
+{
+    const auto entry = templateDialog_->entry();
+    if ( entry.key.isEmpty() ) {
+        return;
+    }
+    appendAndSelect( entry );
 }
 
 void FooterEditor::removeEntry()
@@ -349,6 +380,14 @@ void FooterEditor::selectRow( int row )
     list_->selectionModel()->setCurrentIndex( index, QItemSelectionModel::ClearAndSelect
                                                          | QItemSelectionModel::Rows );
     list_->scrollTo( index );
+}
+
+void FooterEditor::appendAndSelect( const FooterEntry& entry )
+{
+    const int row = model_->rowCount();
+    model_->appendEntries( { entry } );
+    selectRow( row );
+    panel_->focusKey();
 }
 
 void FooterEditor::moveEntry( int from, int to )

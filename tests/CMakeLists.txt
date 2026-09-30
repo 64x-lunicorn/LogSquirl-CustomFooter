@@ -33,6 +33,7 @@ add_executable(logsquirl_custom_footer_tests
     configroundtrip_test.cpp
     simplerule_test.cpp
     simplemode_test.cpp
+    ruletemplate_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES
@@ -59,6 +60,8 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/rulelistview.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruledetailpanel.cpp"
         "${CMAKE_SOURCE_DIR}/src/simplerule.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ruletemplate.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ruletemplatedialog.cpp"
 )
 
 target_link_libraries(logsquirl_custom_footer_tests

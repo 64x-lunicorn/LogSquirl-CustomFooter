@@ -25,6 +25,7 @@
 #include <catch2/catch.hpp>
 
 #include "footerconfig.h"
+#include "footerdisplaywidget.h"
 #include "logsquirl_plugin_api.h"
 
 #include <QApplication>
@@ -32,7 +33,6 @@
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
-#include <QLabel>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -89,10 +89,12 @@ bool waitForText( const QString& text, int timeoutMs = 5000 )
     QElapsedTimer timer;
     timer.start();
     while ( timer.elapsed() < timeoutMs ) {
-        const auto* label
-            = host().footerWidget ? host().footerWidget->findChild<QLabel*>() : nullptr;
-        if ( label && label->text().contains( text ) ) {
-            return true;
+        if ( const auto* footer = qobject_cast<FooterDisplayWidget*>( host().footerWidget ) ) {
+            for ( const auto& value : footer->values() ) {
+                if ( value.value.contains( text ) ) {
+                    return true;
+                }
+            }
         }
         QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
         QThread::msleep( 5 );

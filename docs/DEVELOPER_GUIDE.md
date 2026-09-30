@@ -88,7 +88,8 @@ through `guarded()`, which logs the failure instead.
 | **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog: rule list, detail panel, validation |
 | **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
-| **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget showing key-value pairs |
+| **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
+| **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
 
 ## Scanning Algorithm
 
@@ -111,8 +112,11 @@ through `guarded()`, which logs the failure instead.
      the whole match is the value.
    - **Value Mapping**: If mappings are defined for the rule, substitute the
      raw value with the matching display value (exact string comparison).
-5. Stop early once every key has a value.
-6. **Incremental rescans**: `scanFrom()` returns the scan's progress (offset
+5. Remember for each key the raw value and the index of the rule that
+   supplied it (`Scan::sources`); `FooterScanner::footerValues()` hands the
+   widget `FooterValue`s in rule order, for the tooltips.
+6. Stop early once every key has a value.
+7. **Incremental rescans**: `scanFrom()` returns the scan's progress (offset
    and count of the complete lines scanned, the values found, and bytes
    identifying the file). When the watched file changes, the next scan
    continues from there if the file only grew, and reads nothing once every

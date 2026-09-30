@@ -31,7 +31,6 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFile>
-#include <QLabel>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -72,7 +71,11 @@ void settle( int ms = 300 )
 
 QString shownText( const FooterDisplayWidget& widget )
 {
-    return widget.findChild<QLabel*>()->text();
+    QStringList shown;
+    for ( const auto* item : widget.findChildren<FooterValueItem*>() ) {
+        shown.append( item->value().key + ": " + item->value().value );
+    }
+    return shown.join( " | " );
 }
 
 } // namespace
@@ -347,6 +350,37 @@ SCENARIO( "FooterController shows the values of a log that changes faster than i
                     },
                     30000 ) );
             }
+        }
+    }
+}
+
+SCENARIO( "FooterController shows where each value came from", "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+
+    QList<FooterEntry> entries;
+    entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+    entries.append( { "Mode", "mode=(\\S+)", "", true, { { "0x04", "Production" } } } );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), entries ) );
+
+    const auto log = logDir.path() + "/mapped.log";
+    writeFile( log, "mode=0x04\nVIN: ABC\n" );
+
+    FooterDisplayWidget widget;
+    FooterController controller( &widget, configDir.path() );
+
+    GIVEN( "a file with a mapped and an unmapped value" )
+    {
+        controller.setActiveFile( log );
+
+        THEN( "the widget gets the raw value and the rule of each shown value" )
+        {
+            REQUIRE( waitFor( [ & ] { return widget.values().size() == 2; } ) );
+            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0 } );
+            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
         }
     }
 }

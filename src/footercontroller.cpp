@@ -150,7 +150,7 @@ void FooterController::startScan()
         if ( generation == generation_ ) {
             const auto scan = watcher->result();
             progress_ = scan.progress;
-            show( scanner_->inRuleOrder( scan.values ) );
+            show( scanner_->footerValues( scan ) );
 
             scanning_ = false;
             cancelRunning_.reset();

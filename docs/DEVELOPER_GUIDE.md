@@ -185,13 +185,20 @@ templates can build simple rules too:
   `(\S+)` up to whitespace, `(.*\S)` up to the end of the line, or
   `([^c]*[^c\s])` up to the character `c`, so the value never starts or
   ends with whitespace. Escaping is minimal, so generated patterns read like
-  hand-written ones: the text escapes only the PCRE2 metacharacters
-  `\ ^ $ . | ? * + ( ) [ ] { }` (patterns never use extended mode, so
-  spaces and `#` stay literal), `c` only `\ ] ^ -`, and NUL is `\x{0}`. A simple rule has no
-  value pattern, so the scanner's single-stage path applies. Without a
-  text, or without the end character, the pattern is empty: the rule is
-  incomplete, like a new one. `applySimpleRule()` sets both patterns of a
-  `FooterEntry`.
+  hand-written ones: the text escapes only `\ ^ $ . | ? * + ( ) [ {`
+  (`]` and `}` are literal outside a class once `[` and `{` are escaped,
+  and patterns never use extended mode, so spaces and `#` stay literal),
+  and writes NUL as `\x{0}`; `c` escapes only `\ ] ^ -`. `c` is one code
+  point, kept in a `QString` because it may be a surrogate pair; the field
+  takes one code point, not one UTF-16 unit. A simple rule has no value
+  pattern, so the scanner's single-stage path applies. `\s` and `\S` are
+  ASCII-only, as the scanner compiles without
+  `UseUnicodePropertiesOption`; changing that would change every
+  hand-written rule, so a no-break space is part of a value, and a test
+  pins it. `applySimpleRule()` sets both patterns of a `FooterEntry`.
+- **`endCharacterProblem()`** says why the end character cannot be used:
+  none, more than one code point, or a control character such as NUL or a
+  tab. Then, as without a text, the pattern is empty.
 - **`simpleRuleOf()`** classifies: it parses the text and the end back out
   of the line pattern, generates the patterns again, and accepts the rule
   only if they are the stored ones byte for byte. Empty patterns are the
@@ -199,12 +206,23 @@ templates can build simple rules too:
   rewritten into another form.
 
 `RuleDetailPanel` shows a rule in simple mode exactly when `simpleRuleOf()`
-accepts it; the mode is not stored anywhere. In simple mode the simple
+accepts it, or when it is an unfinished simple rule; the mode is not
+stored anywhere. A simple rule with an `endCharacterProblem()` has no
+patterns to keep its fields in, so `entry()` carries them in
+`FooterEntry::unfinishedSimpleRule`, which is never saved or scanned. It
+moves with the rule, the editor turns it into a problem at the end
+character field that blocks OK and Apply, and `showEntry()` shows it again,
+so switching rules loses nothing. In simple mode the simple
 fields regenerate the patterns on every edit and the pattern fields are
 read-only; `entry()` always reads the pattern fields. **Advanced** makes them
 editable and keeps their text. Switching back is enabled only while
 `simpleRuleOf()` accepts the current patterns, and keeps the simple fields
-if they still generate those patterns. Enabling or disabling the rule in
+if they still generate those patterns. Escape never reverts a read-only
+pattern field, and a pattern field that becomes editable reverts to the
+pattern it became editable with. The value-end list and the Advanced switch
+handle Return and Escape like the line edits: Return confirms, Escape goes
+back to the state at focus or at the last Return, and neither closes the
+dialog. Enabling or disabling the rule in
 the list updates only the panel's check box (`showEnabled()`), so the mode
 chosen for the selected rule is kept. Tests: `tests/simplerule_test.cpp`,
 `tests/simplemode_test.cpp`, and the simple rules in

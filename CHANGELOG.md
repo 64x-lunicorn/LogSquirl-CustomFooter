@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line and value patterns for editing and keeps the generated ones;
   switching back is offered while the patterns still have the simple form.
   Simple rules are saved as their patterns, so the config format is
-  unchanged and older versions read them.
+  unchanged and older versions read them. Whitespace means ASCII
+  whitespace: a no-break space is part of the value.
 
 ### Changed
 - **Rule editor** — the rules are now shown as a list, each with its

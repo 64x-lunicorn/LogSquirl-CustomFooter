@@ -26,7 +26,10 @@
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace custom_footer {
 
@@ -75,6 +78,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
     // ── Rules table (5 columns) ──────────────────────────────────────────
     table_ = new QTableWidget( 0, 5, this );
+    table_->setObjectName( "rulesTable" );
     table_->setHorizontalHeaderLabels( { tr( "Enabled" ), tr( "Key" ), tr( "Line Pattern" ),
                                          tr( "Value Pattern" ), tr( "Mappings" ) } );
     table_->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
@@ -97,11 +101,13 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     toolLayout->addWidget( addButton_ );
 
     removeButton_ = new QToolButton( this );
+    removeButton_->setObjectName( "removeRuleButton" );
     removeButton_->setText( "\u2212" ); // minus sign
     removeButton_->setToolTip( tr( "Remove entry" ) );
     toolLayout->addWidget( removeButton_ );
 
     upButton_ = new QToolButton( this );
+    upButton_->setObjectName( "moveUpButton" );
     upButton_->setText( "\u2191" ); // up arrow
     upButton_->setToolTip( tr( "Move up" ) );
     toolLayout->addWidget( upButton_ );
@@ -127,9 +133,11 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
     // ── Mapping editor panel ─────────────────────────────────────────────
     mappingGroup_ = new QGroupBox( tr( "Value Mappings" ), this );
+    mappingGroup_->setObjectName( "mappingGroup" );
     auto* mappingLayout = new QVBoxLayout( mappingGroup_ );
 
     mappingTable_ = new QTableWidget( 0, 2, mappingGroup_ );
+    mappingTable_->setObjectName( "mappingTable" );
     mappingTable_->setHorizontalHeaderLabels( { tr( "Pattern" ), tr( "Display" ) } );
     mappingTable_->horizontalHeader()->setSectionResizeMode( QHeaderView::Stretch );
     mappingTable_->verticalHeader()->setSectionResizeMode( QHeaderView::ResizeToContents );
@@ -168,7 +176,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( exportButton_, &QToolButton::clicked, this, &FooterEditor::exportRules );
 
     connect( table_, &QTableWidget::currentCellChanged, this, [ this ]( int, int, int, int ) {
-        onRuleSelectionChanged();
+        showMappingsOfCurrentRule();
         updateButtons();
     } );
 
@@ -181,8 +189,9 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
                  removeMappingButton_->setEnabled( mappingTable_->currentRow() >= 0 );
              } );
 
-    // Sync mapping edits back to mappingsData_ when cells change
-    connect( mappingTable_, &QTableWidget::cellChanged, this, &FooterEditor::syncMappingsToEntry );
+    // Store mapping edits in the current rule as they are made.
+    connect( mappingTable_, &QTableWidget::cellChanged, this,
+             &FooterEditor::storeMappingsOfCurrentRule );
 
     connect( buttonBox_, &QDialogButtonBox::accepted, this, &QDialog::accept );
     connect( buttonBox_, &QDialogButtonBox::rejected, this, &QDialog::reject );
@@ -191,16 +200,40 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
     // ── Populate ─────────────────────────────────────────────────────────
     populateTable( entries );
-    updateButtons();
 }
 
 // ── Public accessors ─────────────────────────────────────────────────────
 
-QList<FooterEntry> FooterEditor::entries()
+QList<FooterEntry> FooterEditor::entries() const
 {
-    // Flush any pending mapping-table state for the active row.
-    saveMappingsForRow( currentMappingRow_ );
-    return tableToEntries();
+    QList<FooterEntry> result;
+    const int rows = table_->rowCount();
+    result.reserve( rows );
+
+    for ( int i = 0; i < rows; ++i ) {
+        FooterEntry entry;
+        auto* checkbox = static_cast<CenteredCheckbox*>( table_->cellWidget( i, 0 ) );
+        entry.enabled = checkbox ? checkbox->isChecked() : true;
+
+        auto* keyItem = table_->item( i, 1 );
+        entry.key = keyItem ? keyItem->text() : QString();
+
+        auto* lineItem = table_->item( i, 2 );
+        entry.linePattern = lineItem ? lineItem->text() : QString();
+
+        auto* valueItem = table_->item( i, 3 );
+        entry.valuePattern = valueItem ? valueItem->text() : QString();
+
+        entry.mappings = mappingsOf( i );
+
+        result.append( entry );
+    }
+    return result;
+}
+
+void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
+{
+    populateTable( this->entries() + entries );
 }
 
 // ── Slots ────────────────────────────────────────────────────────────────
@@ -209,26 +242,11 @@ void FooterEditor::addEntry()
 {
     const int row = table_->rowCount();
     table_->setRowCount( row + 1 );
-
-    auto* checkbox = new CenteredCheckbox( true, table_ );
-    table_->setCellWidget( row, 0, checkbox );
-    table_->setItem( row, 1, new QTableWidgetItem( "" ) );
-    table_->setItem( row, 2, new QTableWidgetItem( "" ) );
-    table_->setItem( row, 3, new QTableWidgetItem( "" ) );
-
-    // Mappings count label (read-only)
-    auto* mappingsItem = new QTableWidgetItem( "0" );
-    mappingsItem->setFlags( mappingsItem->flags() & ~Qt::ItemIsEditable );
-    mappingsItem->setTextAlignment( Qt::AlignCenter );
-    table_->setItem( row, 4, mappingsItem );
-
-    mappingsData_.append( QList<ValueMapping>() );
+    setRow( row, FooterEntry() );
 
     table_->scrollToItem( table_->item( row, 1 ) );
     table_->setCurrentCell( row, 1 );
     table_->editItem( table_->item( row, 1 ) );
-
-    updateButtons();
 }
 
 void FooterEditor::removeEntry()
@@ -238,52 +256,34 @@ void FooterEditor::removeEntry()
         return;
     }
 
-    // Clear mapping panel if the removed row is currently shown
-    if ( row == currentMappingRow_ ) {
-        currentMappingRow_ = -1;
-        mappingTable_->setRowCount( 0 );
-        mappingGroup_->setEnabled( false );
-    }
-    else if ( row < currentMappingRow_ ) {
-        --currentMappingRow_;
+    {
+        // Select the next rule, or the one above the last, explicitly
+        // rather than through whatever removeRow() makes current.
+        const QSignalBlocker blocker( table_ );
+        table_->removeRow( row );
+        if ( table_->rowCount() > 0 ) {
+            table_->setCurrentCell( std::min( row, table_->rowCount() - 1 ), 1 );
+        }
     }
 
-    table_->removeRow( row );
-    mappingsData_.removeAt( row );
+    showMappingsOfCurrentRule();
     updateButtons();
 }
 
 void FooterEditor::moveEntryUp()
 {
     const int row = table_->currentRow();
-    if ( row <= 0 ) {
-        return;
+    if ( row > 0 ) {
+        moveEntry( row, row - 1 );
     }
-
-    // Save current mapping panel state before rebuilding
-    saveMappingsForRow( currentMappingRow_ );
-
-    auto entryList = tableToEntries();
-    entryList.move( row, row - 1 );
-    populateTable( entryList );
-    table_->setCurrentCell( row - 1, 1 );
-    updateButtons();
 }
 
 void FooterEditor::moveEntryDown()
 {
     const int row = table_->currentRow();
-    if ( row < 0 || row >= table_->rowCount() - 1 ) {
-        return;
+    if ( row >= 0 && row < table_->rowCount() - 1 ) {
+        moveEntry( row, row + 1 );
     }
-
-    saveMappingsForRow( currentMappingRow_ );
-
-    auto entryList = tableToEntries();
-    entryList.move( row, row + 1 );
-    populateTable( entryList );
-    table_->setCurrentCell( row + 1, 1 );
-    updateButtons();
 }
 
 void FooterEditor::updateButtons()
@@ -311,11 +311,7 @@ void FooterEditor::importRules()
         return;
     }
 
-    // Append imported entries to the current list
-    const auto current = tableToEntries();
-    auto combined = current + imported;
-    populateTable( combined );
-    updateButtons();
+    appendEntries( imported );
 }
 
 void FooterEditor::exportRules()
@@ -327,41 +323,41 @@ void FooterEditor::exportRules()
         return;
     }
 
-    const auto allEntries = tableToEntries();
-    if ( !FooterConfig::exportToJson( filePath, allEntries ) ) {
+    if ( !FooterConfig::exportToJson( filePath, entries() ) ) {
         QMessageBox::warning( this, tr( "Export Error" ),
                               tr( "Could not write to file: %1" ).arg( filePath ) );
     }
 }
 
-void FooterEditor::onRuleSelectionChanged()
+void FooterEditor::showMappingsOfCurrentRule()
 {
-    // Save mappings for the previously selected row
-    saveMappingsForRow( currentMappingRow_ );
-
     const int row = table_->currentRow();
-    currentMappingRow_ = row;
+    const auto mappings = row >= 0 ? mappingsOf( row ) : QList<ValueMapping>();
 
-    if ( row < 0 || row >= mappingsData_.size() ) {
-        mappingGroup_->setEnabled( false );
-        mappingTable_->setRowCount( 0 );
-        return;
+    const QSignalBlocker blocker( mappingTable_ );
+    mappingTable_->setRowCount( mappings.size() );
+    for ( int i = 0; i < mappings.size(); ++i ) {
+        mappingTable_->setItem( i, 0, new QTableWidgetItem( mappings[ i ].pattern ) );
+        mappingTable_->setItem( i, 1, new QTableWidgetItem( mappings[ i ].displayValue ) );
     }
-
-    mappingGroup_->setEnabled( true );
-    loadMappingsForRow( row );
+    mappingGroup_->setEnabled( row >= 0 );
 }
 
 void FooterEditor::addMapping()
 {
-    if ( currentMappingRow_ < 0 ) {
+    if ( table_->currentRow() < 0 ) {
         return;
     }
 
     const int row = mappingTable_->rowCount();
-    mappingTable_->setRowCount( row + 1 );
-    mappingTable_->setItem( row, 0, new QTableWidgetItem( "" ) );
-    mappingTable_->setItem( row, 1, new QTableWidgetItem( "" ) );
+    {
+        const QSignalBlocker blocker( mappingTable_ );
+        mappingTable_->setRowCount( row + 1 );
+        mappingTable_->setItem( row, 0, new QTableWidgetItem( "" ) );
+        mappingTable_->setItem( row, 1, new QTableWidgetItem( "" ) );
+    }
+    storeMappingsOfCurrentRule();
+
     mappingTable_->setCurrentCell( row, 0 );
     mappingTable_->editItem( mappingTable_->item( row, 0 ) );
     updateButtons();
@@ -374,93 +370,14 @@ void FooterEditor::removeMapping()
         return;
     }
     mappingTable_->removeRow( row );
-    syncMappingsToEntry();
+    storeMappingsOfCurrentRule();
     updateButtons();
 }
 
-void FooterEditor::syncMappingsToEntry()
+void FooterEditor::storeMappingsOfCurrentRule()
 {
-    if ( currentMappingRow_ < 0 || currentMappingRow_ >= mappingsData_.size() ) {
-        return;
-    }
-
-    saveMappingsForRow( currentMappingRow_ );
-    updateMappingLabel( currentMappingRow_ );
-}
-
-// ── Private helpers ──────────────────────────────────────────────────────
-
-void FooterEditor::populateTable( const QList<FooterEntry>& entries )
-{
-    mappingsData_.clear();
-    table_->setRowCount( entries.size() );
-
-    for ( int i = 0; i < entries.size(); ++i ) {
-        auto* checkbox = new CenteredCheckbox( entries[ i ].enabled, table_ );
-        table_->setCellWidget( i, 0, checkbox );
-        table_->setItem( i, 1, new QTableWidgetItem( entries[ i ].key ) );
-        table_->setItem( i, 2, new QTableWidgetItem( entries[ i ].linePattern ) );
-        table_->setItem( i, 3, new QTableWidgetItem( entries[ i ].valuePattern ) );
-
-        auto* mappingsItem
-            = new QTableWidgetItem( QString::number( entries[ i ].mappings.size() ) );
-        mappingsItem->setFlags( mappingsItem->flags() & ~Qt::ItemIsEditable );
-        mappingsItem->setTextAlignment( Qt::AlignCenter );
-        table_->setItem( i, 4, mappingsItem );
-
-        mappingsData_.append( entries[ i ].mappings );
-    }
-
-    // Reset mapping panel
-    currentMappingRow_ = -1;
-    mappingTable_->setRowCount( 0 );
-    mappingGroup_->setEnabled( false );
-}
-
-QList<FooterEntry> FooterEditor::tableToEntries() const
-{
-    QList<FooterEntry> result;
-    const int rows = table_->rowCount();
-    result.reserve( rows );
-
-    for ( int i = 0; i < rows; ++i ) {
-        FooterEntry entry;
-        auto* checkbox = static_cast<CenteredCheckbox*>( table_->cellWidget( i, 0 ) );
-        entry.enabled = checkbox ? checkbox->isChecked() : true;
-
-        auto* keyItem = table_->item( i, 1 );
-        entry.key = keyItem ? keyItem->text() : QString();
-
-        auto* lineItem = table_->item( i, 2 );
-        entry.linePattern = lineItem ? lineItem->text() : QString();
-
-        auto* valueItem = table_->item( i, 3 );
-        entry.valuePattern = valueItem ? valueItem->text() : QString();
-
-        if ( i < mappingsData_.size() ) {
-            entry.mappings = mappingsData_[ i ];
-        }
-
-        result.append( entry );
-    }
-    return result;
-}
-
-void FooterEditor::loadMappingsForRow( int row )
-{
-    mappingTable_->blockSignals( true );
-    const auto& mappings = mappingsData_[ row ];
-    mappingTable_->setRowCount( mappings.size() );
-    for ( int i = 0; i < mappings.size(); ++i ) {
-        mappingTable_->setItem( i, 0, new QTableWidgetItem( mappings[ i ].pattern ) );
-        mappingTable_->setItem( i, 1, new QTableWidgetItem( mappings[ i ].displayValue ) );
-    }
-    mappingTable_->blockSignals( false );
-}
-
-void FooterEditor::saveMappingsForRow( int row )
-{
-    if ( row < 0 || row >= mappingsData_.size() ) {
+    const int row = table_->currentRow();
+    if ( row < 0 ) {
         return;
     }
 
@@ -473,17 +390,58 @@ void FooterEditor::saveMappingsForRow( int row )
         m.displayValue = dItem ? dItem->text() : QString();
         mappings.append( m );
     }
-    mappingsData_[ row ] = mappings;
+    setMappings( row, mappings );
 }
 
-void FooterEditor::updateMappingLabel( int row )
+// ── Private helpers ──────────────────────────────────────────────────────
+
+void FooterEditor::populateTable( const QList<FooterEntry>& entries )
 {
-    if ( row < 0 || row >= table_->rowCount() ) {
-        return;
+    table_->setRowCount( entries.size() );
+    for ( int i = 0; i < entries.size(); ++i ) {
+        setRow( i, entries[ i ] );
     }
+
+    // The current cell may stay where it was while its rule is replaced.
+    showMappingsOfCurrentRule();
+    updateButtons();
+}
+
+void FooterEditor::setRow( int row, const FooterEntry& entry )
+{
+    table_->setCellWidget( row, 0, new CenteredCheckbox( entry.enabled, table_ ) );
+    table_->setItem( row, 1, new QTableWidgetItem( entry.key ) );
+    table_->setItem( row, 2, new QTableWidgetItem( entry.linePattern ) );
+    table_->setItem( row, 3, new QTableWidgetItem( entry.valuePattern ) );
+
+    // Mappings count label (read-only)
+    auto* mappingsItem = new QTableWidgetItem;
+    mappingsItem->setFlags( mappingsItem->flags() & ~Qt::ItemIsEditable );
+    mappingsItem->setTextAlignment( Qt::AlignCenter );
+    table_->setItem( row, 4, mappingsItem );
+    setMappings( row, entry.mappings );
+}
+
+void FooterEditor::moveEntry( int from, int to )
+{
+    auto entryList = entries();
+    entryList.move( from, to );
+    populateTable( entryList );
+    table_->setCurrentCell( to, 1 );
+}
+
+QList<ValueMapping> FooterEditor::mappingsOf( int row ) const
+{
+    const auto* item = table_->item( row, 4 );
+    return item ? item->data( Qt::UserRole ).value<QList<ValueMapping>>() : QList<ValueMapping>();
+}
+
+void FooterEditor::setMappings( int row, const QList<ValueMapping>& mappings )
+{
     auto* item = table_->item( row, 4 );
     if ( item ) {
-        item->setText( QString::number( mappingsData_[ row ].size() ) );
+        item->setData( Qt::UserRole, QVariant::fromValue( mappings ) );
+        item->setText( QString::number( mappings.size() ) );
     }
 }
 

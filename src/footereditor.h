@@ -47,7 +47,10 @@ public:
     explicit FooterEditor( const QList<FooterEntry>& entries, QWidget* parent = nullptr );
 
     /// Return the edited list of entries.
-    QList<FooterEntry> entries();
+    QList<FooterEntry> entries() const;
+
+    /// Append entries after the existing ones, as an import does.
+    void appendEntries( const QList<FooterEntry>& entries );
 
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
@@ -61,20 +64,20 @@ private Q_SLOTS:
     void updateButtons();
     void importRules();
     void exportRules();
-    void onRuleSelectionChanged();
+    void showMappingsOfCurrentRule();
     void addMapping();
     void removeMapping();
-    void syncMappingsToEntry();
+    void storeMappingsOfCurrentRule();
 
 private:
     void populateTable( const QList<FooterEntry>& entries );
-    QList<FooterEntry> tableToEntries() const;
-    void loadMappingsForRow( int row );
-    void saveMappingsForRow( int row );
-    void updateMappingLabel( int row );
+    void setRow( int row, const FooterEntry& entry );
+    void moveEntry( int from, int to );
 
-    /// Stores the per-row mappings (not held in the table cells).
-    QList<QList<ValueMapping>> mappingsData_;
+    /// The mappings of a rule live in its Mappings cell, so they stay with
+    /// the rule's row whichever way the table changes.
+    QList<ValueMapping> mappingsOf( int row ) const;
+    void setMappings( int row, const QList<ValueMapping>& mappings );
 
     QTableWidget* table_ = nullptr;
     QToolButton* addButton_ = nullptr;
@@ -85,12 +88,11 @@ private:
     QToolButton* exportButton_ = nullptr;
     QDialogButtonBox* buttonBox_ = nullptr;
 
-    // Mapping editor panel
+    // Mapping editor panel, showing the mappings of the current rule.
     QGroupBox* mappingGroup_ = nullptr;
     QTableWidget* mappingTable_ = nullptr;
     QToolButton* addMappingButton_ = nullptr;
     QToolButton* removeMappingButton_ = nullptr;
-    int currentMappingRow_ = -1;
 };
 
 } // namespace custom_footer

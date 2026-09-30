@@ -1,0 +1,253 @@
+/*
+ * Copyright (C) 2026 LogSquirl Contributors
+ *
+ * This file is part of logsquirl-custom-footer.
+ *
+ * logsquirl-custom-footer is free software: you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * logsquirl-custom-footer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with logsquirl-custom-footer.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file footereditor_test.cpp
+ * @brief BDD tests for the FooterEditor rule and mapping tables.
+ */
+
+#include <catch2/catch.hpp>
+
+#include "footereditor.h"
+
+#include <QCheckBox>
+#include <QDialogButtonBox>
+#include <QGroupBox>
+#include <QPushButton>
+#include <QTableWidget>
+#include <QToolButton>
+
+using namespace custom_footer;
+
+namespace {
+
+/// Test access to the editor's widgets, found by object name.
+struct EditorUi {
+    explicit EditorUi( FooterEditor& editor )
+        : rules( editor.findChild<QTableWidget*>( "rulesTable" ) )
+        , mappings( editor.findChild<QTableWidget*>( "mappingTable" ) )
+        , mappingGroup( editor.findChild<QGroupBox*>( "mappingGroup" ) )
+        , removeRule( editor.findChild<QToolButton*>( "removeRuleButton" ) )
+        , moveUp( editor.findChild<QToolButton*>( "moveUpButton" ) )
+        , buttons( editor.findChild<QDialogButtonBox*>() )
+    {
+        REQUIRE( rules );
+        REQUIRE( mappings );
+        REQUIRE( mappingGroup );
+        REQUIRE( removeRule );
+        REQUIRE( moveUp );
+        REQUIRE( buttons );
+    }
+
+    QStringList shownMappingPatterns() const
+    {
+        QStringList patterns;
+        for ( int i = 0; i < mappings->rowCount(); ++i ) {
+            patterns.append( mappings->item( i, 0 )->text() );
+        }
+        return patterns;
+    }
+
+    void setEnabled( int row, bool enabled ) const
+    {
+        auto* checkbox = rules->cellWidget( row, 0 )->findChild<QCheckBox*>();
+        REQUIRE( checkbox );
+        checkbox->setChecked( enabled );
+    }
+
+    bool canAccept() const
+    {
+        return buttons->button( QDialogButtonBox::Ok )->isEnabled()
+               && buttons->button( QDialogButtonBox::Apply )->isEnabled();
+    }
+
+    QTableWidget* rules;
+    QTableWidget* mappings;
+    QGroupBox* mappingGroup;
+    QToolButton* removeRule;
+    QToolButton* moveUp;
+    QDialogButtonBox* buttons;
+};
+
+FooterEntry entryWithMapping( const QString& key )
+{
+    return { key, key + "=(\\S+)", "", true, { ValueMapping{ key + "-raw", key + "-shown" } } };
+}
+
+QList<FooterEntry> threeRules()
+{
+    return { entryWithMapping( "A" ), entryWithMapping( "B" ), entryWithMapping( "C" ) };
+}
+
+} // namespace
+
+SCENARIO( "FooterEditor keeps mappings with their rule when rules are removed", "[footereditor]" )
+{
+    GIVEN( "three rules with one mapping each and the first rule selected" )
+    {
+        FooterEditor editor( threeRules() );
+        EditorUi ui( editor );
+        ui.rules->setCurrentCell( 0, 1 );
+        REQUIRE( ui.shownMappingPatterns() == QStringList{ "A-raw" } );
+
+        WHEN( "removing the first rule" )
+        {
+            ui.removeRule->click();
+
+            THEN( "the remaining rules keep their own mappings" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 2 );
+                REQUIRE( entries[ 0 ].key == "B" );
+                REQUIRE( entries[ 0 ].mappings.size() == 1 );
+                REQUIRE( entries[ 0 ].mappings[ 0 ].pattern == "B-raw" );
+                REQUIRE( entries[ 1 ].key == "C" );
+                REQUIRE( entries[ 1 ].mappings.size() == 1 );
+                REQUIRE( entries[ 1 ].mappings[ 0 ].pattern == "C-raw" );
+            }
+
+            THEN( "the panel shows the newly selected rule" )
+            {
+                REQUIRE( ui.rules->currentRow() == 0 );
+                REQUIRE( ui.mappingGroup->isEnabled() );
+                REQUIRE( ui.shownMappingPatterns() == QStringList{ "B-raw" } );
+            }
+
+            AND_WHEN( "selecting the other rule and back" )
+            {
+                ui.rules->setCurrentCell( 1, 1 );
+                ui.rules->setCurrentCell( 0, 1 );
+
+                THEN( "nothing was written over another rule" )
+                {
+                    const auto entries = editor.entries();
+                    REQUIRE( entries[ 0 ].mappings[ 0 ].pattern == "B-raw" );
+                    REQUIRE( entries[ 1 ].mappings[ 0 ].pattern == "C-raw" );
+                }
+            }
+        }
+
+        WHEN( "removing the last rule" )
+        {
+            ui.rules->setCurrentCell( 2, 1 );
+            ui.removeRule->click();
+
+            THEN( "the rule above becomes selected and shown" )
+            {
+                REQUIRE( ui.rules->currentRow() == 1 );
+                REQUIRE( ui.shownMappingPatterns() == QStringList{ "B-raw" } );
+            }
+        }
+    }
+
+    GIVEN( "two rules and the first one selected" )
+    {
+        FooterEditor editor( { entryWithMapping( "A" ), entryWithMapping( "B" ) } );
+        EditorUi ui( editor );
+        ui.rules->setCurrentCell( 0, 1 );
+
+        WHEN( "removing it and editing the mapping of the remaining rule" )
+        {
+            ui.removeRule->click();
+            ui.mappings->item( 0, 1 )->setText( "edited" );
+
+            THEN( "the edit is kept" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 1 );
+                REQUIRE( entries[ 0 ].mappings[ 0 ].displayValue == "edited" );
+                REQUIRE( ui.rules->item( 0, 4 )->text() == "1" );
+            }
+        }
+    }
+
+    GIVEN( "a single selected rule" )
+    {
+        FooterEditor editor( { entryWithMapping( "A" ) } );
+        EditorUi ui( editor );
+        ui.rules->setCurrentCell( 0, 1 );
+
+        WHEN( "removing it" )
+        {
+            ui.removeRule->click();
+
+            THEN( "the mapping panel is empty and disabled" )
+            {
+                REQUIRE( editor.entries().isEmpty() );
+                REQUIRE_FALSE( ui.mappingGroup->isEnabled() );
+                REQUIRE( ui.mappings->rowCount() == 0 );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps mappings with their rule when rules are moved", "[footereditor]" )
+{
+    GIVEN( "three rules and an edited mapping on the second one" )
+    {
+        FooterEditor editor( threeRules() );
+        EditorUi ui( editor );
+        ui.rules->setCurrentCell( 1, 1 );
+        ui.mappings->item( 0, 1 )->setText( "B-edited" );
+
+        WHEN( "moving it up" )
+        {
+            ui.moveUp->click();
+
+            THEN( "the rule and its edited mapping move together" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries[ 0 ].key == "B" );
+                REQUIRE( entries[ 0 ].mappings[ 0 ].displayValue == "B-edited" );
+                REQUIRE( entries[ 1 ].key == "A" );
+                REQUIRE( entries[ 1 ].mappings[ 0 ].displayValue == "A-shown" );
+                REQUIRE( ui.rules->currentRow() == 0 );
+                REQUIRE( ui.shownMappingPatterns() == QStringList{ "B-raw" } );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps the mapping panel live after an import", "[footereditor]" )
+{
+    GIVEN( "a selected rule" )
+    {
+        FooterEditor editor( { entryWithMapping( "A" ) } );
+        EditorUi ui( editor );
+        ui.rules->setCurrentCell( 0, 1 );
+
+        WHEN( "rules are appended" )
+        {
+            editor.appendEntries( { entryWithMapping( "B" ) } );
+
+            THEN( "the panel still shows and edits the selected rule" )
+            {
+                REQUIRE( ui.rules->currentRow() == 0 );
+                REQUIRE( ui.mappingGroup->isEnabled() );
+                REQUIRE( ui.shownMappingPatterns() == QStringList{ "A-raw" } );
+
+                ui.mappings->item( 0, 1 )->setText( "A-edited" );
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 2 );
+                REQUIRE( entries[ 0 ].mappings[ 0 ].displayValue == "A-edited" );
+                REQUIRE( entries[ 1 ].mappings[ 0 ].displayValue == "B-shown" );
+            }
+        }
+    }
+}

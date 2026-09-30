@@ -22,6 +22,7 @@ add_executable(logsquirl_custom_footer_tests
     footerconfig_test.cpp
     footerconfig_maxlines_test.cpp
     footerdisplaywidget_test.cpp
+    footereditor_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES

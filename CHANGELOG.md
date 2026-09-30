@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Previously the key was shown twice and the last rule won.
 
 ### Fixed
+- **Mappings lost when removing a rule** — removing the selected rule could
+  write the mappings of one rule over another's, or drop the edits made
+  afterwards. Mappings are now stored with their rule's row.
+- **Mapping panel dead after import** — after importing rules the mapping
+  panel stayed disabled for the selected rule until another one was selected.
 - **Invalid patterns** — a rule whose value pattern does not compile is now
   skipped like one with an invalid line pattern, instead of silently falling
   back to the line pattern and showing the wrong value. Skipped rules are

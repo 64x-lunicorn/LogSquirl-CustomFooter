@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   limit was reached; and, for rules sharing a key, whether this rule or
   another one supplies the key's value in this file. It updates shortly
   after typing stops, scans in the background with the footer's limits
-  and matching, and follows the active file, and its growth, while the
-  editor is open. Without an active file, with an invalid pattern, or for
+  and matching, and follows the active file, its growth and its rotation,
+  while the editor is open. Without an active file, with an invalid pattern, or for
   an unfinished simple rule, it says why instead. The editor no longer
   runs in a nested event loop, so the plugin can be shut down safely
   while it is open.

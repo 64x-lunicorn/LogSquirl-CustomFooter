@@ -105,8 +105,8 @@ the heap, parented to the host's window, opens it with `open()`, and
 handles OK and Apply through `finished()` and `applied()`; a closed
 editor is deleted later. Opened again from another window, such as the
 host's application-modal plugin dialog, the editor is moved over that
-window. Its Import and Export file dialogs and error messages are
-opened with `open()` too, parented to the editor, never with the static
+window. Its Import and Export file dialogs, error messages and the
+rule template dialog are opened with `open()` too, parented to the editor, never with the static
 `QFileDialog` and `QMessageBox` functions, which run nested loops. The
 one nested loop left is a drag in the rule list (`QDrag::exec()`); a
 shutdown during a drag cannot be triggered from the UI. `PluginState::editor` is a `QPointer` to it

@@ -54,6 +54,8 @@ QList<RuleTemplate> makeTemplates()
     // `v`, for `{"version": "1.2.3"}`, `<version>1.2.3` or `Ver. 2.1`. Or
     // a `v` starting a word directly before a number with a dot (`v1.2.3`),
     // so that `v1` in prose is not taken.
+    // The `version` of an XML declaration (`<?xml version="1.0"`) is the
+    // XML version, not the app's, and is skipped.
     //
     // The value is the dotted number, not a date (`\d{4}-\d{2}`). A SemVer
     // pre-release or build suffix belongs to it only if its first
@@ -65,11 +67,12 @@ QList<RuleTemplate> makeTemplates()
           tr( "A version number, e.g. version 1.2.3, Version: v2.0.1-rc1, v1.2" ),
           QStringLiteral( "Version" ),
           {},
-          QStringLiteral( "(?:(?:(?<![A-Za-z0-9])(?i:version|ver)|(?<=[a-z0-9])(?:Version|Ver))"
-                          "[\"']?\\s*[:=>.]?\\s*[\"']?[vV]?|(?<![\\w.])[vV](?=\\d+\\.\\d))"
-                          "(?!\\d{4}-\\d{2})"
-                          "(\\d+(?:\\.\\d+)*"
-                          "(?:[-+][0-9A-Za-z]*[A-Za-z][0-9A-Za-z]*(?:\\.[0-9A-Za-z]+)*)*)" ) } );
+          QStringLiteral(
+              "(?:(?:(?<![A-Za-z0-9])(?<!<\\?xml\\s)(?i:version|ver)|(?<=[a-z0-9])(?:Version|Ver))"
+              "[\"']?\\s*[:=>.]?\\s*[\"']?[vV]?|(?<![\\w.])[vV](?=\\d+\\.\\d))"
+              "(?!\\d{4}-\\d{2})"
+              "(\\d+(?:\\.\\d+)*"
+              "(?:[-+][0-9A-Za-z]*[A-Za-z][0-9A-Za-z]*(?:\\.[0-9A-Za-z]+)*)*)" ) } );
 
     // Build numbers and serial numbers have no common shape: the word after
     // a text, which users adjust to their log.
@@ -101,9 +104,10 @@ QList<RuleTemplate> makeTemplates()
     // seconds (60 for a leap second) with a fraction after `.` or `,`, and
     // an optional `Z` or offset of `±HH`, `±HHMM` or `±HH:MM`; `t` and `z`
     // in lower case too. Not part of a longer number. The part after the
-    // minutes is atomic and must end before anything but a digit or `:`,
-    // so malformed input such as `10:30:5` is no match rather than cut
-    // back to `10:30`.
+    // minutes is atomic and must not be followed by a digit or by `:` and
+    // a digit, so a truncated field such as `10:30:5` or `+01:0` is no
+    // match rather than cut back to `10:30`; a complete timestamp may be
+    // followed by `:`, as in `10:30:00: started`.
     templates.append(
         { tr( "Timestamp (ISO 8601)" ),
           tr( "The first date and time in a line, e.g. 2024-01-15T10:30:00Z or "
@@ -113,18 +117,20 @@ QList<RuleTemplate> makeTemplates()
           QStringLiteral( "(?<!\\d)(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])"
                           "[Tt ](?:[01]\\d|2[0-3]):[0-5]\\d"
                           "(?>(?::(?:[0-5]\\d|60)(?:[.,]\\d+)?)?"
-                          "(?:[Zz]|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)?))(?![\\d:])" ) } );
+                          "(?:[Zz]|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)?))(?!\\d|:\\d)" ) } );
 
     // The key the user gives, then `=` and the value up to whitespace, as
     // in logfmt. Advanced, as the key must not be the end of a longer one
     // (`superuser=`, `a.user=`, `my-user=`), and the value starts right
-    // after `=`: `user= msg=hi` has no value for `user`. For `a=1;b=2` or
+    // after `=`: `user= msg=hi` has no value for `user`. One or two dashes
+    // starting a word may come first, for flags like `--user=alice`; the
+    // lookbehind before them keeps out `my-user=`. For `a=1;b=2` or
     // `a=1, b=2`, edit the pattern.
     templates.append( { tr( "key=value" ),
                         tr( "The value after a key you give and =, up to the next whitespace" ),
                         {},
                         {},
-                        QStringLiteral( "(?<![\\w.-])%1=(\\S+)" ) } );
+                        QStringLiteral( "(?<![\\w.-])-{0,2}%1=(\\S+)" ) } );
 
     return templates;
 }

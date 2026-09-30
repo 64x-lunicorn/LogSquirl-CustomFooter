@@ -344,6 +344,16 @@ SCENARIO( "The version template finds version numbers", "[ruletemplate]" )
                                    { "version 1.0-alpha", "1.0-alpha" } } );
     }
 
+    THEN( "not the XML declaration's version, but an app version on a later line" )
+    {
+        requireFindsNothing( "Version", { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" } );
+        requireFinds( "Version",
+                      { { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                          "<app>\n<version>1.2.3</version>",
+                          "1.2.3" },
+                        { "<?xml version=\"1.0\"?>\n{\"version\": \"4.5.6\"}", "4.5.6" } } );
+    }
+
     THEN( "a date after the version is not part of it" )
     {
         requireFinds( "Version", { { "version 1.2.3-2024-01-15T10:30:00", "1.2.3" } } );
@@ -434,13 +444,23 @@ SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]
                         { "2024-01-15t10:30:00z", "2024-01-15t10:30:00z" } } );
     }
 
+    THEN( "a complete timestamp followed by a colon" )
+    {
+        requireFinds( "Timestamp (ISO 8601)",
+                      { { "2024-01-15 10:30:00: Server started", "2024-01-15 10:30:00" },
+                        { "2024-01-15T10:30:00Z: started", "2024-01-15T10:30:00Z" },
+                        { "2024-01-15T10:30:00.123: x", "2024-01-15T10:30:00.123" },
+                        { "2024-01-15T10:30:00+01:00: x", "2024-01-15T10:30:00+01:00" } } );
+    }
+
     THEN( "not a date alone, another format, or values out of range" )
     {
         requireFindsNothing( "Timestamp (ISO 8601)",
                              { "2024-01-15", "2024/01/15 10:30:00", "15.01.2024 10:30",
                                "2024-13-01T10:00:00", "2024-01-32T10:00", "2024-01-15T24:00",
                                "2024-01-15T10:60", "12024-01-15T10:30:00", "10:30:00",
-                               "2024-01-15T10:30:5", "2024-01-15T10:30:00.5:1" } );
+                               "2024-01-15T10:30:5", "2024-01-15T10:30:00.5:1",
+                               "2024-01-15T10:30:00+01:0", "2024-01-15T10:305" } );
     }
 }
 
@@ -453,7 +473,7 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
         THEN( "the rule is named after the trimmed key and looks for user= as a whole key" )
         {
             REQUIRE( entry.key == "user" );
-            REQUIRE( entry.linePattern == "(?<![\\w.-])user=(\\S+)" );
+            REQUIRE( entry.linePattern == "(?<![\\w.-])-{0,2}user=(\\S+)" );
         }
 
         THEN( "the value directly after = ends at whitespace" )
@@ -463,7 +483,11 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
                                                  { "level=info user=alice msg=hi", "alice" },
                                                  { "a=1 user=x;y=2", "x;y=2" },
                                                  { "superuser=root user=alice", "alice" },
-                                                 { "user= msg=hi user=bob", "bob" } } ) {
+                                                 { "user= msg=hi user=bob", "bob" },
+                                                 { "Starting with --user=alice", "alice" },
+                                                 { "--user=alice", "alice" },
+                                                 { "-user=alice", "alice" },
+                                                 { "a=1 user=alice", "alice" } } ) {
                 INFO( sample.line );
                 REQUIRE( extract( entry, sample.line ) == QString( sample.value ) );
             }
@@ -473,7 +497,8 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
         {
             for ( const auto* line :
                   { "users: alice", "user: alice", "User=alice", "user=", "user= msg=hi",
-                    "superuser=root", "a.user=x", "my-user=x" } ) {
+                    "superuser=root", "a.user=x", "my-user=x", "my-user=bob", "x.user=bob",
+                    "my--user=bob", "---user=bob" } ) {
                 INFO( line );
                 REQUIRE( extract( entry, line ) == std::nullopt );
             }

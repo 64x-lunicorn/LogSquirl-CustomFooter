@@ -248,17 +248,20 @@ with an empty key asks for it (`asksForKey()`): `%1` in its pattern is the
 `QRegularExpression::escape()`, and without a key `entry()` is empty. Only
 values with a shape or boundaries a simple rule cannot express are
 advanced: Version, IPv4, ISO 8601 timestamps, and `key=value`, whose key
-must not end a longer key (`(?<![\w.-])`) and whose value starts right
-after `=`. The patterns guard their edges with lookarounds rather than
+must not end a longer key (`(?<![\w.-])`, before up to two dashes so
+flags like `--user=` match but `my-user=` does not) and whose value starts
+right after `=`. The patterns guard their edges with lookarounds rather than
 anchors or `\b`, as a value may be anywhere in the line and `_` counts as
 a word character; `\d` and `\w` are ASCII, like everything the scanner
 compiles. Version takes `version` after `_` or as a camel-case `Version`,
 but not after another letter, trading a missed `appversion` for no match
-in `conversion` or `server`; its SemVer suffix needs a letter in its first
+in `conversion` or `server`, and skips an XML declaration's version
+(`(?<!<\?xml\s)`); its SemVer suffix needs a letter in its first
 identifier, and a number shaped like `\d{4}-\d{2}` is not a version, so
 dates are never taken. The timestamp's seconds, fraction and offset are an
-atomic group followed by `(?![\d:])`, so `10:30:5` fails instead of
-backtracking to `10:30`. Each template is tested
+atomic group followed by `(?!\d|:\d)`, so a truncated field (`10:30:5`,
+`+01:0`) fails instead of backtracking to a shorter match, while a `:`
+after a complete timestamp, as in `10:30:00: started`, is fine. Each template is tested
 with lines it must find and lines it must not, through `FooterScanner`
 (`tests/ruletemplate_test.cpp`). A new template is a row in
 `makeTemplates()` plus such samples.

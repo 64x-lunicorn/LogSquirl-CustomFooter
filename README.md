@@ -128,12 +128,12 @@ no existing rule changes.
 
 | Template | Key | Finds | Mode |
 |----------|-----|-------|------|
-| Version | `Version` | The number after `version` or `ver` in any case, also after `_` or in camel case (`app_version=1.2.3`, `appVersion: 2.1.0`), with optional quotes, `:`, `=`, `>` or `.` and `v` between (`Version: v2.0.1-rc1` → `2.0.1-rc1`, `{"version": "1.2.3"}`, `<version>1.2.3`, `Ver. 2.1`), or after a `v` starting a word when it has a dot (`v1.2.3`). A suffix like `-rc1`, `-beta.2` or `+build.5` is part of it; a date is not. | Advanced |
+| Version | `Version` | The number after `version` or `ver` in any case, also after `_` or in camel case (`app_version=1.2.3`, `appVersion: 2.1.0`), with optional quotes, `:`, `=`, `>` or `.` and `v` between (`Version: v2.0.1-rc1` → `2.0.1-rc1`, `{"version": "1.2.3"}`, `<version>1.2.3`, `Ver. 2.1`), or after a `v` starting a word when it has a dot (`v1.2.3`). A suffix like `-rc1`, `-beta.2` or `+build.5` is part of it; a date is not. The `version` of an XML declaration (`<?xml version="1.0"`) is skipped. | Advanced |
 | Build number | `Build` | The word after `Build:` (`Build: 1234`) | Simple |
 | Serial number | `Serial number` | The word after `Serial number:` | Simple |
 | IPv4 address | `IP address` | The first address in a line, four numbers 0–255 without leading zeros, not part of a word or a longer dotted sequence (`v1.2.3.4`, `1.2.3.4.5`) | Advanced |
-| Timestamp (ISO 8601) | `Timestamp` | The first date and time in a line: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Malformed times such as `10:30:5` are not matched. | Advanced |
-| `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Not in a longer key (`superuser=`, `a.user=`), and `user= x` has no value. | Advanced |
+| Timestamp (ISO 8601) | `Timestamp` | The first date and time in a line: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Truncated fields such as `10:30:5` or `+01:0` are not matched; a `:` after a complete timestamp (`10:30:00: started`) is fine. | Advanced |
+| `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Also as a flag, `-user=` or `--user=`. Not in a longer key (`superuser=`, `a.user=`, `my-user=`), and `user= x` has no value. | Advanced |
 
 Simple templates match their text as written, case included, so change
 `Build:` to what your log says. Version does not count `version` inside

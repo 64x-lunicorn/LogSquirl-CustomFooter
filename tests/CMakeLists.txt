@@ -28,6 +28,7 @@ add_executable(logsquirl_custom_footer_tests
     footerconfig_test.cpp
     footerconfig_maxlines_test.cpp
     footercontroller_test.cpp
+    activefilewatcher_test.cpp
     footerdisplaywidget_test.cpp
     footereditor_test.cpp
     ruledragdrop_test.cpp
@@ -55,6 +56,7 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/plugin.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerconfig.cpp"
         "${CMAKE_SOURCE_DIR}/src/footercontroller.cpp"
+        "${CMAKE_SOURCE_DIR}/src/activefilewatcher.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerscanner.cpp"
         "${CMAKE_SOURCE_DIR}/src/footereditor.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerdisplaywidget.cpp"

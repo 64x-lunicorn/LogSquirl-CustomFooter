@@ -22,10 +22,6 @@
 #include "footerconfig.h"
 #include "plugin.h"
 
-#include <QFileInfo>
-#include <QFutureWatcher>
-#include <QtConcurrent/QtConcurrentRun>
-
 namespace custom_footer {
 
 FooterController::FooterController( FooterDisplayWidget* widget, const QString& configDir,
@@ -34,44 +30,23 @@ FooterController::FooterController( FooterDisplayWidget* widget, const QString& 
     , widget_( widget )
     , configDir_( configDir )
 {
-    pool_.setMaxThreadCount( 1 );
-
     // Collect the changes of a busy log, without postponing the scan for as
     // long as it keeps changing.
-    rescanTimer_.setSingleShot( true );
-    rescanTimer_.setInterval( kRescanDelayMs );
-    connect( &rescanTimer_, &QTimer::timeout, this, &FooterController::requestScan );
-    connect( &fileWatcher_, &QFileSystemWatcher::fileChanged, this, [ this ] {
-        // The file may have been renamed away, and some watchers would keep
-        // following it: the rescan watches whatever is at the path then.
-        fileWatcher_.removePath( activeFile_ );
-        if ( !rescanTimer_.isActive() ) {
-            rescanTimer_.start();
-        }
-    } );
-    // Only watched while the active file is missing: wait for it to be recreated.
-    connect( &fileWatcher_, &QFileSystemWatcher::directoryChanged, this, [ this ] {
-        if ( QFileInfo::exists( activeFile_ ) && !rescanTimer_.isActive() ) {
-            rescanTimer_.start();
-        }
-    } );
+    connect( &fileWatcher_, &ActiveFileWatcher::changed, this, &FooterController::requestScan );
 
     loadConfig();
 }
 
 FooterController::~FooterController()
 {
-    if ( cancelRunning_ ) {
-        cancelRunning_->store( true );
-    }
-    pool_.waitForDone();
+    scans_.stop();
 }
 
 void FooterController::setActiveFile( const QString& filePath )
 {
     if ( filePath != activeFile_ ) {
-        unwatch();
         activeFile_ = filePath;
+        fileWatcher_.setFile( filePath );
         progress_ = {};
 
         // The previous file's values must not pass for this file's while it is scanned.
@@ -101,26 +76,22 @@ void FooterController::loadConfig()
 
 void FooterController::requestScan()
 {
-    if ( !scanning_ ) {
+    if ( !scans_.isRunning() ) {
         startScan();
         return;
     }
 
     // Let the running scan of this file finish, or on a busy log no scan
     // would ever finish; then scan on from where it stopped.
-    rescanTimer_.stop();
+    fileWatcher_.cancelPending();
     rescanPending_ = true;
-    watchActiveFile();
+    fileWatcher_.watch();
 }
 
 void FooterController::restartScan()
 {
-    // Whatever runs now is outdated; starting a scan makes sure it is not shown.
-    if ( cancelRunning_ ) {
-        cancelRunning_->store( true );
-        cancelRunning_.reset();
-    }
-    scanning_ = false;
+    // Whatever runs now is outdated; it is not shown.
+    scans_.drop();
     rescanPending_ = false;
 
     startScan();
@@ -128,84 +99,34 @@ void FooterController::restartScan()
 
 void FooterController::startScan()
 {
-    rescanTimer_.stop();
+    fileWatcher_.cancelPending();
     rescanPending_ = false;
 
-    const auto generation = ++generation_;
     if ( activeFile_.isEmpty() ) {
+        scans_.drop();
         show( {} );
         return;
     }
-    watchActiveFile();
+    fileWatcher_.watch();
 
-    auto cancelled = std::make_shared<std::atomic_bool>( false );
-    cancelRunning_ = cancelled;
-    scanning_ = true;
-
-    // The watcher lives on this thread, so its finished() is delivered here.
     using Scan = FooterScanner::Scan;
-    auto* watcher = new QFutureWatcher<Scan>( this );
-    connect( watcher, &QFutureWatcher<Scan>::finished, this, [ this, watcher, generation ] {
-        watcher->deleteLater();
-        if ( generation == generation_ ) {
-            const auto scan = watcher->result();
-            progress_ = scan.progress;
-            show( scanner_->footerValues( scan.values ) );
-
-            scanning_ = false;
-            cancelRunning_.reset();
-            if ( rescanPending_ ) {
-                startScan();
-            }
-        }
-    } );
-    watcher->setFuture( QtConcurrent::run(
-        &pool_,
-        [ scanner = scanner_, filePath = activeFile_, progress = progress_, maxLines = maxLines_,
-          cancelled ]() -> Scan {
+    scans_.run(
+        [ scanner = scanner_, filePath = activeFile_, progress = progress_,
+          maxLines = maxLines_ ]( const std::atomic_bool* cancelled ) -> Scan {
             try {
-                return scanner->scanFrom( filePath, progress, maxLines, cancelled.get() );
+                return scanner->scanFrom( filePath, progress, maxLines, cancelled );
             } catch ( ... ) {
                 // E.g. out of memory: better no values than a dead host.
                 return {};
             }
-        } ) );
-}
-
-void FooterController::watchActiveFile()
-{
-    if ( activeFile_.isEmpty() ) {
-        return;
-    }
-    if ( !QFileInfo::exists( activeFile_ ) ) {
-        // Rotated away or not created yet: wait in its directory for it.
-        fileWatcher_.removePath( activeFile_ );
-        const auto dir = QFileInfo( activeFile_ ).absolutePath();
-        if ( watchedDir_ != dir && QFileInfo::exists( dir ) ) {
-            unwatch();
-            if ( fileWatcher_.addPath( dir ) ) {
-                watchedDir_ = dir;
+        },
+        [ this ]( const Scan& scan ) {
+            progress_ = scan.progress;
+            show( scanner_->footerValues( scan.values ) );
+            if ( rescanPending_ ) {
+                startScan();
             }
-        }
-        return;
-    }
-
-    if ( !watchedDir_.isEmpty() ) {
-        fileWatcher_.removePath( watchedDir_ );
-        watchedDir_.clear();
-    }
-    if ( !fileWatcher_.files().contains( activeFile_ ) ) {
-        fileWatcher_.addPath( activeFile_ );
-    }
-}
-
-void FooterController::unwatch()
-{
-    const auto paths = fileWatcher_.files() + fileWatcher_.directories();
-    if ( !paths.isEmpty() ) {
-        fileWatcher_.removePaths( paths );
-    }
-    watchedDir_.clear();
+        } );
 }
 
 void FooterController::show( const Values& values )

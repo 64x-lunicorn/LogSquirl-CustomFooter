@@ -19,17 +19,15 @@
 
 #pragma once
 
+#include "activefilewatcher.h"
 #include "footerdisplaywidget.h"
 #include "footerscanner.h"
+#include "latestjob.h"
 
-#include <QFileSystemWatcher>
 #include <QObject>
 #include <QPointer>
 #include <QString>
-#include <QThreadPool>
-#include <QTimer>
 
-#include <atomic>
 #include <memory>
 
 namespace custom_footer {
@@ -80,7 +78,7 @@ public:
     /// it to be created again.
     bool isWaitingForActiveFile() const
     {
-        return !watchedDir_.isEmpty();
+        return fileWatcher_.isWaitingForFile();
     }
 
 private:
@@ -92,8 +90,6 @@ private:
     /// Cancel a running scan and scan the active file afresh.
     void restartScan();
     void startScan();
-    void watchActiveFile();
-    void unwatch();
     void show( const Values& values );
 
     QPointer<FooterDisplayWidget> widget_;
@@ -106,21 +102,15 @@ private:
     /// How far the active file has been scanned with the current rules.
     FooterScanner::Progress progress_;
 
-    QFileSystemWatcher fileWatcher_;
-    /// The active file's directory, watched while the file is missing.
-    QString watchedDir_;
-    QTimer rescanTimer_;
+    /// Watches the active file, or its directory while it is missing.
+    ActiveFileWatcher fileWatcher_{ kRescanDelayMs };
 
-    /// Counts started scans; a finished scan is shown only if it is the last.
-    quint64 generation_ = 0;
-    /// A scan of the active file runs, and is not cancelled.
-    bool scanning_ = false;
     /// The active file is to be scanned again once the running scan finished.
     bool rescanPending_ = false;
-    std::shared_ptr<std::atomic_bool> cancelRunning_;
 
-    /// One worker thread: a new scan waits for the cancelled one to stop.
-    QThreadPool pool_;
+    /// The scans, on one worker thread: a finished scan is shown only if no
+    /// newer one was started or the running one cancelled.
+    LatestJob<FooterScanner::Scan> scans_{ this };
 };
 
 } // namespace custom_footer

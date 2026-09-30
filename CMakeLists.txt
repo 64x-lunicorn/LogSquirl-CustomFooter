@@ -34,6 +34,7 @@ add_library(logsquirl_custom_footer SHARED
     src/plugin.cpp
     src/footerconfig.cpp
     src/footercontroller.cpp
+    src/activefilewatcher.cpp
     src/footerscanner.cpp
     src/footereditor.cpp
     src/footerdisplaywidget.cpp

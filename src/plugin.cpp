@@ -32,18 +32,24 @@
  *   1. Host calls get_info() to read metadata.
  *   2. Host calls init(api, handle) — we register a status widget,
  *      an optional sidebar tab, a menu action, and an active-file callback.
- *   3. When the active file changes, onActiveFileChanged() re-scans.
- *   4. Host calls shutdown() — we unregister and delete everything.
+ *   3. When the active file changes, onActiveFileChanged() hands it to the
+ *      FooterController, which scans it in the background.
+ *   4. Host calls shutdown() — we stop scanning, unregister and delete
+ *      everything.
+ *
+ * No exception may leave an entry point or a callback: the host is C.
  */
 
 #include "plugin.h"
 
 #include "footerconfig.h"
+#include "footercontroller.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
-#include "footerscanner.h"
 
 #include <QString>
+
+#include <exception>
 
 // ── Global state ─────────────────────────────────────────────────────────
 
@@ -55,6 +61,11 @@ void hostLog( int level, const char* message )
     if ( g_state.api && g_state.handle ) {
         g_state.api->log_message( g_state.handle, level, message );
     }
+}
+
+void hostLog( int level, const QString& message )
+{
+    hostLog( level, message.toUtf8().constData() );
 }
 } // namespace custom_footer
 
@@ -73,6 +84,33 @@ static const LogSquirlPluginInfo kPluginInfo = {
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
+/// Log that work for the host failed.
+static void logFailure( const char* what, const char* reason ) noexcept
+{
+    try {
+        custom_footer::hostLog(
+            LOGSQUIRL_LOG_ERROR,
+            QStringLiteral( "Custom Footer: %1 failed: %2" ).arg( what, reason ) );
+    } catch ( ... ) {
+        custom_footer::hostLog( LOGSQUIRL_LOG_ERROR, "Custom Footer: an operation failed" );
+    }
+}
+
+/// Run work for the host, logging instead of throwing. Returns false if it threw.
+template <typename Work>
+static bool guarded( const char* what, Work&& work ) noexcept
+{
+    try {
+        work();
+        return true;
+    } catch ( const std::exception& e ) {
+        logFailure( what, e.what() );
+    } catch ( ... ) {
+        logFailure( what, "unknown exception" );
+    }
+    return false;
+}
+
 /// Return the plugin config directory (from host API).
 static QString configDir()
 {
@@ -83,73 +121,53 @@ static QString configDir()
     return dir ? QString::fromUtf8( dir ) : QString();
 }
 
-/// Re-scan the active file and update display widgets.
-static void rescanActiveFile()
+/// Save the edited rules and show their results.
+static void saveEntries( const QList<custom_footer::FooterEntry>& entries )
 {
-    const auto& st = custom_footer::g_state;
-    if ( !st.api || !st.handle ) {
+    auto* controller = custom_footer::g_state.controller;
+    if ( !controller ) {
         return;
     }
-
-    // Get current file path from host.
-    const char* pathUtf8 = st.api->get_active_file_path( st.handle );
-    const QString filePath = pathUtf8 ? QString::fromUtf8( pathUtf8 ) : QString();
-
-    if ( filePath.isEmpty() ) {
-        if ( st.footerWidget ) {
-            st.footerWidget->clearValues();
-        }
-        return;
+    if ( !custom_footer::FooterConfig::saveEntries( controller->configDir(), entries ) ) {
+        custom_footer::hostLog( LOGSQUIRL_LOG_WARNING,
+                                "Custom Footer: could not save the rules to the config directory" );
     }
+    controller->reloadConfig();
+}
 
-    const auto dir = configDir();
-    const auto entries = custom_footer::FooterConfig::loadEntries( dir );
-    const int maxLines = custom_footer::FooterConfig::loadMaxLines( dir );
+/// Open the rule editor as a modal dialog over the given parent.
+static void showEditorDialog( QWidget* parent )
+{
+    custom_footer::FooterEditor editor( custom_footer::FooterConfig::loadEntries( configDir() ),
+                                        parent );
 
-    const auto results = custom_footer::FooterScanner::scan( filePath, entries, maxLines );
+    // Apply button: save and rescan without closing the dialog.
+    QObject::connect( &editor, &custom_footer::FooterEditor::applied,
+                      [ &editor ]() { saveEntries( editor.entries() ); } );
 
-    // Build an ordered pair list following the entry definition order.
-    QList<QPair<QString, QString>> ordered;
-    for ( const auto& entry : entries ) {
-        if ( !entry.enabled ) {
-            continue;
-        }
-        auto it = results.find( entry.key );
-        if ( it != results.end() ) {
-            ordered.append( { entry.key, it.value() } );
-        }
-    }
-
-    if ( st.footerWidget ) {
-        st.footerWidget->updateValues( ordered );
+    if ( editor.exec() == QDialog::Accepted ) {
+        saveEntries( editor.entries() );
     }
 }
 
 /// Called by the host when the active file changes.
-static void onActiveFileChanged( void* /* userData */, const char* /* filePath */ )
+static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
-    rescanActiveFile();
+    guarded( "scanning the active file", [ filePath ] {
+        if ( custom_footer::g_state.controller ) {
+            custom_footer::g_state.controller->setActiveFile(
+                filePath ? QString::fromUtf8( filePath ) : QString() );
+        }
+    } );
 }
 
 /// Called when the user clicks "Custom Footer…" in the Plugins menu.
-static void showEditorDialog( void* /* userData */ )
+static void onEditorMenuAction( void* /* userData */ )
 {
-    const auto dir = configDir();
-    auto entries = custom_footer::FooterConfig::loadEntries( dir );
-
-    custom_footer::FooterEditor editor( entries, nullptr );
-
-    // Apply button: save and rescan without closing the dialog.
-    QObject::connect( &editor, &custom_footer::FooterEditor::applied, [ &editor ]() {
-        const auto d = configDir();
-        custom_footer::FooterConfig::saveEntries( d, editor.entries() );
-        rescanActiveFile();
+    guarded( "the rule editor", [] {
+        const auto* footer = custom_footer::g_state.footerWidget;
+        showEditorDialog( footer ? footer->window() : nullptr );
     } );
-
-    if ( editor.exec() == QDialog::Accepted ) {
-        custom_footer::FooterConfig::saveEntries( dir, editor.entries() );
-        rescanActiveFile();
-    }
 }
 
 // ── Exported C entry points ──────────────────────────────────────────────
@@ -179,38 +197,59 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     custom_footer::g_state.handle = handle;
     custom_footer::g_state.initialised = true;
 
-    api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin initialising…" );
+    const bool ok = guarded( "initialisation", [ api, handle ] {
+        auto& st = custom_footer::g_state;
+        api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin initialising…" );
 
-    // Register menu action to open the rule editor.
-    api->register_menu_action( handle, "Plugins", "Custom Footer\u2026", &showEditorDialog,
-                               nullptr );
+        const auto dir = configDir();
+        if ( dir.isEmpty() ) {
+            api->log_message( handle, LOGSQUIRL_LOG_WARNING,
+                              "Custom Footer: the host gave no config directory; rules are "
+                              "neither loaded nor saved" );
+        }
 
-    // Create footer display widget.
-    custom_footer::g_state.footerWidget = new custom_footer::FooterDisplayWidget();
-    api->register_footer_widget( handle,
-                                 static_cast<void*>( custom_footer::g_state.footerWidget ) );
+        // Register menu action to open the rule editor.
+        api->register_menu_action( handle, "Plugins", "Custom Footer…", &onEditorMenuAction,
+                                   nullptr );
 
-    // Register callback for active file changes.
-    api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
+        // Create footer display widget, and the controller that fills it.
+        st.footerWidget = new custom_footer::FooterDisplayWidget();
+        api->register_footer_widget( handle, static_cast<void*>( st.footerWidget ) );
+        st.controller = new custom_footer::FooterController( st.footerWidget, dir );
 
-    // Initial scan if a file is already open.
-    rescanActiveFile();
+        // Register callback for active file changes.
+        api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
 
-    api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin ready." );
+        // Initial scan if a file is already open.
+        const char* activeFile = api->get_active_file_path( handle );
+        st.controller->setActiveFile( activeFile ? QString::fromUtf8( activeFile ) : QString() );
+
+        api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin ready." );
+    } );
+
+    if ( !ok ) {
+        logsquirl_plugin_shutdown();
+        return 1;
+    }
     return 0;
 }
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
-    custom_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
+    guarded( "shutdown", [] {
+        auto& st = custom_footer::g_state;
+        custom_footer::hostLog( LOGSQUIRL_LOG_INFO, "Custom Footer plugin shutting down…" );
 
-    if ( custom_footer::g_state.footerWidget ) {
-        custom_footer::g_state.api->unregister_footer_widget(
-            custom_footer::g_state.handle,
-            static_cast<void*>( custom_footer::g_state.footerWidget ) );
-        delete custom_footer::g_state.footerWidget;
-        custom_footer::g_state.footerWidget = nullptr;
-    }
+        // First stop scanning: the host unloads the library after this returns.
+        delete st.controller;
+        st.controller = nullptr;
+
+        if ( st.footerWidget ) {
+            st.api->unregister_footer_widget( st.handle, static_cast<void*>( st.footerWidget ) );
+            delete st.footerWidget;
+            st.footerWidget = nullptr;
+        }
+    } );
 
     custom_footer::g_state.api = nullptr;
     custom_footer::g_state.handle = nullptr;
@@ -219,10 +258,10 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
 {
-    (void)parent_widget;
     // The editor is opened via the Plugins menu action.
-    // configure() also opens it as a convenience.
-    showEditorDialog( nullptr );
+    // configure() also opens it as a convenience, over the host's window.
+    guarded( "the rule editor",
+             [ parent_widget ] { showEditorDialog( static_cast<QWidget*>( parent_widget ) ); } );
 }
 
 } // extern "C"

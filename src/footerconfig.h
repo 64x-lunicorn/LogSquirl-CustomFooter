@@ -28,19 +28,21 @@ namespace custom_footer {
 
 /// Load and save footer entries to an INI config file.
 /// Provides JSON import/export for sharing rule sets.
+///
+/// Without a config directory nothing is loaded or saved: the defaults apply.
 class FooterConfig {
 public:
     /// Load all entries from the config directory.
     static QList<FooterEntry> loadEntries( const QString& configDir );
 
-    /// Save all entries to the config directory.
-    static void saveEntries( const QString& configDir, const QList<FooterEntry>& entries );
+    /// Save all entries to the config directory.  Returns true on success.
+    static bool saveEntries( const QString& configDir, const QList<FooterEntry>& entries );
 
     /// Load the max-lines limit for scanning.
     static int loadMaxLines( const QString& configDir );
 
-    /// Save the max-lines limit for scanning.
-    static void saveMaxLines( const QString& configDir, int maxLines );
+    /// Save the max-lines limit for scanning.  Returns true on success.
+    static bool saveMaxLines( const QString& configDir, int maxLines );
 
     /// Export all entries to a JSON file.  Returns true on success.
     static bool exportToJson( const QString& filePath, const QList<FooterEntry>& entries );

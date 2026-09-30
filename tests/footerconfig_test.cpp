@@ -175,3 +175,69 @@ SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
         }
     }
 }
+
+SCENARIO( "FooterConfig refuses an empty config directory", "[footerconfig]" )
+{
+    GIVEN( "no config directory" )
+    {
+        QList<FooterEntry> entries;
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+
+        WHEN( "saving entries" )
+        {
+            THEN( "the save is refused rather than written to the file system root" )
+            {
+                REQUIRE_FALSE( FooterConfig::saveEntries( QString(), entries ) );
+            }
+        }
+
+        WHEN( "loading entries and maxLines" )
+        {
+            THEN( "nothing is loaded and the default limit applies" )
+            {
+                REQUIRE( FooterConfig::loadEntries( QString() ).isEmpty() );
+                REQUIRE( FooterConfig::loadMaxLines( QString() ) == 100000 );
+            }
+        }
+    }
+
+    GIVEN( "a valid config directory" )
+    {
+        QTemporaryDir tmpDir;
+        REQUIRE( tmpDir.isValid() );
+
+        WHEN( "saving entries" )
+        {
+            THEN( "the save succeeds" )
+            {
+                REQUIRE( FooterConfig::saveEntries( tmpDir.path(), {} ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterConfig reads the legacy regex key", "[footerconfig]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+
+    GIVEN( "an INI file written before linePattern existed" )
+    {
+        QFile ini( tmpDir.path() + "/custom_footer.ini" );
+        REQUIRE( ini.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        ini.write( "[entries]\n1\\key=VIN\n1\\regex=VIN:(\\\\S+)\n1\\enabled=true\nsize=1\n" );
+        ini.close();
+
+        WHEN( "loading entries" )
+        {
+            const auto loaded = FooterConfig::loadEntries( tmpDir.path() );
+
+            THEN( "the regex becomes the line pattern" )
+            {
+                REQUIRE( loaded.size() == 1 );
+                REQUIRE( loaded[ 0 ].key == "VIN" );
+                REQUIRE( loaded[ 0 ].linePattern == "VIN:(\\S+)" );
+            }
+        }
+    }
+}

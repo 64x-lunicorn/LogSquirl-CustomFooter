@@ -80,6 +80,30 @@ After installing, restart LogSquirl or re-scan via *Plugins â†’ Manage Pluginsâ€
 
 Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
+### How rules are applied
+
+- Each key takes its value from the **first line** of the file that one of
+  its rules matches. Rules may share a key as **alternatives**, e.g. one
+  pattern for old logs and one for new ones: whichever matches first in the
+  file provides the value, and if several match the same line, the one
+  higher in the list wins. The key is shown once, where its first rule is.
+- A rule without a line pattern is ignored. The editor marks invalid
+  patterns, and enabled rules with a line pattern but no key, and won't save
+  until they are fixed.
+- The file is scanned in the background whenever it becomes the active file
+  and when rules are applied. A rule with an invalid pattern is skipped and
+  reported in the LogSquirl log.
+- The active file is **watched**: when it changes, e.g. while following a
+  growing log, it is scanned again within about half a second, so values
+  that show up later in the file appear in the footer. Only the lines
+  appended since the last scan are read, and none once every key has a
+  value; a file that was truncated or replaced is scanned from its start.
+  If the file is rotated away, the footer picks it up again once it is
+  recreated.
+- A scan stops after `scan/maxLines` lines (default 100000, `0` for no
+  limit) and never reads more than 64 MiB; lines longer than 64 KiB are
+  matched against their start.
+
 ### INI Format (internal)
 
 ```ini
@@ -171,10 +195,11 @@ cd build && ctest --output-on-failure
 ```mermaid
 graph TD
     A[LogSquirl Host] -->|active file changed| B[Plugin]
-    B --> C[FooterScanner]
-    C --> D[FooterConfig]
-    D -->|load rules| C
-    C -->|scan results| E[FooterDisplayWidget]
+    B --> G[FooterController]
+    D[FooterConfig] -->|load rules| G
+    G -->|scan on worker thread| C[FooterScanner]
+    H[File watcher] -->|file grew| G
+    G -->|latest scan results| E[FooterDisplayWidget]
     E -->|register_footer_widget| A
     B -->|edit rules| F[FooterEditor]
     F -->|save| D
@@ -186,7 +211,7 @@ graph TD
 flowchart TD
     Start([New log file]) --> Load[Load FooterEntry rules]
     Load --> Loop{More lines?}
-    Loop -->|Yes| MatchLine[Apply linePattern regex]
+    Loop -->|Yes| MatchLine[Apply linePattern regex of each rule whose key has no value yet]
     MatchLine -->|No match| Loop
     MatchLine -->|Match| HasValue{valuePattern set?}
     HasValue -->|No| ExtractLine[Extract capture group 1 from linePattern]
@@ -198,7 +223,7 @@ flowchart TD
     MapCheck -->|Yes| MapLoop{Match found in mappings?}
     MapLoop -->|Yes| StoreMapped[Store mapped display value]
     MapLoop -->|No| Store
-    Store --> AllFound{All rules matched?}
+    Store --> AllFound{Every key has a value?}
     StoreMapped --> AllFound
     AllFound -->|Yes| Done([Display results])
     AllFound -->|No| Loop

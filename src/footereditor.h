@@ -24,6 +24,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGroupBox>
+#include <QHash>
 #include <QLabel>
 #include <QList>
 #include <QTableWidget>
@@ -39,6 +40,10 @@ namespace custom_footer {
  *   - Toolbar row with [+] [-] [↑] [↓] [Import] [Export] buttons
  *   - Inline mapping editor panel below the table
  *   - QDialogButtonBox with OK / Cancel / Apply
+ *
+ * Rules are validated as they are edited: an invalid pattern, or an enabled
+ * rule with a line pattern but no key, is marked in its cell and blocks OK
+ * and Apply. Rules may share a key: they are alternatives for its value.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -47,7 +52,17 @@ public:
     explicit FooterEditor( const QList<FooterEntry>& entries, QWidget* parent = nullptr );
 
     /// Return the edited list of entries.
-    QList<FooterEntry> entries();
+    QList<FooterEntry> entries() const;
+
+    /// Append entries after the existing ones, as an import does.
+    void appendEntries( const QList<FooterEntry>& entries );
+
+    /// How many patterns validation has compiled so far. Unchanged patterns
+    /// are not compiled again; tests check that with this.
+    int patternCompilations() const
+    {
+        return patternCompilations_;
+    }
 
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
@@ -61,20 +76,27 @@ private Q_SLOTS:
     void updateButtons();
     void importRules();
     void exportRules();
-    void onRuleSelectionChanged();
+    void showMappingsOfCurrentRule();
     void addMapping();
     void removeMapping();
-    void syncMappingsToEntry();
+    void storeMappingsOfCurrentRule();
+    void validate();
 
 private:
     void populateTable( const QList<FooterEntry>& entries );
-    QList<FooterEntry> tableToEntries() const;
-    void loadMappingsForRow( int row );
-    void saveMappingsForRow( int row );
-    void updateMappingLabel( int row );
+    void setRow( int row, const FooterEntry& entry );
+    void moveEntry( int from, int to );
 
-    /// Stores the per-row mappings (not held in the table cells).
-    QList<QList<ValueMapping>> mappingsData_;
+    /// The mappings of a rule live in its Mappings cell, so they stay with
+    /// the rule's row whichever way the table changes.
+    QList<ValueMapping> mappingsOf( int row ) const;
+    void setMappings( int row, const QList<ValueMapping>& mappings );
+
+    /// Why a pattern does not compile, remembered from the last validate(),
+    /// so that validating compiles only the patterns edited since.
+    QString patternError( const QString& pattern, QHash<QString, QString>& errors );
+    QHash<QString, QString> patternErrors_;
+    int patternCompilations_ = 0;
 
     QTableWidget* table_ = nullptr;
     QToolButton* addButton_ = nullptr;
@@ -83,14 +105,14 @@ private:
     QToolButton* downButton_ = nullptr;
     QToolButton* importButton_ = nullptr;
     QToolButton* exportButton_ = nullptr;
+    QLabel* problemLabel_ = nullptr;
     QDialogButtonBox* buttonBox_ = nullptr;
 
-    // Mapping editor panel
+    // Mapping editor panel, showing the mappings of the current rule.
     QGroupBox* mappingGroup_ = nullptr;
     QTableWidget* mappingTable_ = nullptr;
     QToolButton* addMappingButton_ = nullptr;
     QToolButton* removeMappingButton_ = nullptr;
-    int currentMappingRow_ = -1;
 };
 
 } // namespace custom_footer

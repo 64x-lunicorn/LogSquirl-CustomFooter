@@ -18,6 +18,7 @@
  */
 
 #include "footerconfig.h"
+#include "footerscanner.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -34,6 +35,10 @@ QString FooterConfig::configPath( const QString& configDir )
 
 QList<FooterEntry> FooterConfig::loadEntries( const QString& configDir )
 {
+    if ( configDir.isEmpty() ) {
+        return {};
+    }
+
     QSettings settings( configPath( configDir ), QSettings::IniFormat );
     QList<FooterEntry> entries;
 
@@ -65,8 +70,12 @@ QList<FooterEntry> FooterConfig::loadEntries( const QString& configDir )
     return entries;
 }
 
-void FooterConfig::saveEntries( const QString& configDir, const QList<FooterEntry>& entries )
+bool FooterConfig::saveEntries( const QString& configDir, const QList<FooterEntry>& entries )
 {
+    if ( configDir.isEmpty() ) {
+        return false;
+    }
+
     QSettings settings( configPath( configDir ), QSettings::IniFormat );
 
     settings.beginWriteArray( "entries", entries.size() );
@@ -87,18 +96,31 @@ void FooterConfig::saveEntries( const QString& configDir, const QList<FooterEntr
         settings.endArray();
     }
     settings.endArray();
+
+    settings.sync();
+    return settings.status() == QSettings::NoError;
 }
 
 int FooterConfig::loadMaxLines( const QString& configDir )
 {
+    if ( configDir.isEmpty() ) {
+        return FooterScanner::kDefaultMaxLines;
+    }
+
     QSettings settings( configPath( configDir ), QSettings::IniFormat );
-    return settings.value( "scan/maxLines", 100000 ).toInt();
+    return settings.value( "scan/maxLines", FooterScanner::kDefaultMaxLines ).toInt();
 }
 
-void FooterConfig::saveMaxLines( const QString& configDir, int maxLines )
+bool FooterConfig::saveMaxLines( const QString& configDir, int maxLines )
 {
+    if ( configDir.isEmpty() ) {
+        return false;
+    }
+
     QSettings settings( configPath( configDir ), QSettings::IniFormat );
     settings.setValue( "scan/maxLines", maxLines );
+    settings.sync();
+    return settings.status() == QSettings::NoError;
 }
 
 bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntry>& entries )

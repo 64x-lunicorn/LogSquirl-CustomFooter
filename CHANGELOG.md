@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Rules sharing a key** — rules with the same key are now alternatives,
+  e.g. one pattern for old logs and one for new ones: the key's value comes
+  from the first line that any of them matches, and if several match that
+  line, the rule higher in the list wins. The key is shown once, at the
+  position of its first rule. Previously the key was shown twice and the
+  last rule won.
+- **Rule validation in the editor** — invalid patterns, and enabled rules
+  with a line pattern but no key, are marked in their cell, with the reason
+  in the tooltip and below the table; OK and Apply stay disabled until they
+  are fixed. The scanner skips such rules and reports them in the host log;
+  rules without a line pattern are ignored.
+- **Background scanning** — the active file is now scanned on a worker
+  thread instead of blocking the window; a scan still running when another
+  file becomes active, or the rules are applied, is cancelled and its values
+  are never shown. The rules are
+  read once and again only when they are applied, instead of twice on every
+  file switch. The footer is cleared as soon as another file becomes active.
+- **Follow mode** — the active file is watched and scanned again shortly
+  after it changes, so values that appear later in a growing log show up
+  without switching files. Only the lines appended since the last scan are
+  read, and none once every key has a value; a file that was truncated or
+  replaced is scanned from its start. A change while the file is scanned
+  does not restart the scan: it finishes, and one more scan then covers
+  every change made meanwhile, so a log that grows faster than it can be
+  scanned still shows its values. When the file is rotated away, its
+  directory is watched until it is recreated.
+
+### Fixed
+- **Mappings lost when removing a rule** — removing the selected rule could
+  write the mappings of one rule over another's, or drop the edits made
+  afterwards. Mappings are now stored with their rule's row.
+- **Mapping panel dead after import** — after importing rules the mapping
+  panel stayed disabled for the selected rule until another one was selected.
+- **Invalid patterns** — a rule whose value pattern does not compile is now
+  skipped like one with an invalid line pattern, instead of silently falling
+  back to the line pattern and showing the wrong value. Skipped rules are
+  reported in the host log.
+- **Huge lines** — a file without line breaks was read into memory in one
+  piece; lines are now matched against their first 64 KiB, and a scan reads
+  at most 64 MiB.
+- **Missing config directory** — without a config directory from the host,
+  rules were read from and written to `/custom_footer.ini`; they are now
+  neither loaded nor saved, and a warning is logged. A failed save is logged
+  too.
+- **Editor parent** — the rule editor opened through `configure()` ignored
+  the parent window the host passed, and the one from the Plugins menu had
+  none; both now open over LogSquirl's main window.
+- **Exceptions at the C boundary** — an exception in an entry point or host
+  callback, e.g. out of memory while scanning, is now logged instead of
+  crossing into the host.
+
 ## [0.2.0] — 2026-04-08
 
 ### Added

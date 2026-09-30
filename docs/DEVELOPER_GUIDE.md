@@ -148,18 +148,23 @@ in a detail panel on the right.
   (fields, mappings), so a live preview or a simple mode for the patterns
   can be added as further sections.
 - **Reordering**: ↑/↓, Ctrl+Shift+Up/Down in the list (`RuleListView`
-  emits `moveUpRequested()` / `moveDownRequested()`) and drag & drop all
-  move whole rows. A drag carries only the dragged row numbers and the
-  model they come from (`mimeData()`); `dropMimeData()` moves those rows
-  with `moveRows()`, so a rule's mappings, enabled state and problems move
-  with it, and the current index, and so the panel, follows it. A drop
-  taken as a copy (macOS can report an internal move as one) still moves,
-  and `RuleListView::startDrag()` never removes rows after the drag, as
-  `QAbstractItemView` would, so a drag can neither copy nor delete a rule.
-  Rules from another list are refused. Before a drop moves anything, the
-  model emits `aboutToDropRules()`, on which the editor commits the panel's
-  pending edit. Tests simulate a drag with `mimeData()` and
-  `dropMimeData()` (`tests/ruledragdrop_test.cpp`).
+  emits `moveUpRequested()` / `moveDownRequested()`; the keypad modifier,
+  which macOS sets on every arrow key, is ignored) and drag & drop all
+  move whole rows. A drag carries the dragged row numbers and a random
+  token of the model they come from (`mimeData()`), so no other list takes
+  them. `dropMimeData()` accepts only `Qt::MoveAction` and a row between
+  rules (none means the end), and moves the rows with `moveRows()`, so a
+  rule's mappings, enabled state and problems move with it, and the
+  current index, and so the panel, follows it. `RuleListView::startDrag()`
+  replaces `QAbstractItemView`'s, which would remove the selected rows
+  after a drag ending in a move, and those are then the moved rule itself.
+  Before a drop moves anything, the model emits `aboutToDropRules()`, on
+  which the editor commits the panel's pending edit. Tests
+  (`tests/ruledragdrop_test.cpp`) simulate drags with `mimeData()` and
+  `dropMimeData()`, and send drag and drop events to the view's viewport.
+  Offscreen, `QDrag::exec()` returns at once, so those events have no
+  source and the `InternalMove` view ignores them; the tests switch the
+  view to `DragDrop` to get past that check to the same drop handling.
 - **Validation** checks one rule: an invalid pattern, or an enabled rule
   with a line pattern but no key, becomes a problem of that field. An edit
   validates only the edited rule, and new rules are validated when they are

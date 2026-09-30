@@ -85,6 +85,12 @@ public:
 
     void setDelay( int delayMs );
 
+    /// Whether the file system is asked for notifications at all. Tests of
+    /// what an owner does on changed() turn it off and emit changed()
+    /// themselves: some systems report reads of the file too, e.g. its
+    /// access time, which would arm the pause behind the test's back.
+    void setSystemNotifications( bool enabled );
+
 Q_SIGNALS:
     /// The file changed, or reappeared, and the pause has passed.
     void changed();
@@ -102,6 +108,7 @@ private:
     QFileSystemWatcher watcher_;
     QTimer timer_;
     int delayMs_;
+    bool systemNotifications_ = true;
 };
 
 } // namespace custom_footer

@@ -43,7 +43,7 @@ void ActiveFileWatcher::setFile( const QString& filePath )
 
 void ActiveFileWatcher::watch()
 {
-    if ( file_.isEmpty() ) {
+    if ( file_.isEmpty() || !systemNotifications_ ) {
         return;
     }
     if ( !QFileInfo::exists( file_ ) ) {
@@ -83,6 +83,15 @@ void ActiveFileWatcher::scheduleIn( int delayMs )
 void ActiveFileWatcher::cancelPending()
 {
     timer_.stop();
+}
+
+void ActiveFileWatcher::setSystemNotifications( bool enabled )
+{
+    systemNotifications_ = enabled;
+    if ( !enabled ) {
+        timer_.stop();
+        unwatch();
+    }
 }
 
 void ActiveFileWatcher::setDelay( int delayMs )

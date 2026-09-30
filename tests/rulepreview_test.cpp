@@ -324,9 +324,10 @@ SCENARIO( "RulePreviewer never previews a changed file back to back", "[preview]
         previewer.setDelays( 0, pause );
         qint64 now = 0;
         previewer.setClock( [ &now ] { return now; } );
-        previewer.setActiveFile( "/some/file.log" );
         auto* fileWatcher = previewer.findChild<ActiveFileWatcher*>();
         REQUIRE( fileWatcher );
+        fileWatcher->setSystemNotifications( false );
+        previewer.setActiveFile( "/some/file.log" );
 
         previewer.schedule( { rule( "K", "k" ) }, 0 );
         previewer.flush();
@@ -364,9 +365,12 @@ SCENARIO( "RulePreviewer skips previews a change of the file cannot alter", "[pr
     previewer.setDelays( 0, 3600 * 1000 );
     qint64 now = 0;
     previewer.setClock( [ &now ] { return now; } );
-    previewer.setActiveFile( path );
     auto* fileWatcher = previewer.findChild<ActiveFileWatcher*>();
     REQUIRE( fileWatcher );
+    // The test reports the changes (changed()): what the previewer decides
+    // is tested here, not the system's notifications.
+    fileWatcher->setSystemNotifications( false );
+    previewer.setActiveFile( path );
     std::vector<Preview> previews;
     QObject::connect( &previewer, &RulePreviewer::previewed,
                       [ &previews ]( const Preview& preview ) { previews.push_back( preview ); } );

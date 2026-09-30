@@ -27,6 +27,8 @@
 
 namespace custom_footer {
 
+class FooterController;
+
 /// Global plugin state — bridges C ABI entry points to C++ implementation.
 struct PluginState {
     const LogSquirlHostApi* api = nullptr;
@@ -34,6 +36,7 @@ struct PluginState {
     bool initialised = false;
 
     FooterDisplayWidget* footerWidget = nullptr; ///< Registered in footer bar.
+    FooterController* controller = nullptr;      ///< Fills footerWidget.
 };
 
 extern PluginState g_state;

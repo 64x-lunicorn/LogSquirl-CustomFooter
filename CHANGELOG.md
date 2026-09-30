@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by an enabled rule above are marked in their cell, with the reason in the
   tooltip and below the table; OK and Apply stay disabled until they are
   fixed.
+- **Background scanning** — the active file is now scanned on a worker
+  thread instead of blocking the window; a scan still running when the file
+  changes again is cancelled and its values are never shown. The rules are
+  read once and again only when they are applied, instead of twice on every
+  file switch.
+- **Follow mode** — the active file is watched and scanned again shortly
+  after it changes, so values that appear later in a growing log show up
+  without switching files.
 
 ### Fixed
 - **Mappings lost when removing a rule** — removing the selected rule could
@@ -33,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rules were read from and written to `/custom_footer.ini`; they are now
   neither loaded nor saved, and a warning is logged. A failed save is logged
   too.
+- **Exceptions at the C boundary** — an exception in an entry point or host
+  callback, e.g. out of memory while scanning, is now logged instead of
+  crossing into the host.
 
 ## [0.2.0] — 2026-04-08
 

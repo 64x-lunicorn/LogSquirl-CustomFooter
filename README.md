@@ -80,6 +80,21 @@ After installing, restart LogSquirl or re-scan via *Plugins â†’ Manage Pluginsâ€
 
 Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
+### How rules are applied
+
+- Each rule takes the **first line** of the file that matches it. When two
+  enabled rules share a key, the one higher in the list wins; the editor
+  marks such a key, and invalid patterns, and won't save until they are fixed.
+- The file is scanned in the background whenever it becomes the active file
+  and when rules are applied. A rule with an invalid pattern is skipped and
+  reported in the LogSquirl log.
+- The active file is **watched**: when it changes, e.g. while following a
+  growing log, it is scanned again within about half a second, so values
+  that show up later in the file appear in the footer.
+- A scan stops after `scan/maxLines` lines (default 100000, `0` for no
+  limit) and never reads more than 64 MiB; lines longer than 64 KiB are
+  matched against their start.
+
 ### INI Format (internal)
 
 ```ini
@@ -171,10 +186,11 @@ cd build && ctest --output-on-failure
 ```mermaid
 graph TD
     A[LogSquirl Host] -->|active file changed| B[Plugin]
-    B --> C[FooterScanner]
-    C --> D[FooterConfig]
-    D -->|load rules| C
-    C -->|scan results| E[FooterDisplayWidget]
+    B --> G[FooterController]
+    D[FooterConfig] -->|load rules| G
+    G -->|scan on worker thread| C[FooterScanner]
+    H[File watcher] -->|file grew| G
+    G -->|latest scan results| E[FooterDisplayWidget]
     E -->|register_footer_widget| A
     B -->|edit rules| F[FooterEditor]
     F -->|save| D

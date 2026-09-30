@@ -33,24 +33,44 @@ sequenceDiagram
     Plugin->>Host: api->register_menu_action("Plugins", "Custom Footer…", callback)
     Plugin->>Host: api->register_footer_widget(footerWidget)
     Plugin->>Host: api->register_active_file_callback(onActiveFileChanged)
-    Plugin->>Plugin: rescanActiveFile()
+    Plugin->>Plugin: FooterController loads and compiles the rules
+    Plugin->>Plugin: FooterController::setActiveFile(current file)
     Plugin-->>Host: return 0 (success)
 
     Note over Host,Plugin: User opens or switches to a log file
 
     Host->>Plugin: onActiveFileChanged(filePath)
-    Plugin->>Plugin: FooterConfig::loadEntries()
-    Plugin->>Plugin: FooterScanner::scan(filePath, entries)
-    Plugin->>Plugin: FooterDisplayWidget::updateValues(ordered)
+    Plugin->>Plugin: FooterController::setActiveFile(filePath)
+    Plugin->>Plugin: FooterScanner::scanFile() on a worker thread
+    Plugin->>Plugin: FooterDisplayWidget::updateValues(ordered), if still current
 
     Note over Host,Plugin: User clicks "Custom Footer…" in Plugins menu
 
-    Host->>Plugin: showEditorDialog() callback
+    Host->>Plugin: onEditorMenuAction() callback
     Plugin->>Plugin: Open FooterEditor dialog
     Plugin->>Plugin: User edits rules, clicks OK
     Plugin->>Plugin: FooterConfig::saveEntries()
-    Plugin->>Plugin: rescanActiveFile()
+    Plugin->>Plugin: FooterController::reloadConfig()
+
+    Note over Host,Plugin: Host unloads the plugin
+
+    Host->>Plugin: logsquirl_plugin_shutdown()
+    Plugin->>Plugin: Cancel and wait for a running scan
+    Plugin->>Host: api->unregister_footer_widget(footerWidget)
 ```
+
+## Threading
+
+Scans run on a single worker thread owned by `FooterController`. Every scan
+request increments a generation counter; a finished scan is shown only if no
+newer one was requested, so switching files quickly never shows stale
+values. The result reaches the widget through a `QFutureWatcher` on the GUI
+thread. `logsquirl_plugin_shutdown()` deletes the controller first, which
+cancels the running scan and waits for the worker: after it returns, no code
+of the plugin runs, and the host may unload the library.
+
+No exception may leave an entry point or host callback; they run their work
+through `guarded()`, which logs the failure instead.
 
 ## Module Overview
 
@@ -58,6 +78,7 @@ sequenceDiagram
 |--------|---------|----------------|
 | **Plugin entry** | `plugin.cpp`, `plugin.h` | C ABI exports, global state, lifecycle |
 | **FooterEntry** | `footerentry.h` | Data model: key, linePattern, valuePattern, mappings |
+| **FooterController** | `footercontroller.h/.cpp` | Cached rules, background scans, file watching |
 | **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |
 | **FooterConfig** | `footerconfig.h/.cpp` | INI persistence + JSON import/export |
 | **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog with inline mapping panel |

@@ -26,13 +26,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_definitions(LOGSQUIRL_PLUGIN_VERSION="${PROJECT_VERSION}")
 
 # ── Find Qt6 ──────────────────────────────────────────────────────────────
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Concurrent Widgets)
 qt_standard_project_setup()
 
 # ── Plugin shared library ─────────────────────────────────────────────────
 add_library(logsquirl_custom_footer SHARED
     src/plugin.cpp
     src/footerconfig.cpp
+    src/footercontroller.cpp
     src/footerscanner.cpp
     src/footereditor.cpp
     src/footerdisplaywidget.cpp
@@ -56,6 +57,7 @@ target_include_directories(logsquirl_custom_footer
 target_link_libraries(logsquirl_custom_footer
     PRIVATE
         Qt6::Core
+        Qt6::Concurrent
         Qt6::Widgets
 )
 

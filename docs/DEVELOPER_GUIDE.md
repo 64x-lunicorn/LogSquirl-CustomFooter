@@ -74,6 +74,13 @@ on the GUI thread. `logsquirl_plugin_shutdown()` deletes the controller first, w
 cancels the running scan and waits for the worker: after it returns, no code
 of the plugin runs, and the host may unload the library.
 
+Both workers are a `LatestJob` (`latestjob.h`): one worker thread, a
+generation counter, a cancel flag, and results handed to the GUI thread
+only for the latest job; `stop()` cancels, waits, and drops results not
+yet handed over. Both watch the active file with an `ActiveFileWatcher`,
+which collects changes for a pause, ignores queued changes of a file no
+longer active, and watches the file's directory while it is missing.
+
 The rule editor's live preview has a worker thread of its own, owned by
 `RulePreviewer`, with the same rules: every request (an edit, another
 selected rule, another active file) bumps its generation counter and
@@ -83,23 +90,35 @@ without another one; another rule or active file starts one with the next
 pass of the event loop (`Start::Soon`), coalesced with the change that
 follows, so removing the selected rule previews once, on the remaining
 rules. The active file is watched like the footer's: a change on disk
-previews it again after `kRescanDelayMs`, and a running preview of the
-file is not cancelled for it but followed by one more. Setting the same
-active file again counts as such a change.
+previews it again after `kRescanDelayMs`, and a rotated file once it is
+recreated. A running preview of the file is not cancelled for a change
+but followed by one more, which also waits for `kRescanDelayMs` after the
+running one finished, so a busy log is never scanned back to back. The
+preview always scans the file from its start, unlike the footer, which
+continues where it stopped. Setting the same active file again counts as
+a change.
 
 The editor never runs in a nested event loop: `exec()` would keep plugin
 frames on the stack, and the host may shut the plugin down, and unload
 it, from within that loop. `openEditor()` in `plugin.cpp` creates it on
 the heap, parented to the host's window, opens it with `open()`, and
 handles OK and Apply through `finished()` and `applied()`; a closed
-editor is deleted later. `PluginState::editor` is a `QPointer` to it
+editor is deleted later. Opened again from another window, such as the
+host's application-modal plugin dialog, the editor is moved over that
+window. Its Import and Export file dialogs and error messages are
+opened with `open()` too, parented to the editor, never with the static
+`QFileDialog` and `QMessageBox` functions, which run nested loops. The
+one nested loop left is a drag in the rule list (`QDrag::exec()`); a
+shutdown during a drag cannot be triggered from the UI. `PluginState::editor` is a `QPointer` to it
 until it is deleted, and `logsquirl_plugin_shutdown()` deletes it at
 once: its destructor stops the preview (`RulePreviewer::stop()` cancels,
 waits for the worker, stops its timers and deletes pending result
 watchers), and deleting the objects drops their timers and posted
 events. Closing the editor (`done()`) stops the preview for good; an edit
 committed while it closes, such as an open mapping cell losing the
-focus, starts none (`FooterEditor::closing_`).
+focus, starts none (`FooterEditor::closing_`). The destructor commits a
+mapping cell being edited and disconnects the panel, model and list from
+the editor before any child is deleted.
 
 No exception may leave an entry point or host callback; they run their work
 through `guarded()`, which logs the failure instead.
@@ -117,6 +136,8 @@ through `guarded()`, which logs the failure instead.
 | **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
 | **RuleListView** | `rulelistview.h/.cpp` | The rule list: drag & drop and Ctrl+Shift+Up/Down to reorder rules |
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
+| **ActiveFileWatcher** | `activefilewatcher.h/.cpp` | Watches the active file, or its directory while it is missing, with a pause after changes |
+| **LatestJob** | `latestjob.h` | One worker thread whose latest job alone hands over its result |
 | **RulePreviewer** | `rulepreviewer.h/.cpp` | Runs the live preview: debounced, on a worker thread, outdated results dropped |
 | **RulePreviewView** | `rulepreviewview.h/.cpp` | The preview section of the detail panel: first match with highlights, values, count |
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |

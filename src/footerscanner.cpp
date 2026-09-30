@@ -335,51 +335,52 @@ bool FooterScanner::continues( QFile& file, const Progress& from )
            && readAt( file, from.offset - from.tail.size(), from.tail.size() ) == from.tail;
 }
 
-std::optional<FooterValue> FooterScanner::valueOf( const Rule& rule, const QString& line )
+std::optional<FooterScanner::Matches> FooterScanner::matchesOf( const Rule& rule,
+                                                                const QString& line )
 {
-    // The footer's hot path: nothing but the value.
-    const auto lineMatch = rule.lineRegex.match( line );
-    if ( !lineMatch.hasMatch() ) {
+    Matches matches;
+    matches.line = rule.lineRegex.match( line );
+    if ( !matches.line.hasMatch() ) {
         return std::nullopt;
     }
-
-    QString rawValue;
     if ( rule.valueRegex.pattern().isEmpty() ) {
-        rawValue = capturedValue( lineMatch );
+        matches.value = matches.line;
     }
     else {
-        const auto valueMatch = rule.valueRegex.match( line );
-        if ( !valueMatch.hasMatch() ) {
+        matches.value = rule.valueRegex.match( line );
+        if ( !matches.value.hasMatch() ) {
             return std::nullopt;
         }
-        rawValue = capturedValue( valueMatch );
     }
+    return matches;
+}
+
+std::optional<FooterValue> FooterScanner::valueOf( const Rule& rule, const QString& line )
+{
+    // The footer's hot path: the value, without where it was found.
+    const auto matches = matchesOf( rule, line );
+    if ( !matches ) {
+        return std::nullopt;
+    }
+    const auto rawValue = capturedValue( matches->value );
     return FooterValue{ rule.key, mapped( rule.mappings, rawValue ), rawValue, rule.index };
 }
 
 std::optional<FooterScanner::Match> FooterScanner::matchOf( const Rule& rule, const QString& line )
 {
-    // As valueOf(), and where in the line the value was found.
-    const auto lineMatch = rule.lineRegex.match( line );
-    if ( !lineMatch.hasMatch() ) {
+    const auto matches = matchesOf( rule, line );
+    if ( !matches ) {
         return std::nullopt;
-    }
-    auto valueMatch = lineMatch;
-    if ( !rule.valueRegex.pattern().isEmpty() ) {
-        valueMatch = rule.valueRegex.match( line );
-        if ( !valueMatch.hasMatch() ) {
-            return std::nullopt;
-        }
     }
 
     Match match;
-    match.lineMatchStart = lineMatch.capturedStart( 0 );
-    match.lineMatchLength = lineMatch.capturedLength( 0 );
-    const int group = valueMatch.lastCapturedIndex() >= 1 ? 1 : 0;
-    match.valueStart = valueMatch.capturedStart( group );
-    match.valueLength = match.valueStart < 0 ? 0 : valueMatch.capturedLength( group );
+    match.lineMatchStart = matches->line.capturedStart( 0 );
+    match.lineMatchLength = matches->line.capturedLength( 0 );
+    const int group = matches->value.lastCapturedIndex() >= 1 ? 1 : 0;
+    match.valueStart = matches->value.capturedStart( group );
+    match.valueLength = match.valueStart < 0 ? 0 : matches->value.capturedLength( group );
 
-    const auto rawValue = capturedValue( valueMatch );
+    const auto rawValue = capturedValue( matches->value );
     match.value = FooterValue{ rule.key, mapped( rule.mappings, rawValue ), rawValue, rule.index };
     return match;
 }

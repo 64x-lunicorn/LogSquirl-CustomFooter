@@ -219,6 +219,17 @@ private:
         qsizetype valueLength = 0;
     };
 
+    /// A rule's match of a line: the line pattern's, and the value
+    /// pattern's, which is the line pattern's without a value pattern.
+    struct Matches {
+        QRegularExpressionMatch line;
+        QRegularExpressionMatch value;
+    };
+
+    /// The matches of a rule that takes a value from a line, if it does:
+    /// the one extraction valueOf() and matchOf() share.
+    static std::optional<Matches> matchesOf( const Rule& rule, const QString& line );
+
     /// Compile a rule; empty and with @p problem set if it cannot be used.
     static std::optional<Rule> compile( const FooterEntry& entry, int index, QString* problem );
 

@@ -128,18 +128,21 @@ no existing rule changes.
 
 | Template | Key | Finds | Mode |
 |----------|-----|-------|------|
-| Version | `Version` | The number after `version` or `ver` in any case, with an optional `:` or `=` and `v` (`version 1.2.3`, `Version: v2.0.1-rc1` → `2.0.1-rc1`, `ver=1.2`), or after a `v` starting a word when it has a dot (`v1.2.3`). A `-rc1` or `+build.5` suffix is part of it. | Advanced |
+| Version | `Version` | The number after `version` or `ver` in any case, also after `_` or in camel case (`app_version=1.2.3`, `appVersion: 2.1.0`), with optional quotes, `:`, `=`, `>` or `.` and `v` between (`Version: v2.0.1-rc1` → `2.0.1-rc1`, `{"version": "1.2.3"}`, `<version>1.2.3`, `Ver. 2.1`), or after a `v` starting a word when it has a dot (`v1.2.3`). A suffix like `-rc1`, `-beta.2` or `+build.5` is part of it; a date is not. | Advanced |
 | Build number | `Build` | The word after `Build:` (`Build: 1234`) | Simple |
 | Serial number | `Serial number` | The word after `Serial number:` | Simple |
-| IPv4 address | `IP address` | The first address in a line, four numbers 0–255 without leading zeros, not part of a longer dotted sequence | Advanced |
-| Timestamp (ISO 8601) | `Timestamp` | The first date and time in a line: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or offset | Advanced |
-| `key=value` | the key you give | The value after `<key>=`, up to the next whitespace, as in logfmt | Simple |
+| IPv4 address | `IP address` | The first address in a line, four numbers 0–255 without leading zeros, not part of a word or a longer dotted sequence (`v1.2.3.4`, `1.2.3.4.5`) | Advanced |
+| Timestamp (ISO 8601) | `Timestamp` | The first date and time in a line: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Malformed times such as `10:30:5` are not matched. | Advanced |
+| `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Not in a longer key (`superuser=`, `a.user=`), and `user= x` has no value. | Advanced |
 
 Simple templates match their text as written, case included, so change
-`Build:` to what your log says. For `key=value` lists separated by `;` or
-`,` instead of spaces, set **Value ends at** to that character. If a rule
-with the template's key exists already, the dialog says so: the new rule
-becomes an alternative for that key.
+`Build:` to what your log says. Version does not count `version` inside
+another word (`conversion`, `server`), and so also misses a lower-case
+`appversion`; `app_version` and `appVersion` are found. For `key=value`,
+give the key without `=` (a trailing `=` is dropped); for lists separated
+by `;` or `,`, change `(\S+)` in the pattern to `([^;]+)`. If an enabled
+rule with a line pattern already has the template's key, the dialog says
+so: the new rule becomes an alternative for that key.
 
 ### How rules are applied
 

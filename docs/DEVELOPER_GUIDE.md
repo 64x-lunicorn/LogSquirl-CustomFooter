@@ -243,21 +243,32 @@ advanced `linePattern` with the value as group 1. `entry()` builds the
 rule: a simple template goes through `applySimpleRule()`, so its patterns
 are exactly what simple mode generates and it opens in simple mode; an
 advanced one keeps its pattern and opens in advanced mode. A template
-with an empty key asks for it (`asksForKey()`): `key=value` prepends the
-trimmed key to its text `=`, and without a key `entry()` is empty. Only
-values with a shape are advanced: Version, IPv4 and ISO 8601 timestamps.
-Their patterns guard their edges with lookarounds (`(?<!\d)`, `\b`)
-rather than anchors, as a value may be anywhere in the line; `\d` and `\b`
-are ASCII, like everything the scanner compiles. Each template is tested
+with an empty key asks for it (`asksForKey()`): `%1` in its pattern is the
+`givenKey()` (trimmed, one trailing `=` dropped) escaped with
+`QRegularExpression::escape()`, and without a key `entry()` is empty. Only
+values with a shape or boundaries a simple rule cannot express are
+advanced: Version, IPv4, ISO 8601 timestamps, and `key=value`, whose key
+must not end a longer key (`(?<![\w.-])`) and whose value starts right
+after `=`. The patterns guard their edges with lookarounds rather than
+anchors or `\b`, as a value may be anywhere in the line and `_` counts as
+a word character; `\d` and `\w` are ASCII, like everything the scanner
+compiles. Version takes `version` after `_` or as a camel-case `Version`,
+but not after another letter, trading a missed `appversion` for no match
+in `conversion` or `server`; its SemVer suffix needs a letter in its first
+identifier, and a number shaped like `\d{4}-\d{2}` is not a version, so
+dates are never taken. The timestamp's seconds, fraction and offset are an
+atomic group followed by `(?![\d:])`, so `10:30:5` fails instead of
+backtracking to `10:30`. Each template is tested
 with lines it must find and lines it must not, through `FooterScanner`
 (`tests/ruletemplate_test.cpp`). A new template is a row in
 `makeTemplates()` plus such samples.
 
 `RuleTemplateDialog` lists name and description in a `QTreeWidget`, with a
 key field enabled only for a template that asks for one; OK is enabled
-once `entry()` has a key. It gets the keys in use in `reset()` and shows a
-note when the new rule's key is one of them: the rule is still added, as
-an alternative. `FooterEditor::addFromTemplate()` commits the panel's
+once `entry()` has a key, and a hint says a typed trailing `=` is dropped.
+It gets the keys of enabled rules with a line pattern, the ones the scanner
+uses, in `reset()` and shows a note when the new rule's key is one of
+them: the rule is still added, as an alternative. `FooterEditor::addFromTemplate()` commits the panel's
 pending edit, keeps one dialog, calls `reset()` and `open()` (not `exec()`,
 so tests click through it), and on `accepted` appends `entry()` and selects
 it, like the add button, without touching other rows.

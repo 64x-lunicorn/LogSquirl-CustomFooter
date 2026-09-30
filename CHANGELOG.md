@@ -37,12 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rule templates** — **From template…** next to the add button offers
   ready-made rules for common values, each with a name and a one-line
   description: Version (`version 1.2.3`, `Version: v2.0.1-rc1`, `ver=1.2`,
-  `v1.2.3`), Build number (`Build:`), Serial number (`Serial number:`),
-  IPv4 address, Timestamp (ISO 8601) and `key=value`, which asks for the
-  key. The chosen template is added as a new rule after the others and
-  selected; existing rules are not changed. Build number, Serial number
-  and `key=value` open in simple mode, the others, whose values need a
-  shape, in advanced mode. If the key is already in use, the dialog says
+  `v1.2.3`, `appVersion: 2.1.0`, `{"version": "1.2.3"}`), Build number
+  (`Build:`), Serial number (`Serial number:`), IPv4 address, Timestamp
+  (ISO 8601) and `key=value`, which asks for the key. The chosen template
+  is added as a new rule after the others and selected; existing rules are
+  not changed. Build number and Serial number open in simple mode, the
+  others, whose values need a shape or boundaries, in advanced mode. If an
+  enabled rule with a line pattern already has the key, the dialog says
   that the new rule becomes an alternative for it.
 
 ### Changed

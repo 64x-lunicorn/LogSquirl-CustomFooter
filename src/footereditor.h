@@ -22,28 +22,41 @@
 #include "footerentry.h"
 
 #include <QDialog>
-#include <QDialogButtonBox>
-#include <QGroupBox>
 #include <QHash>
-#include <QLabel>
 #include <QList>
-#include <QTableWidget>
-#include <QToolButton>
+#include <QMap>
+#include <QString>
+#include <QStringList>
+
+class QDialogButtonBox;
+class QLabel;
+class QTableView;
+class QToolButton;
 
 namespace custom_footer {
+
+class RuleDetailPanel;
+class RuleListModel;
 
 /**
  * Modal dialog for editing footer extraction rules.
  *
  * Layout:
- *   - QTableWidget with five columns: Enabled, Key, Line Pattern, Value Pattern, Mappings
- *   - Toolbar row with [+] [-] [↑] [↓] [Import] [Export] buttons
- *   - Inline mapping editor panel below the table
- *   - QDialogButtonBox with OK / Cancel / Apply
+ *   - Left: the rule list (RuleListModel in a QTableView), one row per rule
+ *     with its enabled check box, key and line pattern, and below it the
+ *     [+] [-] [↑] [↓] [Import] [Export] buttons
+ *   - Right: the RuleDetailPanel for the selected rule, with all its fields
+ *     and value mappings
+ *   - Below: the problems of all rules, and OK / Cancel / Apply
+ *
+ * The rules live in the model, one row each with its mappings and problems,
+ * so they stay together whichever way the list changes. Edits in the panel
+ * are stored into the selected rule as they are made.
  *
  * Rules are validated as they are edited: an invalid pattern, or an enabled
- * rule with a line pattern but no key, is marked in its cell and blocks OK
- * and Apply. Rules may share a key: they are alternatives for its value.
+ * rule with a line pattern but no key, is marked at its field and in the
+ * list and blocks OK and Apply. Rules may share a key: they are
+ * alternatives for its value.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -64,6 +77,13 @@ public:
         return patternCompilations_;
     }
 
+    /// How many times a rule has been validated so far. An edit validates
+    /// only the edited rule; tests check that with this.
+    int ruleValidations() const
+    {
+        return ruleValidations_;
+    }
+
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
     void applied();
@@ -76,29 +96,41 @@ private Q_SLOTS:
     void updateButtons();
     void importRules();
     void exportRules();
-    void showMappingsOfCurrentRule();
-    void addMapping();
-    void removeMapping();
-    void storeMappingsOfCurrentRule();
-    void validate();
+    void showCurrentRule();
+    void storePanelInCurrentRule();
+    void ruleChanged( int row );
 
 private:
-    void populateTable( const QList<FooterEntry>& entries );
-    void setRow( int row, const FooterEntry& entry );
+    int currentRow() const;
+    void selectRow( int row );
     void moveEntry( int from, int to );
 
-    /// The mappings of a rule live in its Mappings cell, so they stay with
-    /// the rule's row whichever way the table changes.
-    QList<ValueMapping> mappingsOf( int row ) const;
-    void setMappings( int row, const QList<ValueMapping>& mappings );
+    /// Validate one rule and store its problems in the model.
+    void validateRow( int row );
+    /// Validate the rules in rows @p first to @p last, e.g. new ones.
+    void validateRows( int first, int last );
+    /// List the problems of all rules, with their current row numbers, from
+    /// the problems stored in the model. Validates nothing.
+    void listProblems();
+    /// Show the listed problems below the list, at the panel's fields, and
+    /// allow OK and Apply only without any.
+    void showProblems();
 
-    /// Why a pattern does not compile, remembered from the last validate(),
-    /// so that validating compiles only the patterns edited since.
-    QString patternError( const QString& pattern, QHash<QString, QString>& errors );
+    /// Why a pattern does not compile, remembered for the dialog's lifetime,
+    /// so that validating compiles only patterns not seen before.
+    QString patternError( const QString& pattern );
     QHash<QString, QString> patternErrors_;
+    /// The problem lines of each invalid rule, by row. Updated for the rule
+    /// being edited, and listed again when rows are inserted, removed or
+    /// moved, so an edit costs as much with one rule as with a thousand.
+    QMap<int, QStringList> problemLines_;
     int patternCompilations_ = 0;
+    int ruleValidations_ = 0;
 
-    QTableWidget* table_ = nullptr;
+    RuleListModel* model_ = nullptr;
+    QTableView* list_ = nullptr;
+    RuleDetailPanel* panel_ = nullptr;
+
     QToolButton* addButton_ = nullptr;
     QToolButton* removeButton_ = nullptr;
     QToolButton* upButton_ = nullptr;
@@ -107,12 +139,6 @@ private:
     QToolButton* exportButton_ = nullptr;
     QLabel* problemLabel_ = nullptr;
     QDialogButtonBox* buttonBox_ = nullptr;
-
-    // Mapping editor panel, showing the mappings of the current rule.
-    QGroupBox* mappingGroup_ = nullptr;
-    QTableWidget* mappingTable_ = nullptr;
-    QToolButton* addMappingButton_ = nullptr;
-    QToolButton* removeMappingButton_ = nullptr;
 };
 
 } // namespace custom_footer

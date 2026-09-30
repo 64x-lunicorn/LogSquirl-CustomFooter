@@ -20,14 +20,19 @@
 #include "footereditor.h"
 #include "footerconfig.h"
 #include "footerscanner.h"
+#include "ruledetailpanel.h"
+#include "rulelistmodel.h"
 
-#include <QCheckBox>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QSignalBlocker>
+#include <QSplitter>
+#include <QTableView>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -35,140 +40,91 @@
 
 namespace custom_footer {
 
-// ── Centered checkbox helper ─────────────────────────────────────────────
-
-namespace {
-
-/// A QCheckBox centered in a container widget, for use in QTableWidget cells.
-class CenteredCheckbox : public QWidget {
-public:
-    explicit CenteredCheckbox( bool checked, QWidget* parent = nullptr )
-        : QWidget( parent )
-    {
-        auto* layout = new QHBoxLayout( this );
-        layout->setAlignment( Qt::AlignCenter );
-        layout->setContentsMargins( 0, 0, 0, 0 );
-        checkbox_ = new QCheckBox;
-        checkbox_->setChecked( checked );
-        layout->addWidget( checkbox_ );
-    }
-
-    bool isChecked() const
-    {
-        return checkbox_->isChecked();
-    }
-    QCheckBox* checkbox() const
-    {
-        return checkbox_;
-    }
-
-private:
-    QCheckBox* checkbox_;
-};
-
-/// Background for cells whose content keeps the rules from being saved.
-const QColor kProblemColor( 220, 50, 50, 70 );
-
-} // namespace
-
-// ── FooterEditor ─────────────────────────────────────────────────────────
-
 FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     : QDialog( parent )
 {
     setWindowTitle( tr( "Custom Footer — Edit Rules" ) );
-    setMinimumSize( 700, 500 );
+    setMinimumSize( 800, 520 );
 
     auto* mainLayout = new QVBoxLayout( this );
+    auto* splitter = new QSplitter( Qt::Horizontal, this );
+    splitter->setChildrenCollapsible( false );
+    mainLayout->addWidget( splitter, 1 );
 
-    // ── Rules table (5 columns) ──────────────────────────────────────────
-    table_ = new QTableWidget( 0, 5, this );
-    table_->setObjectName( "rulesTable" );
-    table_->setHorizontalHeaderLabels( { tr( "Enabled" ), tr( "Key" ), tr( "Line Pattern" ),
-                                         tr( "Value Pattern" ), tr( "Mappings" ) } );
-    table_->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
-    table_->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Interactive );
-    table_->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
-    table_->horizontalHeader()->setSectionResizeMode( 3, QHeaderView::Stretch );
-    table_->horizontalHeader()->setSectionResizeMode( 4, QHeaderView::ResizeToContents );
-    table_->verticalHeader()->setSectionResizeMode( QHeaderView::ResizeToContents );
-    table_->setSelectionBehavior( QAbstractItemView::SelectRows );
-    table_->setSelectionMode( QAbstractItemView::SingleSelection );
-    table_->setWordWrap( false );
-    mainLayout->addWidget( table_, 3 );
+    // ── Left: the rule list and its buttons ──────────────────────────────
+    auto* listSide = new QWidget( splitter );
+    auto* listLayout = new QVBoxLayout( listSide );
+    listLayout->setContentsMargins( 0, 0, 0, 0 );
 
-    // ── Toolbar ──────────────────────────────────────────────────────────
+    model_ = new RuleListModel( this );
+    list_ = new QTableView( listSide );
+    list_->setObjectName( "ruleList" );
+    list_->setModel( model_ );
+    list_->setSelectionBehavior( QAbstractItemView::SelectRows );
+    list_->setSelectionMode( QAbstractItemView::SingleSelection );
+    list_->setEditTriggers( QAbstractItemView::NoEditTriggers );
+    list_->setWordWrap( false );
+    list_->setTextElideMode( Qt::ElideRight );
+    list_->setShowGrid( false );
+    list_->setAlternatingRowColors( true );
+    // Row numbers, as the problems below the list refer to them.
+    list_->verticalHeader()->setSectionResizeMode( QHeaderView::ResizeToContents );
+    list_->horizontalHeader()->setSectionResizeMode( RuleListModel::KeyColumn,
+                                                     QHeaderView::Interactive );
+    list_->horizontalHeader()->setSectionResizeMode( RuleListModel::LinePatternColumn,
+                                                     QHeaderView::Stretch );
+    list_->horizontalHeader()->resizeSection( RuleListModel::KeyColumn, 150 );
+    listLayout->addWidget( list_, 1 );
+
     auto* toolLayout = new QHBoxLayout;
 
-    addButton_ = new QToolButton( this );
+    addButton_ = new QToolButton( listSide );
+    addButton_->setObjectName( "addRuleButton" );
     addButton_->setText( "+" );
-    addButton_->setToolTip( tr( "Add entry" ) );
+    addButton_->setToolTip( tr( "Add rule" ) );
     toolLayout->addWidget( addButton_ );
 
-    removeButton_ = new QToolButton( this );
+    removeButton_ = new QToolButton( listSide );
     removeButton_->setObjectName( "removeRuleButton" );
-    removeButton_->setText( "\u2212" ); // minus sign
-    removeButton_->setToolTip( tr( "Remove entry" ) );
+    removeButton_->setText( "−" ); // minus sign
+    removeButton_->setToolTip( tr( "Remove rule" ) );
     toolLayout->addWidget( removeButton_ );
 
-    upButton_ = new QToolButton( this );
+    upButton_ = new QToolButton( listSide );
     upButton_->setObjectName( "moveUpButton" );
-    upButton_->setText( "\u2191" ); // up arrow
+    upButton_->setText( "↑" ); // up arrow
     upButton_->setToolTip( tr( "Move up" ) );
     toolLayout->addWidget( upButton_ );
 
-    downButton_ = new QToolButton( this );
-    downButton_->setText( "\u2193" ); // down arrow
+    downButton_ = new QToolButton( listSide );
+    downButton_->setObjectName( "moveDownButton" );
+    downButton_->setText( "↓" ); // down arrow
     downButton_->setToolTip( tr( "Move down" ) );
     toolLayout->addWidget( downButton_ );
 
     toolLayout->addStretch();
 
-    importButton_ = new QToolButton( this );
+    importButton_ = new QToolButton( listSide );
     importButton_->setText( tr( "Import" ) );
     importButton_->setToolTip( tr( "Import rules from a JSON file" ) );
     toolLayout->addWidget( importButton_ );
 
-    exportButton_ = new QToolButton( this );
+    exportButton_ = new QToolButton( listSide );
     exportButton_->setText( tr( "Export" ) );
     exportButton_->setToolTip( tr( "Export rules to a JSON file" ) );
     toolLayout->addWidget( exportButton_ );
 
-    mainLayout->addLayout( toolLayout );
+    listLayout->addLayout( toolLayout );
 
-    // ── Mapping editor panel ─────────────────────────────────────────────
-    mappingGroup_ = new QGroupBox( tr( "Value Mappings" ), this );
-    mappingGroup_->setObjectName( "mappingGroup" );
-    auto* mappingLayout = new QVBoxLayout( mappingGroup_ );
+    // ── Right: the selected rule ─────────────────────────────────────────
+    panel_ = new RuleDetailPanel( splitter );
 
-    mappingTable_ = new QTableWidget( 0, 2, mappingGroup_ );
-    mappingTable_->setObjectName( "mappingTable" );
-    mappingTable_->setHorizontalHeaderLabels( { tr( "Pattern" ), tr( "Display" ) } );
-    mappingTable_->horizontalHeader()->setSectionResizeMode( QHeaderView::Stretch );
-    mappingTable_->verticalHeader()->setSectionResizeMode( QHeaderView::ResizeToContents );
-    mappingTable_->setSelectionBehavior( QAbstractItemView::SelectRows );
-    mappingTable_->setSelectionMode( QAbstractItemView::SingleSelection );
-    mappingLayout->addWidget( mappingTable_ );
-
-    auto* mappingToolLayout = new QHBoxLayout;
-    addMappingButton_ = new QToolButton( mappingGroup_ );
-    addMappingButton_->setText( "+" );
-    addMappingButton_->setToolTip( tr( "Add mapping" ) );
-    mappingToolLayout->addWidget( addMappingButton_ );
-
-    removeMappingButton_ = new QToolButton( mappingGroup_ );
-    removeMappingButton_->setText( "\u2212" );
-    removeMappingButton_->setToolTip( tr( "Remove mapping" ) );
-    mappingToolLayout->addWidget( removeMappingButton_ );
-
-    mappingToolLayout->addStretch();
-    mappingLayout->addLayout( mappingToolLayout );
-
-    mappingGroup_->setEnabled( false );
-    mainLayout->addWidget( mappingGroup_, 2 );
+    splitter->setStretchFactor( 0, 2 );
+    splitter->setStretchFactor( 1, 3 );
 
     // ── Problems + Button Box ────────────────────────────────────────────
     problemLabel_ = new QLabel( this );
+    problemLabel_->setObjectName( "problemLabel" );
     problemLabel_->setWordWrap( true );
     problemLabel_->hide();
     mainLayout->addWidget( problemLabel_ );
@@ -185,110 +141,93 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( importButton_, &QToolButton::clicked, this, &FooterEditor::importRules );
     connect( exportButton_, &QToolButton::clicked, this, &FooterEditor::exportRules );
 
-    connect( table_, &QTableWidget::itemChanged, this, &FooterEditor::validate );
-    connect( table_, &QTableWidget::currentCellChanged, this, [ this ]( int, int, int, int ) {
-        showMappingsOfCurrentRule();
-        updateButtons();
+    connect( list_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
+             &FooterEditor::showCurrentRule );
+    connect( panel_, &RuleDetailPanel::edited, this, &FooterEditor::storePanelInCurrentRule );
+
+    // Validation marks and row numbers follow every change of the rules.
+    // Moved rules keep their marks; validating again only renumbers them.
+    connect( model_, &RuleListModel::ruleChanged, this, &FooterEditor::ruleChanged );
+    connect( model_, &RuleListModel::rowsInserted, this,
+             [ this ]( const QModelIndex&, int first, int last ) { validateRows( first, last ); } );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::listProblems );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::listProblems );
+    connect( model_, &RuleListModel::modelReset, this,
+             [ this ] { validateRows( 0, model_->rowCount() - 1 ); } );
+    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::updateButtons );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::updateButtons );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::updateButtons );
+
+    // A mapping still being typed belongs to the rules that are saved.
+    connect( buttonBox_, &QDialogButtonBox::accepted, this, [ this ] {
+        panel_->commitPendingEdit();
+        accept();
+    } );
+    connect( buttonBox_, &QDialogButtonBox::rejected, this, &QDialog::reject );
+    connect( buttonBox_->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this, [ this ] {
+        panel_->commitPendingEdit();
+        Q_EMIT applied();
     } );
 
-    connect( addMappingButton_, &QToolButton::clicked, this, &FooterEditor::addMapping );
-    connect( removeMappingButton_, &QToolButton::clicked, this, &FooterEditor::removeMapping );
-
-    // Enable/disable remove-mapping button when mapping table selection changes.
-    connect( mappingTable_, &QTableWidget::currentCellChanged, this,
-             [ this ]( int, int, int, int ) {
-                 removeMappingButton_->setEnabled( mappingTable_->currentRow() >= 0 );
-             } );
-
-    // Store mapping edits in the current rule as they are made.
-    connect( mappingTable_, &QTableWidget::cellChanged, this,
-             &FooterEditor::storeMappingsOfCurrentRule );
-
-    connect( buttonBox_, &QDialogButtonBox::accepted, this, &QDialog::accept );
-    connect( buttonBox_, &QDialogButtonBox::rejected, this, &QDialog::reject );
-    connect( buttonBox_->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this,
-             &FooterEditor::applied );
-
     // ── Populate ─────────────────────────────────────────────────────────
-    populateTable( entries );
+    model_->setEntries( entries );
+    if ( model_->rowCount() > 0 ) {
+        selectRow( 0 );
+    }
+    showCurrentRule();
 }
 
 // ── Public accessors ─────────────────────────────────────────────────────
 
 QList<FooterEntry> FooterEditor::entries() const
 {
-    QList<FooterEntry> result;
-    const int rows = table_->rowCount();
-    result.reserve( rows );
-
-    for ( int i = 0; i < rows; ++i ) {
-        FooterEntry entry;
-        auto* checkbox = static_cast<CenteredCheckbox*>( table_->cellWidget( i, 0 ) );
-        entry.enabled = checkbox ? checkbox->isChecked() : true;
-
-        auto* keyItem = table_->item( i, 1 );
-        entry.key = keyItem ? keyItem->text() : QString();
-
-        auto* lineItem = table_->item( i, 2 );
-        entry.linePattern = lineItem ? lineItem->text() : QString();
-
-        auto* valueItem = table_->item( i, 3 );
-        entry.valuePattern = valueItem ? valueItem->text() : QString();
-
-        entry.mappings = mappingsOf( i );
-
-        result.append( entry );
-    }
-    return result;
+    return model_->entries();
 }
 
 void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
 {
-    populateTable( this->entries() + entries );
+    model_->appendEntries( entries );
+    if ( currentRow() < 0 && model_->rowCount() > 0 ) {
+        selectRow( 0 );
+    }
 }
 
 // ── Slots ────────────────────────────────────────────────────────────────
 
 void FooterEditor::addEntry()
 {
-    const int row = table_->rowCount();
-    {
-        const QSignalBlocker blocker( table_ );
-        table_->setRowCount( row + 1 );
-        setRow( row, FooterEntry() );
-    }
-    validate();
-
-    table_->scrollToItem( table_->item( row, 1 ) );
-    table_->setCurrentCell( row, 1 );
-    table_->editItem( table_->item( row, 1 ) );
+    panel_->commitPendingEdit();
+    const int row = model_->rowCount();
+    model_->appendEntries( { FooterEntry() } );
+    selectRow( row );
+    panel_->focusKey();
 }
 
 void FooterEditor::removeEntry()
 {
-    const int row = table_->currentRow();
+    panel_->commitPendingEdit();
+    const int row = currentRow();
     if ( row < 0 ) {
         return;
     }
 
-    {
-        // Select the next rule, or the one above the last, explicitly
-        // rather than through whatever removeRow() makes current.
-        const QSignalBlocker blocker( table_ );
-        table_->removeRow( row );
-        if ( table_->rowCount() > 0 ) {
-            table_->setCurrentCell( std::min( row, table_->rowCount() - 1 ), 1 );
-        }
+    // Select the next rule, or the one above the last, before removing the
+    // rule, so that the panel shows the right rule once rather than
+    // whichever the selection model makes current.
+    const int count = model_->rowCount();
+    if ( count > 1 ) {
+        selectRow( row + 1 < count ? row + 1 : row - 1 );
     }
-
-    showMappingsOfCurrentRule();
-    updateButtons();
-    validate();
+    else {
+        list_->selectionModel()->clear();
+    }
+    model_->removeRows( row, 1 );
 }
 
 void FooterEditor::moveEntryUp()
 {
-    const int row = table_->currentRow();
+    panel_->commitPendingEdit();
+    const int row = currentRow();
     if ( row > 0 ) {
         moveEntry( row, row - 1 );
     }
@@ -296,24 +235,25 @@ void FooterEditor::moveEntryUp()
 
 void FooterEditor::moveEntryDown()
 {
-    const int row = table_->currentRow();
-    if ( row >= 0 && row < table_->rowCount() - 1 ) {
+    panel_->commitPendingEdit();
+    const int row = currentRow();
+    if ( row >= 0 && row < model_->rowCount() - 1 ) {
         moveEntry( row, row + 1 );
     }
 }
 
 void FooterEditor::updateButtons()
 {
-    const int row = table_->currentRow();
-    const int count = table_->rowCount();
+    const int row = currentRow();
+    const int count = model_->rowCount();
     removeButton_->setEnabled( row >= 0 );
     upButton_->setEnabled( row > 0 );
     downButton_->setEnabled( row >= 0 && row < count - 1 );
-    removeMappingButton_->setEnabled( mappingTable_->currentRow() >= 0 );
 }
 
 void FooterEditor::importRules()
 {
+    panel_->commitPendingEdit();
     const auto filePath = QFileDialog::getOpenFileName(
         this, tr( "Import Rules" ), QString(), tr( "JSON Files (*.json);;All Files (*)" ) );
     if ( filePath.isEmpty() ) {
@@ -332,6 +272,7 @@ void FooterEditor::importRules()
 
 void FooterEditor::exportRules()
 {
+    panel_->commitPendingEdit();
     const auto filePath = QFileDialog::getSaveFileName(
         this, tr( "Export Rules" ), QStringLiteral( "footer_rules.json" ),
         tr( "JSON Files (*.json);;All Files (*)" ) );
@@ -345,192 +286,148 @@ void FooterEditor::exportRules()
     }
 }
 
-void FooterEditor::showMappingsOfCurrentRule()
+void FooterEditor::showCurrentRule()
 {
-    const int row = table_->currentRow();
-    const auto mappings = row >= 0 ? mappingsOf( row ) : QList<ValueMapping>();
-
-    const QSignalBlocker blocker( mappingTable_ );
-    mappingTable_->setRowCount( mappings.size() );
-    for ( int i = 0; i < mappings.size(); ++i ) {
-        mappingTable_->setItem( i, 0, new QTableWidgetItem( mappings[ i ].pattern ) );
-        mappingTable_->setItem( i, 1, new QTableWidgetItem( mappings[ i ].displayValue ) );
+    const int row = currentRow();
+    if ( row < 0 ) {
+        panel_->showNoEntry();
     }
-    mappingGroup_->setEnabled( row >= 0 );
-}
-
-void FooterEditor::addMapping()
-{
-    if ( table_->currentRow() < 0 ) {
-        return;
+    else {
+        panel_->showEntry( model_->entry( row ) );
+        panel_->setProblems( model_->problems( row ) );
     }
-
-    const int row = mappingTable_->rowCount();
-    {
-        const QSignalBlocker blocker( mappingTable_ );
-        mappingTable_->setRowCount( row + 1 );
-        mappingTable_->setItem( row, 0, new QTableWidgetItem( "" ) );
-        mappingTable_->setItem( row, 1, new QTableWidgetItem( "" ) );
-    }
-    storeMappingsOfCurrentRule();
-
-    mappingTable_->setCurrentCell( row, 0 );
-    mappingTable_->editItem( mappingTable_->item( row, 0 ) );
     updateButtons();
 }
 
-void FooterEditor::removeMapping()
+void FooterEditor::storePanelInCurrentRule()
 {
-    const int row = mappingTable_->currentRow();
+    const int row = currentRow();
     if ( row < 0 ) {
         return;
     }
-    mappingTable_->removeRow( row );
-    storeMappingsOfCurrentRule();
-    updateButtons();
+    model_->setEntry( row, panel_->entry() );
+    validateRow( row );
+    showProblems();
 }
 
-void FooterEditor::storeMappingsOfCurrentRule()
+void FooterEditor::ruleChanged( int row )
 {
-    const int row = table_->currentRow();
-    if ( row < 0 ) {
-        return;
+    // Enabled or disabled in the list.
+    if ( row == currentRow() ) {
+        panel_->showEntry( model_->entry( row ) );
     }
-
-    QList<ValueMapping> mappings;
-    for ( int i = 0; i < mappingTable_->rowCount(); ++i ) {
-        ValueMapping m;
-        auto* pItem = mappingTable_->item( i, 0 );
-        m.pattern = pItem ? pItem->text() : QString();
-        auto* dItem = mappingTable_->item( i, 1 );
-        m.displayValue = dItem ? dItem->text() : QString();
-        mappings.append( m );
-    }
-    setMappings( row, mappings );
-}
-
-void FooterEditor::validate()
-{
-    QStringList problems;
-    // Only the patterns in the table now are remembered for the next time.
-    QHash<QString, QString> patternErrors;
-
-    // Marking a cell changes its item: do not validate again for that.
-    const QSignalBlocker blocker( table_ );
-    for ( int row = 0; row < table_->rowCount(); ++row ) {
-        const auto mark = [ this, row, &problems ]( int column, const QString& problem ) {
-            auto* item = table_->item( row, column );
-            if ( !item ) {
-                return;
-            }
-            if ( item->toolTip() != problem ) {
-                item->setToolTip( problem );
-                item->setBackground( problem.isEmpty() ? QBrush() : QBrush( kProblemColor ) );
-            }
-            if ( !problem.isEmpty() ) {
-                problems.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
-            }
-        };
-
-        // Rules sharing a key are alternatives. A rule without a line pattern
-        // is incomplete and ignored, but one with a pattern needs a key.
-        const auto text = [ this, row ]( int column ) {
-            const auto* item = table_->item( row, column );
-            return item ? item->text() : QString();
-        };
-        const auto* checkbox = static_cast<CenteredCheckbox*>( table_->cellWidget( row, 0 ) );
-        const bool keyMissing = checkbox && checkbox->isChecked() && !text( 2 ).isEmpty()
-                                && text( 1 ).trimmed().isEmpty();
-        mark( 1, keyMissing ? tr( "a rule with a line pattern needs a key" ) : QString() );
-
-        const auto patternProblem
-            = [ this, &text, &patternErrors ]( int column, const QString& what ) {
-                  const auto error = patternError( text( column ), patternErrors );
-                  return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
-              };
-        mark( 2, patternProblem( 2, tr( "invalid line pattern" ) ) );
-        mark( 3, patternProblem( 3, tr( "invalid value pattern" ) ) );
-    }
-
-    patternErrors_ = std::move( patternErrors );
-
-    problemLabel_->setText( problems.join( '\n' ) );
-    problemLabel_->setVisible( !problems.isEmpty() );
-    buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( problems.isEmpty() );
-    buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( problems.isEmpty() );
+    validateRow( row );
+    showProblems();
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────
 
-void FooterEditor::populateTable( const QList<FooterEntry>& entries )
+int FooterEditor::currentRow() const
 {
-    {
-        // Every cell set would validate all rules again: validate once below.
-        const QSignalBlocker blocker( table_ );
-        table_->setRowCount( entries.size() );
-        for ( int i = 0; i < entries.size(); ++i ) {
-            setRow( i, entries[ i ] );
-        }
-    }
-
-    // The current cell may stay where it was while its rule is replaced.
-    showMappingsOfCurrentRule();
-    updateButtons();
-    validate();
+    const auto current = list_->selectionModel()->currentIndex();
+    return current.isValid() ? current.row() : -1;
 }
 
-void FooterEditor::setRow( int row, const FooterEntry& entry )
+void FooterEditor::selectRow( int row )
 {
-    auto* checkbox = new CenteredCheckbox( entry.enabled, table_ );
-    connect( checkbox->checkbox(), &QCheckBox::toggled, this, &FooterEditor::validate );
-    table_->setCellWidget( row, 0, checkbox );
-    table_->setItem( row, 1, new QTableWidgetItem( entry.key ) );
-    table_->setItem( row, 2, new QTableWidgetItem( entry.linePattern ) );
-    table_->setItem( row, 3, new QTableWidgetItem( entry.valuePattern ) );
-
-    // Mappings count label (read-only)
-    auto* mappingsItem = new QTableWidgetItem;
-    mappingsItem->setFlags( mappingsItem->flags() & ~Qt::ItemIsEditable );
-    mappingsItem->setTextAlignment( Qt::AlignCenter );
-    table_->setItem( row, 4, mappingsItem );
-    setMappings( row, entry.mappings );
+    const auto index = model_->index( row, RuleListModel::KeyColumn );
+    list_->selectionModel()->setCurrentIndex( index, QItemSelectionModel::ClearAndSelect
+                                                         | QItemSelectionModel::Rows );
+    list_->scrollTo( index );
 }
 
 void FooterEditor::moveEntry( int from, int to )
 {
-    auto entryList = entries();
-    entryList.move( from, to );
-    populateTable( entryList );
-    table_->setCurrentCell( to, 1 );
+    // The selection moves with the rule, and the panel keeps showing it.
+    model_->moveRule( from, to );
+    list_->scrollTo( model_->index( to, RuleListModel::KeyColumn ) );
 }
 
-QString FooterEditor::patternError( const QString& pattern, QHash<QString, QString>& errors )
+void FooterEditor::validateRow( int row )
 {
-    auto it = errors.constFind( pattern );
-    if ( it == errors.constEnd() ) {
-        auto known = patternErrors_.constFind( pattern );
-        if ( known == patternErrors_.constEnd() ) {
-            ++patternCompilations_;
-            known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
+    ++ruleValidations_;
+    const auto& entry = model_->entry( row );
+
+    // Rules sharing a key are alternatives. A rule without a line pattern
+    // is incomplete and ignored, but one with a pattern needs a key.
+    RuleProblems problems;
+    if ( entry.enabled && !entry.linePattern.isEmpty() && entry.key.trimmed().isEmpty() ) {
+        problems.key = tr( "a rule with a line pattern needs a key" );
+    }
+    const auto patternProblem = [ this ]( const QString& pattern, const QString& what ) {
+        const auto error = patternError( pattern );
+        return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
+    };
+    problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
+    problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
+    model_->setProblems( row, problems );
+
+    QStringList lines;
+    for ( const auto& problem : { problems.key, problems.linePattern, problems.valuePattern } ) {
+        if ( !problem.isEmpty() ) {
+            lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
         }
-        it = errors.insert( pattern, known.value() );
     }
-    return it.value();
+    if ( lines.isEmpty() ) {
+        problemLines_.remove( row );
+    }
+    else {
+        problemLines_.insert( row, lines );
+    }
 }
 
-QList<ValueMapping> FooterEditor::mappingsOf( int row ) const
+void FooterEditor::validateRows( int first, int last )
 {
-    const auto* item = table_->item( row, 4 );
-    return item ? item->data( Qt::UserRole ).value<QList<ValueMapping>>() : QList<ValueMapping>();
+    for ( int row = first; row <= last; ++row ) {
+        validateRow( row );
+    }
+    // Rows after the new ones moved down.
+    listProblems();
 }
 
-void FooterEditor::setMappings( int row, const QList<ValueMapping>& mappings )
+void FooterEditor::listProblems()
 {
-    auto* item = table_->item( row, 4 );
-    if ( item ) {
-        item->setData( Qt::UserRole, QVariant::fromValue( mappings ) );
-        item->setText( QString::number( mappings.size() ) );
+    problemLines_.clear();
+    for ( int row = 0; row < model_->rowCount(); ++row ) {
+        const auto problems = model_->problems( row );
+        if ( problems.isEmpty() ) {
+            continue;
+        }
+        QStringList lines;
+        for ( const auto& problem :
+              { problems.key, problems.linePattern, problems.valuePattern } ) {
+            if ( !problem.isEmpty() ) {
+                lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
+            }
+        }
+        problemLines_.insert( row, lines );
     }
+    showProblems();
+}
+
+void FooterEditor::showProblems()
+{
+    QStringList lines;
+    for ( const auto& ruleLines : std::as_const( problemLines_ ) ) {
+        lines += ruleLines;
+    }
+    const bool valid = problemLines_.isEmpty();
+
+    panel_->setProblems( model_->problems( currentRow() ) );
+    problemLabel_->setText( lines.join( '\n' ) );
+    problemLabel_->setVisible( !valid );
+    buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
+    buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
+}
+
+QString FooterEditor::patternError( const QString& pattern )
+{
+    auto known = patternErrors_.constFind( pattern );
+    if ( known == patternErrors_.constEnd() ) {
+        ++patternCompilations_;
+        known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
+    }
+    return known.value();
 }
 
 } // namespace custom_footer

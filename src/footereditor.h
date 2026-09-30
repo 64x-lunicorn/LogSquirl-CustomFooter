@@ -37,6 +37,7 @@ namespace custom_footer {
 class RuleDetailPanel;
 class RuleListModel;
 class RuleListView;
+class RuleTemplateDialog;
 
 /**
  * Modal dialog for editing footer extraction rules.
@@ -44,7 +45,7 @@ class RuleListView;
  * Layout:
  *   - Left: the rule list (RuleListModel in a RuleListView), one row per rule
  *     with its enabled check box, key and line pattern, and below it the
- *     [+] [-] [↑] [↓] [Import] [Export] buttons. Rules are reordered with
+ *     [+] [From template…] [-] [↑] [↓] [Import] [Export] buttons. Rules are reordered with
  *     ↑/↓, Ctrl+Shift+Up/Down in the list, or by dragging them
  *   - Right: the RuleDetailPanel for the selected rule, with all its fields
  *     and value mappings
@@ -91,6 +92,9 @@ Q_SIGNALS:
 
 private Q_SLOTS:
     void addEntry();
+    /// Open the template dialog; a chosen template is added as a new rule.
+    void addFromTemplate();
+    void addTemplateRule();
     void removeEntry();
     void moveEntryUp();
     void moveEntryDown();
@@ -104,6 +108,8 @@ private Q_SLOTS:
 private:
     int currentRow() const;
     void selectRow( int row );
+    /// Append @p entry as a new rule, select it and focus its key.
+    void appendAndSelect( const FooterEntry& entry );
     void moveEntry( int from, int to );
 
     /// Validate one rule and store its problems in the model.
@@ -133,6 +139,9 @@ private:
     RuleDetailPanel* panel_ = nullptr;
 
     QToolButton* addButton_ = nullptr;
+    QToolButton* templateButton_ = nullptr;
+    /// Made on first use and kept, so each opening starts from reset().
+    RuleTemplateDialog* templateDialog_ = nullptr;
     QToolButton* removeButton_ = nullptr;
     QToolButton* upButton_ = nullptr;
     QToolButton* downButton_ = nullptr;

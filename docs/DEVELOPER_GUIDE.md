@@ -92,6 +92,7 @@ through `guarded()`, which logs the failure instead.
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
 | **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
+| **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values, and the dialog choosing one |
 
 ## Scanning Algorithm
 
@@ -233,6 +234,47 @@ chosen for the selected rule is kept. Tests: `tests/simplerule_test.cpp`,
 
 The editor never changes rules it only shows: a config saved by 0.3.0 is
 saved back byte for byte (`tests/configroundtrip_test.cpp`).
+
+### Rule templates
+
+`ruletemplate.h` is a data table, `ruleTemplates()`: each `RuleTemplate`
+has a name, a one-line description, a key, and either a `SimpleRule` or an
+advanced `linePattern` with the value as group 1. `entry()` builds the
+rule: a simple template goes through `applySimpleRule()`, so its patterns
+are exactly what simple mode generates and it opens in simple mode; an
+advanced one keeps its pattern and opens in advanced mode. A template
+with an empty key asks for it (`asksForKey()`): `%1` in its pattern is the
+`givenKey()` (trimmed, one trailing `=` dropped) escaped with
+`QRegularExpression::escape()`, and without a key `entry()` is empty. Only
+values with a shape or boundaries a simple rule cannot express are
+advanced: Version, IPv4, ISO 8601 timestamps, and `key=value`, whose key
+must not end a longer key (`(?<![\w.-])`, before up to two dashes so
+flags like `--user=` match but `my-user=` does not) and whose value starts
+right after `=`. The patterns guard their edges with lookarounds rather than
+anchors or `\b`, as a value may be anywhere in the line and `_` counts as
+a word character; `\d` and `\w` are ASCII, like everything the scanner
+compiles. Version takes `version` after `_` or as a camel-case `Version`,
+but not after another letter, trading a missed `appversion` for no match
+in `conversion` or `server`, and skips an XML declaration's version
+(`(?<!<\?xml\s)`); its SemVer suffix needs a letter in its first
+identifier, and a number shaped like `\d{4}-\d{2}` is not a version, so
+dates are never taken. The timestamp's seconds, fraction and offset are an
+atomic group followed by `(?!\d|:\d)`, so a truncated field (`10:30:5`,
+`+01:0`) fails instead of backtracking to a shorter match, while a `:`
+after a complete timestamp, as in `10:30:00: started`, is fine. Each template is tested
+with lines it must find and lines it must not, through `FooterScanner`
+(`tests/ruletemplate_test.cpp`). A new template is a row in
+`makeTemplates()` plus such samples.
+
+`RuleTemplateDialog` lists name and description in a `QTreeWidget`, with a
+key field enabled only for a template that asks for one; OK is enabled
+once `entry()` has a key, and a hint says a typed trailing `=` is dropped.
+It gets the keys of enabled rules with a line pattern, the ones the scanner
+uses, in `reset()` and shows a note when the new rule's key is one of
+them: the rule is still added, as an alternative. `FooterEditor::addFromTemplate()` commits the panel's
+pending edit, keeps one dialog, calls `reset()` and `open()` (not `exec()`,
+so tests click through it), and on `accepted` appends `entry()` and selects
+it, like the add button, without touching other rows.
 
 ## Configuration Storage
 

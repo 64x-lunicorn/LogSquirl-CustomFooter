@@ -27,9 +27,12 @@
 #include "footereditor.h"
 #include "rulelistmodel.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QGroupBox>
+#include <QItemSelectionModel>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -169,6 +172,42 @@ FooterEntry entryWithMapping( const QString& key )
 QList<FooterEntry> threeRules()
 {
     return { entryWithMapping( "A" ), entryWithMapping( "B" ), entryWithMapping( "C" ) };
+}
+
+/// Press a key in a widget as the user would; unhandled keys go on to the
+/// dialog, as in the application.
+void press( QWidget* widget, int key )
+{
+    QKeyEvent event( QEvent::KeyPress, key, Qt::NoModifier );
+    QApplication::sendEvent( widget, &event );
+}
+
+/// The editor a view opened for a cell, not yet committed.
+QLineEdit* openCellEditor( QTableWidget* table, int row, int column )
+{
+    table->setCurrentCell( row, column );
+    table->editItem( table->item( row, column ) );
+    auto* editor = table->viewport()->findChild<QLineEdit*>();
+    REQUIRE( editor );
+    return editor;
+}
+
+/// Counts how often a dialog was closed, whichever way.
+struct ClosedCounter {
+    explicit ClosedCounter( QDialog& dialog )
+    {
+        QObject::connect( &dialog, &QDialog::finished, [ this ]( int ) { ++count; } );
+    }
+    int count = 0;
+};
+
+QList<FooterEntry> manyRules( int count )
+{
+    QList<FooterEntry> entries;
+    for ( int i = 0; i < count; ++i ) {
+        entries.append( entryWithMapping( QString( "R%1" ).arg( i ) ) );
+    }
+    return entries;
 }
 
 bool sameEntry( const FooterEntry& a, const FooterEntry& b )
@@ -955,6 +994,372 @@ SCENARIO( "FooterEditor compiles each pattern only once", "[footereditor]" )
             {
                 REQUIRE( editor.patternCompilations() == 400 );
                 REQUIRE( ui.listKey( 100 ) == "New" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps the dialog open for Return and Escape in the panel's fields",
+          "[footereditor]" )
+{
+    GIVEN( "a shown editor with the second rule selected" )
+    {
+        FooterEditor editor( threeRules() );
+        EditorUi ui( editor );
+        editor.show();
+        ui.select( 1 );
+        const ClosedCounter closed( editor );
+
+        WHEN( "pressing Return or Enter in the key and pattern fields" )
+        {
+            ui.key->setText( "B2" );
+            for ( auto* field : { ui.key, ui.linePattern, ui.valuePattern } ) {
+                press( field, Qt::Key_Return );
+                press( field, Qt::Key_Enter );
+            }
+
+            THEN( "the dialog stays open and the edit is kept" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( editor.isVisible() );
+                REQUIRE( editor.entries()[ 1 ].key == "B2" );
+            }
+        }
+
+        WHEN( "pressing Escape in a field after editing it" )
+        {
+            ui.key->setText( "B2" );
+            ui.linePattern->setText( "changed" );
+            press( ui.key, Qt::Key_Escape );
+
+            THEN( "only that field is reverted, and the dialog stays open" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( editor.isVisible() );
+                REQUIRE( ui.key->text() == "B" );
+                REQUIRE( ui.listKey( 1 ) == "B" );
+                const auto entries = editor.entries();
+                REQUIRE( entries[ 1 ].key == "B" );
+                REQUIRE( entries[ 1 ].linePattern == "changed" );
+            }
+        }
+
+        WHEN( "pressing Escape after confirming an edit with Return" )
+        {
+            ui.valuePattern->setText( "first" );
+            press( ui.valuePattern, Qt::Key_Return );
+            ui.valuePattern->setText( "second" );
+            press( ui.valuePattern, Qt::Key_Escape );
+
+            THEN( "the field goes back to the confirmed text" )
+            {
+                REQUIRE( ui.valuePattern->text() == "first" );
+                REQUIRE( editor.entries()[ 1 ].valuePattern == "first" );
+            }
+        }
+
+        WHEN( "pressing Escape in an unchanged field" )
+        {
+            press( ui.linePattern, Qt::Key_Escape );
+
+            THEN( "the dialog stays open and nothing changes" )
+            {
+                REQUIRE( closed.count == 0 );
+                REQUIRE( editor.isVisible() );
+                REQUIRE( sameEntry( editor.entries()[ 1 ], entryWithMapping( "B" ) ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps a mapping still being typed", "[footereditor]" )
+{
+    GIVEN( "a shown editor with a mapping cell of the first rule open for editing" )
+    {
+        FooterEditor editor( threeRules() );
+        EditorUi ui( editor );
+        editor.show();
+        ui.select( 0 );
+        openCellEditor( ui.mappings, 0, 1 )->setText( "typed" );
+
+        WHEN( "moving the rule down" )
+        {
+            ui.moveDown->click();
+
+            THEN( "the typed text is kept with the rule" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries[ 1 ].key == "A" );
+                REQUIRE( entries[ 1 ].mappings[ 0 ].displayValue == "typed" );
+            }
+        }
+
+        WHEN( "adding a rule" )
+        {
+            ui.addRule->click();
+
+            THEN( "the typed text is kept with the rule it was typed for" )
+            {
+                REQUIRE( editor.entries()[ 0 ].mappings[ 0 ].displayValue == "typed" );
+            }
+        }
+
+        WHEN( "removing the rule" )
+        {
+            ui.removeRule->click();
+
+            THEN( "the typed text went with it, not onto the next rule" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 2 );
+                REQUIRE( entries[ 0 ].mappings[ 0 ].displayValue == "B-shown" );
+            }
+        }
+
+        WHEN( "clicking OK" )
+        {
+            editor.findChild<QDialogButtonBox*>()->button( QDialogButtonBox::Ok )->click();
+
+            THEN( "the typed text is saved" )
+            {
+                REQUIRE( editor.result() == QDialog::Accepted );
+                REQUIRE( editor.entries()[ 0 ].mappings[ 0 ].displayValue == "typed" );
+            }
+        }
+
+        WHEN( "clicking Apply" )
+        {
+            QList<FooterEntry> applied;
+            QObject::connect( &editor, &FooterEditor::applied,
+                              [ & ] { applied = editor.entries(); } );
+            editor.findChild<QDialogButtonBox*>()->button( QDialogButtonBox::Apply )->click();
+
+            THEN( "the typed text is applied" )
+            {
+                REQUIRE( applied.size() == 3 );
+                REQUIRE( applied[ 0 ].mappings[ 0 ].displayValue == "typed" );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps long patterns whole", "[footereditor]" )
+{
+    GIVEN( "a rule with a 40 000 character line pattern" )
+    {
+        const QString longPattern = QString( 40000, QLatin1Char( 'a' ) ) + "(\\S+)";
+        FooterEditor editor( { { "Long", longPattern, "", true, {} } } );
+        EditorUi ui( editor );
+        ui.select( 0 );
+
+        THEN( "the panel shows all of it" )
+        {
+            REQUIRE( ui.linePattern->text() == longPattern );
+        }
+
+        WHEN( "another field of the rule is edited" )
+        {
+            ui.key->setText( "Longer" );
+
+            THEN( "the pattern is saved whole" )
+            {
+                REQUIRE( editor.entries()[ 0 ].linePattern == longPattern );
+            }
+        }
+
+        WHEN( "a 40 000 character key is typed" )
+        {
+            const QString longKey( 40000, QLatin1Char( 'k' ) );
+            ui.key->setText( longKey );
+
+            THEN( "it is saved whole" )
+            {
+                REQUIRE( editor.entries()[ 0 ].key == longKey );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor keeps a moved rule in view", "[footereditor]" )
+{
+    GIVEN( "a shown editor with more rules than fit into the list" )
+    {
+        FooterEditor editor( manyRules( 200 ) );
+        EditorUi ui( editor );
+        editor.resize( 800, 520 );
+        editor.show();
+        QApplication::processEvents();
+
+        const auto inView = [ &ui ]( int row ) {
+            const auto rect = ui.list->visualRect( ui.model->index( row, 0 ) );
+            return ui.list->viewport()->rect().contains( rect );
+        };
+
+        WHEN( "the first rule is moved down many times" )
+        {
+            ui.select( 0 );
+            for ( int i = 0; i < 60; ++i ) {
+                ui.moveDown->click();
+            }
+
+            THEN( "it stays visible" )
+            {
+                REQUIRE( ui.listKey( 60 ) == "R0" );
+                REQUIRE( inView( 60 ) );
+            }
+        }
+
+        WHEN( "the last rule is moved up many times" )
+        {
+            ui.select( 199 );
+            for ( int i = 0; i < 60; ++i ) {
+                ui.moveUp->click();
+            }
+
+            THEN( "it stays visible" )
+            {
+                REQUIRE( ui.listKey( 139 ) == "R199" );
+                REQUIRE( inView( 139 ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor validates only the rule being edited", "[footereditor]" )
+{
+    GIVEN( "an editor with 200 rules" )
+    {
+        FooterEditor editor( manyRules( 200 ) );
+        EditorUi ui( editor );
+        REQUIRE( editor.ruleValidations() == 200 );
+
+        WHEN( "typing into one rule, and moving it" )
+        {
+            ui.select( 100 );
+            for ( const auto& prefix : { "N", "Ne", "New" } ) {
+                ui.key->setText( prefix );
+            }
+            ui.moveUp->click();
+            ui.moveDown->click();
+
+            THEN( "only that rule was validated again, once per change" )
+            {
+                REQUIRE( editor.ruleValidations() == 203 );
+            }
+        }
+
+        WHEN( "rules are added, removed and imported" )
+        {
+            ui.addRule->click();
+            ui.removeRule->click();
+            editor.appendEntries( manyRules( 2 ) );
+
+            THEN( "only the new rules are validated" )
+            {
+                REQUIRE( editor.ruleValidations() == 203 );
+            }
+        }
+    }
+
+    GIVEN( "two invalid rules among valid ones" )
+    {
+        FooterEditor editor( { entryWithMapping( "A" ),
+                               { "Bad1", "(", "", true, {} },
+                               entryWithMapping( "B" ),
+                               { "Bad2", "[", "", true, {} } } );
+        EditorUi ui( editor );
+        REQUIRE_FALSE( ui.canAccept() );
+        REQUIRE( ui.problems->text().split( '\n' ).size() == 2 );
+
+        WHEN( "one of them is fixed" )
+        {
+            ui.select( 1 );
+            ui.linePattern->setText( "fixed" );
+
+            THEN( "only the other is listed, and the rules still cannot be saved" )
+            {
+                REQUIRE( ui.problems->text().startsWith( "Rule 4:" ) );
+                REQUIRE( ui.problems->text().split( '\n' ).size() == 1 );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+
+            AND_WHEN( "the other is fixed too" )
+            {
+                ui.select( 3 );
+                ui.linePattern->setText( "fixed" );
+
+                THEN( "the rules can be saved" )
+                {
+                    REQUIRE( ui.problems->isHidden() );
+                    REQUIRE( ui.canAccept() );
+                }
+            }
+        }
+
+        WHEN( "a valid rule above them is removed" )
+        {
+            ui.select( 0 );
+            ui.removeRule->click();
+
+            THEN( "the problems are renumbered" )
+            {
+                REQUIRE( ui.problems->text().startsWith( "Rule 1:" ) );
+                REQUIRE( ui.problems->text().contains( "Rule 3:" ) );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+        }
+
+        WHEN( "an invalid rule is removed" )
+        {
+            ui.select( 1 );
+            ui.removeRule->click();
+            ui.select( 2 );
+            ui.removeRule->click();
+
+            THEN( "the rules can be saved" )
+            {
+                REQUIRE( ui.problems->isHidden() );
+                REQUIRE( ui.canAccept() );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterEditor shows the next rule once when removing one", "[footereditor]" )
+{
+    GIVEN( "three rules and the middle one selected" )
+    {
+        FooterEditor editor( threeRules() );
+        EditorUi ui( editor );
+        ui.select( 1 );
+        QStringList shown;
+        QObject::connect( ui.list->selectionModel(), &QItemSelectionModel::currentRowChanged,
+                          [ & ]( const QModelIndex& current ) {
+                              shown.append( current.isValid() ? ui.model->entry( current.row() ).key
+                                                              : QString() );
+                          } );
+
+        WHEN( "removing it" )
+        {
+            ui.removeRule->click();
+
+            THEN( "only the next rule became current, and it is shown" )
+            {
+                REQUIRE( shown == QStringList{ "C" } );
+                REQUIRE( ui.key->text() == "C" );
+            }
+        }
+
+        WHEN( "removing every rule" )
+        {
+            ui.removeRule->click();
+            ui.removeRule->click();
+            ui.removeRule->click();
+
+            THEN( "each rule became current once, then none" )
+            {
+                REQUIRE( shown == QStringList{ "C", "A", QString() } );
+                REQUIRE_FALSE( ui.panel->isEnabled() );
             }
         }
     }

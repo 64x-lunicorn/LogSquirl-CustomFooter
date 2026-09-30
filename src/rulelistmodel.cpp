@@ -20,7 +20,6 @@
 #include "rulelistmodel.h"
 
 #include <QBrush>
-#include <QColor>
 #include <QFont>
 #include <QPalette>
 #include <QStringList>
@@ -28,9 +27,6 @@
 namespace custom_footer {
 
 namespace {
-
-/// Background of rules that keep the rules from being saved.
-const QColor kProblemColor( 220, 50, 50, 70 );
 
 /// A pattern on one line, for the list: the view elides what does not fit.
 QString oneLine( QString text )
@@ -92,7 +88,6 @@ void RuleListModel::setEntry( int row, const FooterEntry& entry )
     }
     rules_[ row ].entry = entry;
     emitRowChanged( row );
-    Q_EMIT ruleChanged( row );
 }
 
 bool RuleListModel::moveRule( int from, int to )
@@ -159,7 +154,8 @@ QVariant RuleListModel::data( const QModelIndex& index, int role ) const
         }
         return {};
     case Qt::BackgroundRole:
-        return rule.problems.isEmpty() ? QVariant() : QVariant( QBrush( kProblemColor ) );
+        return rule.problems.isEmpty() ? QVariant()
+                                       : QVariant( QBrush( problemBackgroundColor() ) );
     case Qt::ToolTipRole: {
         QStringList lines;
         if ( !keyColumn && !rule.entry.linePattern.isEmpty() ) {

@@ -24,7 +24,9 @@
 #include <QDialog>
 #include <QHash>
 #include <QList>
+#include <QMap>
 #include <QString>
+#include <QStringList>
 
 class QDialogButtonBox;
 class QLabel;
@@ -75,6 +77,13 @@ public:
         return patternCompilations_;
     }
 
+    /// How many times a rule has been validated so far. An edit validates
+    /// only the edited rule; tests check that with this.
+    int ruleValidations() const
+    {
+        return ruleValidations_;
+    }
+
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
     void applied();
@@ -90,25 +99,37 @@ private Q_SLOTS:
     void showCurrentRule();
     void storePanelInCurrentRule();
     void ruleChanged( int row );
-    void validate();
 
 private:
     int currentRow() const;
     void selectRow( int row );
     void moveEntry( int from, int to );
 
-    /// Why a pattern does not compile, remembered from the last validate(),
-    /// so that validating compiles only the patterns edited since.
-    QString patternError( const QString& pattern, QHash<QString, QString>& errors );
+    /// Validate one rule and store its problems in the model.
+    void validateRow( int row );
+    /// Validate the rules in rows @p first to @p last, e.g. new ones.
+    void validateRows( int first, int last );
+    /// List the problems of all rules, with their current row numbers, from
+    /// the problems stored in the model. Validates nothing.
+    void listProblems();
+    /// Show the listed problems below the list, at the panel's fields, and
+    /// allow OK and Apply only without any.
+    void showProblems();
+
+    /// Why a pattern does not compile, remembered for the dialog's lifetime,
+    /// so that validating compiles only patterns not seen before.
+    QString patternError( const QString& pattern );
     QHash<QString, QString> patternErrors_;
+    /// The problem lines of each invalid rule, by row. Updated for the rule
+    /// being edited, and listed again when rows are inserted, removed or
+    /// moved, so an edit costs as much with one rule as with a thousand.
+    QMap<int, QStringList> problemLines_;
     int patternCompilations_ = 0;
+    int ruleValidations_ = 0;
 
     RuleListModel* model_ = nullptr;
     QTableView* list_ = nullptr;
     RuleDetailPanel* panel_ = nullptr;
-    /// Set while the panel's edits are stored, which must not show the rule
-    /// in the panel again.
-    bool storingPanel_ = false;
 
     QToolButton* addButton_ = nullptr;
     QToolButton* removeButton_ = nullptr;

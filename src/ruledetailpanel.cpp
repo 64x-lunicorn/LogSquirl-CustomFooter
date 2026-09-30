@@ -23,6 +23,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QSignalBlocker>
@@ -30,15 +31,30 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <limits>
+
 namespace custom_footer {
 
 namespace {
 
+/// A colour for style sheets.
+QString css( const QColor& color )
+{
+    return QStringLiteral( "rgba(%1, %2, %3, %4)" )
+        .arg( color.red() )
+        .arg( color.green() )
+        .arg( color.blue() )
+        .arg( color.alpha() );
+}
+
 /// How a field whose content keeps the rules from being saved looks. With a
 /// border, native styles draw the background too.
-const QString kProblemStyle
-    = QStringLiteral( "QLineEdit { border: 1px solid rgb(220, 50, 50); border-radius: 3px;"
-                      " background-color: rgba(220, 50, 50, 70); padding: 1px; }" );
+QString problemFieldStyle()
+{
+    return QStringLiteral( "QLineEdit { border: 1px solid %1; border-radius: 3px;"
+                           " background-color: %2; padding: 1px; }" )
+        .arg( css( problemColor() ), css( problemBackgroundColor() ) );
+}
 
 void markField( QLineEdit* field, QLabel* label, const QString& problem )
 {
@@ -46,7 +62,7 @@ void markField( QLineEdit* field, QLabel* label, const QString& problem )
         return;
     }
     field->setToolTip( problem );
-    field->setStyleSheet( problem.isEmpty() ? QString() : kProblemStyle );
+    field->setStyleSheet( problem.isEmpty() ? QString() : problemFieldStyle() );
     label->setText( problem );
     label->setVisible( !problem.isEmpty() );
 }
@@ -139,6 +155,9 @@ void RuleDetailPanel::showEntry( const FooterEntry& entry )
         valuePatternEdit_->setText( entry.valuePattern );
         setMappings( entry.mappings );
     }
+    for ( auto* field : { keyEdit_, linePatternEdit_, valuePatternEdit_ } ) {
+        revertText_[ field ] = field->text();
+    }
     setEnabled( true );
     updateMappingButtons();
 }
@@ -176,6 +195,46 @@ void RuleDetailPanel::setProblems( const RuleProblems& problems )
 void RuleDetailPanel::focusKey()
 {
     keyEdit_->setFocus();
+}
+
+void RuleDetailPanel::commitPendingEdit()
+{
+    // The table has no persistent editors: an editor is an edit in progress.
+    const auto current = mappingTable_->currentIndex();
+    auto* editor = current.isValid() ? mappingTable_->indexWidget( current ) : nullptr;
+    if ( editor ) {
+        auto* delegate = mappingTable_->itemDelegateForIndex( current );
+        Q_EMIT delegate->commitData( editor );
+        Q_EMIT delegate->closeEditor( editor, QAbstractItemDelegate::NoHint );
+    }
+}
+
+bool RuleDetailPanel::eventFilter( QObject* watched, QEvent* event )
+{
+    auto* field = qobject_cast<QLineEdit*>( watched );
+    if ( !field || !revertText_.contains( field ) ) {
+        return QGroupBox::eventFilter( watched, event );
+    }
+
+    if ( event->type() == QEvent::FocusIn ) {
+        revertText_[ field ] = field->text();
+    }
+    else if ( event->type() == QEvent::KeyPress ) {
+        switch ( static_cast<QKeyEvent*>( event )->key() ) {
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            revertText_[ field ] = field->text();
+            return true;
+        case Qt::Key_Escape:
+            if ( field->text() != revertText_.value( field ) ) {
+                field->setText( revertText_.value( field ) );
+            }
+            return true;
+        default:
+            break;
+        }
+    }
+    return QGroupBox::eventFilter( watched, event );
 }
 
 void RuleDetailPanel::addMapping()
@@ -217,10 +276,14 @@ QLineEdit* RuleDetailPanel::addField( QFormLayout* form, const QString& label,
 {
     auto* field = new QLineEdit( this );
     field->setObjectName( objectName );
+    // Not the default 32767 characters, which would cut long patterns.
+    field->setMaxLength( std::numeric_limits<int>::max() );
+    field->installEventFilter( this );
+    revertText_.insert( field, QString() );
 
     auto* problem = new QLabel( this );
     problem->setObjectName( objectName.chopped( 4 ) + "Problem" ); // keyEdit → keyProblem
-    problem->setStyleSheet( QStringLiteral( "color: rgb(220, 50, 50);" ) );
+    problem->setStyleSheet( QStringLiteral( "color: %1;" ).arg( css( problemColor() ) ) );
     problem->setWordWrap( true );
     problem->setTextInteractionFlags( Qt::TextSelectableByMouse );
     problem->hide();

@@ -23,6 +23,7 @@
 #include "rulelistmodel.h"
 
 #include <QGroupBox>
+#include <QHash>
 
 class QCheckBox;
 class QFormLayout;
@@ -65,6 +66,16 @@ public:
     /// Put the focus into the key field, e.g. for a new rule.
     void focusKey();
 
+    /// Store a mapping cell still being edited, as if its editor had lost
+    /// the focus. Buttons without focus, such as tool buttons, and OK on
+    /// macOS, do not end the edit themselves.
+    void commitPendingEdit();
+
+protected:
+    /// Return and Enter in a field only confirm it, and Escape reverts it,
+    /// instead of accepting or rejecting the whole dialog.
+    bool eventFilter( QObject* watched, QEvent* event ) override;
+
 Q_SIGNALS:
     /// The user changed the rule in the panel.
     void edited();
@@ -88,6 +99,9 @@ private:
     QLabel* keyProblem_ = nullptr;
     QLabel* linePatternProblem_ = nullptr;
     QLabel* valuePatternProblem_ = nullptr;
+    /// What Escape reverts each field to: its text when the rule was shown,
+    /// the field got the focus, or Return was pressed in it.
+    QHash<QLineEdit*, QString> revertText_;
 
     QTableWidget* mappingTable_ = nullptr;
     QToolButton* addMappingButton_ = nullptr;

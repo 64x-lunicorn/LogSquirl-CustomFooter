@@ -148,18 +148,26 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     // Validation marks and row numbers follow every change of the rules.
     // Moved rules keep their marks; validating again only renumbers them.
     connect( model_, &RuleListModel::ruleChanged, this, &FooterEditor::ruleChanged );
-    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::validate );
-    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::validate );
-    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::validate );
-    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::validate );
+    connect( model_, &RuleListModel::rowsInserted, this,
+             [ this ]( const QModelIndex&, int first, int last ) { validateRows( first, last ); } );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::listProblems );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::listProblems );
+    connect( model_, &RuleListModel::modelReset, this,
+             [ this ] { validateRows( 0, model_->rowCount() - 1 ); } );
     connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::updateButtons );
 
-    connect( buttonBox_, &QDialogButtonBox::accepted, this, &QDialog::accept );
+    // A mapping still being typed belongs to the rules that are saved.
+    connect( buttonBox_, &QDialogButtonBox::accepted, this, [ this ] {
+        panel_->commitPendingEdit();
+        accept();
+    } );
     connect( buttonBox_, &QDialogButtonBox::rejected, this, &QDialog::reject );
-    connect( buttonBox_->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this,
-             &FooterEditor::applied );
+    connect( buttonBox_->button( QDialogButtonBox::Apply ), &QPushButton::clicked, this, [ this ] {
+        panel_->commitPendingEdit();
+        Q_EMIT applied();
+    } );
 
     // ── Populate ─────────────────────────────────────────────────────────
     model_->setEntries( entries );
@@ -188,6 +196,7 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
 
 void FooterEditor::addEntry()
 {
+    panel_->commitPendingEdit();
     const int row = model_->rowCount();
     model_->appendEntries( { FooterEntry() } );
     selectRow( row );
@@ -196,22 +205,28 @@ void FooterEditor::addEntry()
 
 void FooterEditor::removeEntry()
 {
+    panel_->commitPendingEdit();
     const int row = currentRow();
     if ( row < 0 ) {
         return;
     }
-    model_->removeRows( row, 1 );
 
-    // Select the next rule, or the one above the last, explicitly rather
-    // than whichever the selection model made current.
-    if ( model_->rowCount() > 0 ) {
-        selectRow( std::min( row, model_->rowCount() - 1 ) );
+    // Select the next rule, or the one above the last, before removing the
+    // rule, so that the panel shows the right rule once rather than
+    // whichever the selection model makes current.
+    const int count = model_->rowCount();
+    if ( count > 1 ) {
+        selectRow( row + 1 < count ? row + 1 : row - 1 );
     }
-    showCurrentRule();
+    else {
+        list_->selectionModel()->clear();
+    }
+    model_->removeRows( row, 1 );
 }
 
 void FooterEditor::moveEntryUp()
 {
+    panel_->commitPendingEdit();
     const int row = currentRow();
     if ( row > 0 ) {
         moveEntry( row, row - 1 );
@@ -220,6 +235,7 @@ void FooterEditor::moveEntryUp()
 
 void FooterEditor::moveEntryDown()
 {
+    panel_->commitPendingEdit();
     const int row = currentRow();
     if ( row >= 0 && row < model_->rowCount() - 1 ) {
         moveEntry( row, row + 1 );
@@ -237,6 +253,7 @@ void FooterEditor::updateButtons()
 
 void FooterEditor::importRules()
 {
+    panel_->commitPendingEdit();
     const auto filePath = QFileDialog::getOpenFileName(
         this, tr( "Import Rules" ), QString(), tr( "JSON Files (*.json);;All Files (*)" ) );
     if ( filePath.isEmpty() ) {
@@ -255,6 +272,7 @@ void FooterEditor::importRules()
 
 void FooterEditor::exportRules()
 {
+    panel_->commitPendingEdit();
     const auto filePath = QFileDialog::getSaveFileName(
         this, tr( "Export Rules" ), QStringLiteral( "footer_rules.json" ),
         tr( "JSON Files (*.json);;All Files (*)" ) );
@@ -287,59 +305,19 @@ void FooterEditor::storePanelInCurrentRule()
     if ( row < 0 ) {
         return;
     }
-    storingPanel_ = true;
     model_->setEntry( row, panel_->entry() );
-    storingPanel_ = false;
+    validateRow( row );
+    showProblems();
 }
 
 void FooterEditor::ruleChanged( int row )
 {
-    // Changed elsewhere than in the panel, e.g. enabled in the list.
-    if ( !storingPanel_ && row == currentRow() ) {
+    // Enabled or disabled in the list.
+    if ( row == currentRow() ) {
         panel_->showEntry( model_->entry( row ) );
     }
-    validate();
-}
-
-void FooterEditor::validate()
-{
-    QStringList problems;
-    // Only the patterns of the rules now are remembered for the next time.
-    QHash<QString, QString> patternErrors;
-
-    const auto patternProblem
-        = [ this, &patternErrors ]( const QString& pattern, const QString& what ) {
-              const auto error = patternError( pattern, patternErrors );
-              return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
-          };
-
-    for ( int row = 0; row < model_->rowCount(); ++row ) {
-        const auto& entry = model_->entry( row );
-
-        // Rules sharing a key are alternatives. A rule without a line pattern
-        // is incomplete and ignored, but one with a pattern needs a key.
-        RuleProblems rule;
-        if ( entry.enabled && !entry.linePattern.isEmpty() && entry.key.trimmed().isEmpty() ) {
-            rule.key = tr( "a rule with a line pattern needs a key" );
-        }
-        rule.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
-        rule.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
-        model_->setProblems( row, rule );
-
-        for ( const auto& problem : { rule.key, rule.linePattern, rule.valuePattern } ) {
-            if ( !problem.isEmpty() ) {
-                problems.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
-            }
-        }
-    }
-
-    patternErrors_ = std::move( patternErrors );
-
-    panel_->setProblems( model_->problems( currentRow() ) );
-    problemLabel_->setText( problems.join( '\n' ) );
-    problemLabel_->setVisible( !problems.isEmpty() );
-    buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( problems.isEmpty() );
-    buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( problems.isEmpty() );
+    validateRow( row );
+    showProblems();
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────
@@ -362,20 +340,94 @@ void FooterEditor::moveEntry( int from, int to )
 {
     // The selection moves with the rule, and the panel keeps showing it.
     model_->moveRule( from, to );
+    list_->scrollTo( model_->index( to, RuleListModel::KeyColumn ) );
 }
 
-QString FooterEditor::patternError( const QString& pattern, QHash<QString, QString>& errors )
+void FooterEditor::validateRow( int row )
 {
-    auto it = errors.constFind( pattern );
-    if ( it == errors.constEnd() ) {
-        auto known = patternErrors_.constFind( pattern );
-        if ( known == patternErrors_.constEnd() ) {
-            ++patternCompilations_;
-            known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
-        }
-        it = errors.insert( pattern, known.value() );
+    ++ruleValidations_;
+    const auto& entry = model_->entry( row );
+
+    // Rules sharing a key are alternatives. A rule without a line pattern
+    // is incomplete and ignored, but one with a pattern needs a key.
+    RuleProblems problems;
+    if ( entry.enabled && !entry.linePattern.isEmpty() && entry.key.trimmed().isEmpty() ) {
+        problems.key = tr( "a rule with a line pattern needs a key" );
     }
-    return it.value();
+    const auto patternProblem = [ this ]( const QString& pattern, const QString& what ) {
+        const auto error = patternError( pattern );
+        return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
+    };
+    problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
+    problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
+    model_->setProblems( row, problems );
+
+    QStringList lines;
+    for ( const auto& problem : { problems.key, problems.linePattern, problems.valuePattern } ) {
+        if ( !problem.isEmpty() ) {
+            lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
+        }
+    }
+    if ( lines.isEmpty() ) {
+        problemLines_.remove( row );
+    }
+    else {
+        problemLines_.insert( row, lines );
+    }
+}
+
+void FooterEditor::validateRows( int first, int last )
+{
+    for ( int row = first; row <= last; ++row ) {
+        validateRow( row );
+    }
+    // Rows after the new ones moved down.
+    listProblems();
+}
+
+void FooterEditor::listProblems()
+{
+    problemLines_.clear();
+    for ( int row = 0; row < model_->rowCount(); ++row ) {
+        const auto problems = model_->problems( row );
+        if ( problems.isEmpty() ) {
+            continue;
+        }
+        QStringList lines;
+        for ( const auto& problem :
+              { problems.key, problems.linePattern, problems.valuePattern } ) {
+            if ( !problem.isEmpty() ) {
+                lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
+            }
+        }
+        problemLines_.insert( row, lines );
+    }
+    showProblems();
+}
+
+void FooterEditor::showProblems()
+{
+    QStringList lines;
+    for ( const auto& ruleLines : std::as_const( problemLines_ ) ) {
+        lines += ruleLines;
+    }
+    const bool valid = problemLines_.isEmpty();
+
+    panel_->setProblems( model_->problems( currentRow() ) );
+    problemLabel_->setText( lines.join( '\n' ) );
+    problemLabel_->setVisible( !valid );
+    buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
+    buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
+}
+
+QString FooterEditor::patternError( const QString& pattern )
+{
+    auto known = patternErrors_.constFind( pattern );
+    if ( known == patternErrors_.constEnd() ) {
+        ++patternCompilations_;
+        known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
+    }
+    return known.value();
 }
 
 } // namespace custom_footer

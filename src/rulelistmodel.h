@@ -22,10 +22,26 @@
 #include "footerentry.h"
 
 #include <QAbstractTableModel>
+#include <QColor>
 #include <QList>
 #include <QString>
 
 namespace custom_footer {
+
+/// The colour marking what keeps the rules from being saved, in the rule
+/// list and at the fields of the detail panel.
+inline QColor problemColor()
+{
+    return QColor( 220, 50, 50 );
+}
+
+/// The same colour as a background that text stays readable on.
+inline QColor problemBackgroundColor()
+{
+    auto color = problemColor();
+    color.setAlpha( 70 );
+    return color;
+}
 
 /// Why a rule keeps the rules from being saved, per field. Empty when the
 /// field is fine.
@@ -99,8 +115,8 @@ public:
                    const QModelIndex& destinationParent, int destinationChild ) override;
 
 Q_SIGNALS:
-    /// The rule in @p row was changed, e.g. enabled or disabled in the list.
-    /// Not emitted for inserted, removed or moved rows, nor for problems.
+    /// The rule in @p row was enabled or disabled in the list. Not emitted
+    /// for setEntry(), whose caller knows what it changed.
     void ruleChanged( int row );
 
 private:

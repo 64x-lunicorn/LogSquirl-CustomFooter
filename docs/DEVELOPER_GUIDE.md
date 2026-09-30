@@ -85,7 +85,9 @@ through `guarded()`, which logs the failure instead.
 | **FooterController** | `footercontroller.h/.cpp` | Cached rules, background scans, file watching |
 | **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |
 | **FooterConfig** | `footerconfig.h/.cpp` | INI persistence + JSON import/export |
-| **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog with inline mapping panel |
+| **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog: rule list, detail panel, validation |
+| **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
+| **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget showing key-value pairs |
 
 ## Scanning Algorithm
@@ -118,6 +120,34 @@ through `guarded()`, which logs the failure instead.
    or scanned end differs, or with another birth time, is scanned from its
    start. A last line without a line break is matched but not remembered,
    as it may still be being written.
+
+## Rule Editor
+
+`FooterEditor` shows the rules in a list on the left and the selected rule
+in a detail panel on the right.
+
+- **`RuleListModel`** holds the rules. Each row is a whole `FooterEntry`,
+  mappings included, plus its `RuleProblems`, so a rule's data and
+  validation marks stay together whichever way rows are inserted, removed
+  or moved (`moveRows()`, which drag & drop can build on). The list shows
+  the enabled state as the check box of the key column, the key, and the
+  line pattern elided to one line; everything else is edited in the panel.
+- **`RuleDetailPanel`** edits a copy of the selected rule and emits
+  `edited()` on every change; the editor stores `entry()` into the selected
+  row, which updates the list at once. `showEntry()` never emits `edited()`,
+  so showing a rule cannot change it. The panel is a column of sections
+  (fields, mappings), so a live preview or a simple mode for the patterns
+  can be added as further sections.
+- **Validation** runs after every change, over all rules: an invalid
+  pattern, or an enabled rule with a line pattern but no key, becomes a
+  problem of that field. Problems are marked at the field with the reason,
+  on the rule's row in the list, and below the list with the rule number;
+  OK and Apply stay disabled while there are any. Each pattern is compiled
+  once and its error cached (`FooterEditor::patternCompilations()`), so
+  editing, selecting or moving rules compiles only patterns that changed.
+
+The editor never changes rules it only shows: a config saved by 0.3.0 is
+saved back byte for byte (`tests/configroundtrip_test.cpp`).
 
 ## Configuration Storage
 

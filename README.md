@@ -42,7 +42,7 @@ in the footer.
 | :--- | :--- |
 | **Regex extraction.** A rule matches a line and captures the value you want from it. | **Always on screen.** Results sit in a compact bar along the bottom of the main window. |
 | **Two-stage matching.** An optional second regex runs against the matched line, for when the value needs a finer cut than the line pattern gives. | **Readable values.** Map raw captures to display text, so `0x04` can read as `Production`. |
-| **Rules you can share.** Import and export rule sets as JSON, per project or per team. | **Edited in place.** Rules are managed in a dialog, with an inline editor for the value mappings. |
+| **Rules you can share.** Import and export rule sets as JSON, per project or per team. | **Edited in one place.** Rules are managed in a dialog: a list of all rules, and a panel with the patterns and value mappings of the selected one. |
 
 ## Install
 
@@ -78,6 +78,12 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
 
 ## Configuration
 
+Rules are edited in *Plugins → Custom Footer…*. The dialog lists the rules on
+the left, each with its enabled check box, key and line pattern, with buttons
+to add, remove, reorder, import and export them. The panel on the right shows
+the selected rule: its key, line pattern, value pattern and value mappings.
+Changes show up in the list as you type.
+
 Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
 
 ### How rules are applied
@@ -88,8 +94,8 @@ Rules are persisted in `custom_footer.ini` inside the plugin's config directory.
   file provides the value, and if several match the same line, the one
   higher in the list wins. The key is shown once, where its first rule is.
 - A rule without a line pattern is ignored. The editor marks invalid
-  patterns, and enabled rules with a line pattern but no key, and won't save
-  until they are fixed.
+  patterns, and enabled rules with a line pattern but no key, at the field
+  with the reason and in the rule list, and won't save until they are fixed.
 - The file is scanned in the background whenever it becomes the active file
   and when rules are applied. A rule with an invalid pattern is skipped and
   reported in the LogSquirl log.

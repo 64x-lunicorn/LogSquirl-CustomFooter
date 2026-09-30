@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Rule editor** — the rules are now shown as a list, each with its
+  enabled check box, key and line pattern, and the selected rule in a
+  panel next to it with its key, line pattern, value pattern and value
+  mappings in one form, replacing the five-column table and the separate
+  mapping panel. Edits in the panel show up in the list as you type.
+  Invalid patterns and a line pattern without a key are marked at their
+  field with the reason, and on the rule's row in the list. Adding,
+  removing, reordering, importing and exporting rules, and the saved
+  config, are unchanged.
+
 ## [0.3.0] — 2026-09-30
 
 ### Changed

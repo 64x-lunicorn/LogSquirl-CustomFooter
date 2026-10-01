@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-01
+
 ### Added
 - **Copy a value with a click** — clicking a value in the footer copies
   exactly that value, without its key, to the clipboard, and a short
@@ -60,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while it is open.
 
 ### Changed
+- **Requires LogSquirl 26.10.0 or later**, like 0.3.0: this release is built with
+  the Qt of LogSquirl 26.10.0 (Qt 6.11.3).
 - **Rule editor** — the rules are now shown as a list, each with its
   enabled check box, key and line pattern, and the selected rule in a
   panel next to it with its key, line pattern, value pattern and value

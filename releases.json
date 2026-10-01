@@ -2,6 +2,28 @@
   "plugin_id": "io.github.logsquirl.customfooter",
   "releases": [
     {
+      "version": "0.4.0",
+      "api_version": 1,
+      "release_notes": "Custom Footer v0.4.0",
+      "assets": [
+        {
+          "platform": "macos",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-CustomFooter/releases/download/v0.4.0/logsquirl-custom-footer-0.4.0-macos-arm64.zip",
+          "sha256": "0281f71d98f784003a7909776cca356524f1447cd321f6cddf621bc6d23a0647"
+        },
+        {
+          "platform": "linux",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-CustomFooter/releases/download/v0.4.0/logsquirl-custom-footer-0.4.0-linux-x64.zip",
+          "sha256": "cffff3d6692b72725fca1fa4198cb73c115bab0d1ded94dec5c2e15595c36396"
+        },
+        {
+          "platform": "windows",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-CustomFooter/releases/download/v0.4.0/logsquirl-custom-footer-0.4.0-windows-x64.zip",
+          "sha256": "e7326c421d8618cddbaf93caa5dad7e4fe2ce190029b48d92d6ba8d484a895d6"
+        }
+      ]
+    },
+    {
       "version": "0.3.0",
       "api_version": 1,
       "release_notes": "Custom Footer v0.3.0",

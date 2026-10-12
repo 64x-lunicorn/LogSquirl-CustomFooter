@@ -75,11 +75,12 @@ class RuleTemplateDialog;
  * function the plugin passes in with setRegexLab(). One Lab is open for
  * the editor at a time, and Test… is disabled meanwhile. Apply in the Lab
  * writes the pattern into the rule it was opened for, as if typed there,
- * also when another rule is selected or the rule has moved; Cancel, a
- * rule removed meanwhile, or a closed editor drop the answer. A rule has
- * no match-case flag: the Lab gets "Match case" on, or off for a pattern
- * that starts with (?i), which the Lab gets without it; an applied pattern
- * gets (?i) in front when "Match case" came back off.
+ * also when another rule is selected or the rule has moved; Cancel, an
+ * Apply of the pattern as it was opened, a rule removed meanwhile, or a
+ * closed editor drop the answer. A rule has no match-case flag: the Lab
+ * gets "Match case" on, or off for a pattern that starts with (?i) (after
+ * any start-of-pattern items such as (*CRLF)), which the Lab gets without
+ * it; an applied pattern gets (?i) there when "Match case" came back off.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -144,9 +145,14 @@ private:
     void showError( const QString& title, const QString& text, const QString& objectName );
 
     /// The Regex Lab's answer for the pattern in @p field of @p rule, the
-    /// rule it was opened for, wherever it is now.
+    /// rule it was opened for, wherever it is now; @p opened is what the Lab
+    /// was opened with.
     void regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                           const RegexLabPattern& opened,
                            const std::optional<RegexLabPattern>& applied );
+    /// Note whether a Regex Lab opened by Test… awaits its answer, and offer
+    /// Test… accordingly.
+    void setRegexLabOpen( bool open );
     /// Offer Test… only when the Regex Lab can be opened.
     void updatePatternTest();
 

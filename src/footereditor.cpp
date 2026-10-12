@@ -47,25 +47,57 @@ namespace {
 /// a rule says so.
 const QString ignoreCase = QStringLiteral( "(?i)" );
 
-/// A rule's pattern as the Regex Lab tests it: (?i) in front becomes its
-/// Match case flag.
+/// How long the pattern's leading start-of-pattern items are, such as
+/// (*CRLF) or (*UTF): PCRE takes them only before everything else, (?i)
+/// included.
+qsizetype startItemsLength( const QString& pattern )
+{
+    qsizetype length = 0;
+    while ( pattern.mid( length ).startsWith( QStringLiteral( "(*" ) ) ) {
+        const auto end = pattern.indexOf( QLatin1Char( ')' ), length );
+        if ( end < 0 ) {
+            break;
+        }
+        length = end + 1;
+    }
+    return length;
+}
+
+/// A rule's pattern as the Regex Lab tests it: (?i) at its start, after
+/// any start-of-pattern items, becomes the Lab's Match case flag, as long
+/// as more of the pattern follows it.
 RegexLabPattern toRegexLab( const QString& pattern )
 {
-    if ( pattern.startsWith( ignoreCase ) ) {
-        return { pattern.mid( ignoreCase.size() ), false };
+    const auto start = startItemsLength( pattern );
+    const auto rest = pattern.mid( start );
+    if ( rest.startsWith( ignoreCase ) && rest.size() > ignoreCase.size() ) {
+        return { pattern.left( start ) + rest.mid( ignoreCase.size() ), false };
     }
     return { pattern, true };
 }
 
-/// An applied pattern as a rule's pattern: without Match case, (?i) in
-/// front, unless it is there already or there is no pattern.
+/// An applied pattern as a rule's pattern: without Match case, (?i) at its
+/// start, after any start-of-pattern items, unless it is there already or
+/// nothing would follow it.
 QString fromRegexLab( const RegexLabPattern& applied )
 {
-    if ( applied.matchesCase || applied.pattern.isEmpty()
-         || applied.pattern.startsWith( ignoreCase ) ) {
+    const auto start = startItemsLength( applied.pattern );
+    const auto rest = applied.pattern.mid( start );
+    if ( applied.matchesCase || rest.isEmpty() || rest.startsWith( ignoreCase ) ) {
         return applied.pattern;
     }
-    return ignoreCase + applied.pattern;
+    return applied.pattern.left( start ) + ignoreCase + rest;
+}
+
+/// The pattern of @p entry in @p field.
+QString& patternOf( FooterEntry& entry, PatternField field )
+{
+    return field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+}
+
+const QString& patternOf( const FooterEntry& entry, PatternField field )
+{
+    return field == PatternField::Line ? entry.linePattern : entry.valuePattern;
 }
 
 } // namespace
@@ -491,35 +523,34 @@ void FooterEditor::testPattern( PatternField field )
     if ( row < 0 || !openRegexLab_ || regexLabOpen_ || closing_ ) {
         return;
     }
-    const auto& entry = model_->entry( row );
-    const auto pattern
-        = toRegexLab( field == PatternField::Line ? entry.linePattern : entry.valuePattern );
+    const auto pattern = toRegexLab( patternOf( model_->entry( row ), field ) );
     // Follows the rule when rules move, and is invalid once it is removed.
     const QPersistentModelIndex rule( model_->index( row, RuleListModel::KeyColumn ) );
 
-    regexLabOpen_ = true;
-    updatePatternTest();
+    setRegexLabOpen( true );
     // The host never answers once this editor is destroyed.
     const bool opened = openRegexLab_(
-        pattern, this, [ this, rule, field ]( const std::optional<RegexLabPattern>& applied ) {
-            regexLabAnswered( rule, field, applied );
+        pattern, this,
+        [ this, rule, field, pattern ]( const std::optional<RegexLabPattern>& applied ) {
+            regexLabAnswered( rule, field, pattern, applied );
         } );
     if ( !opened ) {
-        regexLabOpen_ = false;
-        updatePatternTest();
+        setRegexLabOpen( false );
     }
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────
 
 void FooterEditor::regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                                     const RegexLabPattern& opened,
                                      const std::optional<RegexLabPattern>& applied )
 {
-    regexLabOpen_ = false;
-    updatePatternTest();
+    setRegexLabOpen( false );
     // Cancelled, the editor closed (its rules are saved or dropped already),
-    // or the rule removed: nothing to write the pattern into.
-    if ( !applied || closing_ || !rule.isValid() ) {
+    // or the rule removed: nothing to write the pattern into. Applied as it
+    // was opened: nothing to change, not even edits made meanwhile.
+    if ( !applied || closing_ || !rule.isValid()
+         || ( applied->pattern == opened.pattern && applied->matchesCase == opened.matchesCase ) ) {
         return;
     }
     const auto pattern = fromRegexLab( *applied );
@@ -530,7 +561,7 @@ void FooterEditor::regexLabAnswered( const QPersistentModelIndex& rule, PatternF
         return;
     }
     auto entry = model_->entry( row );
-    auto& target = field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+    auto& target = patternOf( entry, field );
     if ( target == pattern ) {
         return;
     }
@@ -540,6 +571,12 @@ void FooterEditor::regexLabAnswered( const QPersistentModelIndex& rule, PatternF
     showProblems();
     // Another rule of the key may supply its value now.
     schedulePreview();
+}
+
+void FooterEditor::setRegexLabOpen( bool open )
+{
+    regexLabOpen_ = open;
+    updatePatternTest();
 }
 
 void FooterEditor::updatePatternTest()

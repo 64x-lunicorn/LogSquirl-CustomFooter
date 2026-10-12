@@ -384,6 +384,57 @@ SCENARIO( "FooterEditor maps a rule's (?i) to the Regex Lab's Match case",
             }
         }
     }
+
+    GIVEN( "a rule starting with PCRE start-of-pattern items, tested in the Lab" )
+    {
+        FooterEditor editor( { advancedRule( "VIN", "(*CRLF)(*UTF)VIN=(\\w+)" ) } );
+        editor.setRegexLab( lab.function() );
+        Ui ui( editor );
+        ui.testLine->click();
+        REQUIRE( lab.pattern.pattern == "(*CRLF)(*UTF)VIN=(\\w+)" );
+        REQUIRE( lab.pattern.matchesCase );
+
+        WHEN( "it is applied with Match case turned off" )
+        {
+            REQUIRE( lab.apply( "(*CRLF)(*UTF)VIN=(\\w+)", false ) );
+
+            THEN( "(?i) goes after those items, which must come first, and the pattern is valid" )
+            {
+                REQUIRE( editor.entries().at( 0 ).linePattern == "(*CRLF)(*UTF)(?i)VIN=(\\w+)" );
+                REQUIRE( ui.linePatternProblem->isHidden() );
+            }
+
+            AND_WHEN( "it is tested again" )
+            {
+                ui.testLine->click();
+
+                THEN( "the Lab gets it without (?i), and Match case off" )
+                {
+                    REQUIRE( lab.pattern.pattern == "(*CRLF)(*UTF)VIN=(\\w+)" );
+                    REQUIRE_FALSE( lab.pattern.matchesCase );
+                }
+            }
+        }
+    }
+
+    GIVEN( "a rule whose pattern is just (?i)" )
+    {
+        FooterEditor editor( { advancedRule( "VIN", "(?i)" ) } );
+        editor.setRegexLab( lab.function() );
+        Ui ui( editor );
+
+        WHEN( "it is tested and applied unchanged" )
+        {
+            ui.testLine->click();
+            REQUIRE( lab.pattern.pattern == "(?i)" );
+            REQUIRE( lab.apply( lab.pattern.pattern, lab.pattern.matchesCase ) );
+
+            THEN( "it is kept as it is, not emptied" )
+            {
+                REQUIRE( editor.entries().at( 0 ).linePattern == "(?i)" );
+            }
+        }
+    }
 }
 
 SCENARIO( "FooterEditor tests a simple rule's generated pattern", "[footereditor][regexlab]" )
@@ -411,6 +462,19 @@ SCENARIO( "FooterEditor tests a simple rule's generated pattern", "[footereditor
         {
             REQUIRE_FALSE( ui.advanced->isChecked() );
             REQUIRE( ui.linePattern->isReadOnly() );
+        }
+    }
+
+    WHEN( "the simple fields are edited while the Lab is open, and it is applied unchanged" )
+    {
+        ui.testLine->click();
+        child<QLineEdit>( editor, "textBeforeEdit" )->setText( "Serial:" );
+        REQUIRE( lab.apply( "VIN:\\s*(\\S+)" ) );
+
+        THEN( "nothing changes: the rule stays simple, with the edited text" )
+        {
+            REQUIRE_FALSE( ui.advanced->isChecked() );
+            REQUIRE( editor.entries().at( 0 ).linePattern == "Serial:\\s*(\\S+)" );
         }
     }
 
@@ -591,6 +655,30 @@ SCENARIO( "FooterEditor writes the Regex Lab's answer into the rule it was opene
             {
                 REQUIRE( patterns()
                          == QStringList{ "VIN=(\\w+)", "Build=(\\w+)", "Mode: (\\w+)" } );
+            }
+        }
+
+        WHEN( "the rule above it is removed before the pattern is applied" )
+        {
+            ui.select( 0 );
+            ui.removeRule->click();
+            REQUIRE( patterns() == QStringList{ "Mode=(\\w+)", "Build=(\\w+)" } );
+            REQUIRE( lab.apply( "Mode: (\\w+)" ) );
+
+            THEN( "the rule it was opened for gets it, in its new place" )
+            {
+                REQUIRE( patterns() == QStringList{ "Mode: (\\w+)", "Build=(\\w+)" } );
+            }
+        }
+
+        WHEN( "the pattern field is edited and the pattern applied unchanged" )
+        {
+            ui.linePattern->setText( "Mode := (\\w+)" );
+            REQUIRE( lab.apply( "Mode=(\\w+)" ) );
+
+            THEN( "nothing changes: the edit is kept" )
+            {
+                REQUIRE( patterns()[ 1 ] == "Mode := (\\w+)" );
             }
         }
 

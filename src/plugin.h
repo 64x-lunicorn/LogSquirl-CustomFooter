@@ -21,35 +21,16 @@
 
 #include "logsquirl_plugin_api.h"
 
-#include "footerdisplaywidget.h"
-#include "footereditor.h"
+/*
+ * The plugin's C entry points, which the host looks up by name. They only
+ * translate between the host API and a FooterSession; the plugin keeps no
+ * state that is visible outside plugin.cpp.
+ */
+extern "C" {
 
-#include <QPointer>
-#include <QString>
+LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( void );
+LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
+LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void );
+LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget );
 
-namespace custom_footer {
-
-class FooterController;
-
-/// Global plugin state — bridges C ABI entry points to C++ implementation.
-struct PluginState {
-    const LogSquirlHostApi* api = nullptr;
-    void* handle = nullptr;
-    bool initialised = false;
-
-    FooterDisplayWidget* footerWidget = nullptr; ///< Registered in footer bar.
-    FooterController* controller = nullptr;      ///< Fills footerWidget.
-    /// The rule editor from when it is opened until it is deleted: its
-    /// preview follows the active file, and shutdown deletes it.
-    QPointer<FooterEditor> editor;
-};
-
-extern PluginState g_state;
-
-/// Convenience wrapper: log via host API.
-void hostLog( int level, const char* message );
-
-/// Log via host API, UTF-8 encoded.
-void hostLog( int level, const QString& message );
-
-} // namespace custom_footer
+} // extern "C"

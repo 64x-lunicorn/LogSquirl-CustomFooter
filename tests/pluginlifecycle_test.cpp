@@ -29,7 +29,6 @@
 #include "footereditor.h"
 #include "logsquirl_plugin_api.h"
 #include "plugin.h"
-#include "rulepreviewer.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -44,10 +43,6 @@
 #include <QToolButton>
 #include <QWidget>
 
-extern "C" int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
-extern "C" void logsquirl_plugin_shutdown( void );
-extern "C" void logsquirl_plugin_configure( void* parent_widget );
-
 using namespace custom_footer;
 
 namespace {
@@ -60,6 +55,9 @@ struct FakeHost {
     QWidget* unregisteredWidget = nullptr;
     void ( *activeFileCallback )( void*, const char* ) = nullptr;
     void* activeFileUserData = nullptr;
+    void ( *menuAction )( void* ) = nullptr;
+    void* menuActionUserData = nullptr;
+    QStringList warnings; ///< The messages logged as warnings.
 };
 
 FakeHost& host()
@@ -72,9 +70,17 @@ LogSquirlHostApi fakeApi()
 {
     LogSquirlHostApi api{};
     api.api_version = LOGSQUIRL_PLUGIN_API_VERSION;
-    api.log_message = []( void*, int, const char* ) {};
+    api.log_message = []( void*, int level, const char* message ) {
+        if ( level == LOGSQUIRL_LOG_WARNING ) {
+            host().warnings.append( QString::fromUtf8( message ) );
+        }
+    };
     api.get_config_dir = []( void* ) { return host().configDir.constData(); };
-    api.register_menu_action = []( void*, const char*, const char*, void ( * )( void* ), void* ) {};
+    api.register_menu_action
+        = []( void*, const char*, const char*, void ( *callback )( void* ), void* userData ) {
+              host().menuAction = callback;
+              host().menuActionUserData = userData;
+          };
     api.register_footer_widget
         = []( void*, void* widget ) { host().footerWidget = static_cast<QWidget*>( widget ); };
     api.unregister_footer_widget = []( void*, void* widget ) {
@@ -128,6 +134,29 @@ void writeFile( const QString& path, const QByteArray& content )
     file.write( content );
 }
 
+/// The open rule editor, found as the user sees it: as an open window of
+/// the application. Null if none is open.
+FooterEditor* openEditorWindow()
+{
+    for ( auto* widget : QApplication::topLevelWidgets() ) {
+        auto* editor = qobject_cast<FooterEditor*>( widget );
+        if ( editor && editor->isVisible() ) {
+            return editor;
+        }
+    }
+    return nullptr;
+}
+
+/// The editor and everything it owns, to check that they are gone.
+QList<QPointer<QObject>> partsOf( FooterEditor& editor )
+{
+    QList<QPointer<QObject>> parts;
+    for ( auto* part : editor.findChildren<QObject*>() ) {
+        parts.append( part );
+    }
+    return parts;
+}
+
 } // namespace
 
 SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
@@ -175,7 +204,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
         {
             QWidget hostWindow;
             logsquirl_plugin_configure( &hostWindow );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
 
             THEN( "it is open without blocking, parented to the widget the host passed" )
             {
@@ -190,7 +219,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
 
                 THEN( "the same editor is kept" )
                 {
-                    REQUIRE( g_state.editor == editor );
+                    REQUIRE( openEditorWindow() == editor );
                 }
             }
 
@@ -201,7 +230,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
 
                 THEN( "the same editor moves over that window, still an open dialog" )
                 {
-                    REQUIRE( g_state.editor == editor );
+                    REQUIRE( openEditorWindow() == editor );
                     REQUIRE( editor->parentWidget() == &pluginDialog );
                     REQUIRE( editor->isWindow() );
                     REQUIRE( editor->isVisible() );
@@ -217,8 +246,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
                 THEN( "a new editor is open" )
                 {
                     REQUIRE_FALSE( editor );
-                    REQUIRE( g_state.editor );
-                    REQUIRE( g_state.editor->isVisible() );
+                    REQUIRE( openEditorWindow() );
                 }
             }
 
@@ -230,7 +258,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
                 THEN( "it is deleted" )
                 {
                     REQUIRE_FALSE( editor );
-                    REQUIRE_FALSE( g_state.editor );
+                    REQUIRE_FALSE( openEditorWindow() );
                 }
             }
         }
@@ -248,7 +276,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             REQUIRE( QApplication::activeModalWidget() == pluginDialog );
 
             logsquirl_plugin_configure( &mainWindow );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
             REQUIRE( editor );
 
             THEN( "the editor opens over the plugin dialog, where it is usable" )
@@ -290,7 +318,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             QWidget mainWindow;
             mainWindow.show();
             logsquirl_plugin_configure( &mainWindow );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
             REQUIRE( editor );
             REQUIRE( editor->parentWidget() == &mainWindow );
 
@@ -301,7 +329,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
 
             THEN( "the same editor moves over the plugin dialog" )
             {
-                REQUIRE( g_state.editor == editor );
+                REQUIRE( openEditorWindow() == editor );
                 REQUIRE( editor->parentWidget() == &pluginDialog );
                 REQUIRE( editor->isVisible() );
             }
@@ -311,7 +339,7 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
         WHEN( "the rule editor is open while the host switches files" )
         {
             logsquirl_plugin_configure( nullptr );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
             REQUIRE( editor );
             const auto openedWith = editor->activeFile();
             const auto second = ( logDir.path() + "/second.log" ).toUtf8();
@@ -327,16 +355,10 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
         WHEN( "the plugin is shut down from the event loop while the editor is previewing" )
         {
             logsquirl_plugin_configure( nullptr );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
             REQUIRE( editor );
-            QPointer<RulePreviewer> previewer = editor->findChild<RulePreviewer*>();
-            REQUIRE( previewer );
-            REQUIRE( previewer->isBusy() );
-            QList<QPointer<QTimer>> timers;
-            for ( auto* timer : editor->findChildren<QTimer*>() ) {
-                timers.append( timer );
-            }
-            REQUIRE_FALSE( timers.isEmpty() );
+            REQUIRE( editor->findChild<QWidget*>( "previewUpdating" )->isVisible() );
+            const auto parts = partsOf( *editor );
 
             // As a host would: from its event loop, with no plugin frame on the stack.
             bool shutDown = false;
@@ -346,21 +368,20 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             } );
             REQUIRE( processUntil( [ &shutDown ] { return shutDown; } ) );
 
-            THEN( "the editor, its previewer and all their timers are gone at once" )
+            THEN( "the editor and everything it owns are gone at once" )
             {
                 REQUIRE_FALSE( editor );
-                REQUIRE_FALSE( previewer );
-                for ( const auto& timer : timers ) {
-                    REQUIRE_FALSE( timer );
+                for ( const auto& part : parts ) {
+                    REQUIRE_FALSE( part );
                 }
-                REQUIRE_FALSE( g_state.editor );
+                REQUIRE_FALSE( openEditorWindow() );
             }
         }
 
         WHEN( "the plugin is shut down from the event loop while the import dialog is open" )
         {
             logsquirl_plugin_configure( nullptr );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
             REQUIRE( editor );
             auto* import = editor->findChild<QToolButton*>( "importButton" );
             REQUIRE( import );
@@ -380,14 +401,14 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             {
                 REQUIRE_FALSE( editor );
                 REQUIRE_FALSE( dialog );
-                REQUIRE_FALSE( g_state.editor );
+                REQUIRE_FALSE( openEditorWindow() );
             }
         }
 
         WHEN( "the plugin is shut down from the event loop while the template dialog is open" )
         {
             logsquirl_plugin_configure( nullptr );
-            QPointer<FooterEditor> editor = g_state.editor;
+            QPointer<FooterEditor> editor = openEditorWindow();
             REQUIRE( editor );
             auto* fromTemplate = editor->findChild<QToolButton*>( "templateButton" );
             REQUIRE( fromTemplate );
@@ -410,6 +431,25 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
             }
         }
 
+        WHEN( "the rule editor is opened from the Plugins menu, and a rule is added and saved" )
+        {
+            REQUIRE( host().menuAction );
+            host().menuAction( host().menuActionUserData );
+            QPointer<FooterEditor> editor = openEditorWindow();
+            REQUIRE( editor );
+            REQUIRE( editor->activeFile() == logDir.path() + "/first.log" );
+            editor->appendEntries( { { "Mode", "Mode:\\s+(\\S+)", "", true, {} } } );
+            editor->accept();
+
+            THEN( "the rules are saved to the host's config dir" )
+            {
+                const auto saved = FooterConfig::loadEntries( configDir.path() );
+                REQUIRE( saved.size() == 2 );
+                REQUIRE( saved.at( 1 ).key == "Mode" );
+                REQUIRE( host().warnings.isEmpty() );
+            }
+        }
+
         WHEN( "the plugin is shut down" )
         {
             QWidget* const footer = host().footerWidget;
@@ -424,4 +464,48 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
 
         logsquirl_plugin_shutdown();
     }
+}
+
+SCENARIO( "The plugin logs what is wrong through the host", "[plugin]" )
+{
+    host() = FakeHost();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    GIVEN( "a host that gives no config directory" )
+    {
+        WHEN( "the plugin is initialised" )
+        {
+            REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+
+            THEN( "it warns once that rules are neither loaded nor saved" )
+            {
+                REQUIRE( host().warnings
+                         == QStringList{ "Custom Footer: the host gave no config directory; rules "
+                                         "are neither loaded nor saved" } );
+            }
+        }
+    }
+
+    GIVEN( "a config dir with a rule whose pattern is invalid" )
+    {
+        QTemporaryDir configDir;
+        REQUIRE( configDir.isValid() );
+        REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                            { { "Broken", "broken=(", "", true, {} } } ) );
+        host().configDir = configDir.path().toUtf8();
+
+        WHEN( "the plugin is initialised" )
+        {
+            REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+
+            THEN( "the rule's problem is logged as a warning" )
+            {
+                REQUIRE( host().warnings.size() == 1 );
+                REQUIRE( host().warnings.at( 0 ).startsWith( "Custom Footer: Rule 1 (Broken): " ) );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
 }

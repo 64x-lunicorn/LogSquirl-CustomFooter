@@ -430,3 +430,222 @@ SCENARIO( "The rule editor offers a rule from the selected line only when asked 
     }
 }
 
+SCENARIO( "A footer session makes a rule from the Log Line selected in the host",
+          "[rulefromline][footersession]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "Mode", "Mode:\\s+(\\S+)", "", true, {} } } ) );
+    const auto log = logDir.path() + "/car.log";
+    writeFile( log, kVinLine + "\n" );
+
+    FooterDisplayWidget footer;
+    FakeSelection selection;
+    QWidget window;
+
+    GIVEN( "a host with a Log Line selected" )
+    {
+        selection.lines = QStringList{ kVinLine };
+        FooterSession session( configDir.path(), &footer, selection.host() );
+        session.setActiveFile( log );
+
+        WHEN( "a rule is made from the selected line, with no editor open" )
+        {
+            QPointer<FooterEditor> editor = session.ruleFromSelectedLine( &window );
+
+            THEN( "the editor opens over the window with a new rule made from that line" )
+            {
+                REQUIRE( selection.calls == 1 );
+                REQUIRE( editor );
+                REQUIRE( editor->isVisible() );
+                REQUIRE( editor->parentWidget() == &window );
+                FromLineUi ui( *editor );
+                REQUIRE( editor->entries().size() == 2 );
+                REQUIRE( ui.currentRow() == 1 );
+                REQUIRE( ui.line->text() == kVinLine );
+                REQUIRE( ui.lineShown() );
+            }
+
+            THEN( "the editor offers the same action as a button" )
+            {
+                REQUIRE( child<QToolButton>( *editor, "ruleFromLineButton" )
+                             ->isVisibleTo( editor.data() ) );
+            }
+
+            AND_WHEN( "the VIN is marked and the editor is accepted" )
+            {
+                FromLineUi( *editor ).mark( "WDB1234567" );
+                editor->accept();
+
+                THEN( "the rule is saved and the footer shows the VIN" )
+                {
+                    const auto saved = FooterConfig::loadEntries( configDir.path() );
+                    REQUIRE( saved.size() == 2 );
+                    REQUIRE( saved.at( 1 ).key == "VIN" );
+                    REQUIRE( processUntil( [ &footer ] {
+                        for ( const auto& value : footer.values() ) {
+                            if ( value.key == "VIN" && value.value == "WDB1234567" ) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    } ) );
+                }
+            }
+
+            AND_WHEN( "the editor's button is clicked" )
+            {
+                child<QToolButton>( *editor, "ruleFromLineButton" )->click();
+
+                THEN( "another rule is made from the line in the same editor" )
+                {
+                    REQUIRE( selection.calls == 2 );
+                    REQUIRE( editor->entries().size() == 3 );
+                    REQUIRE( FromLineUi( *editor ).currentRow() == 2 );
+                }
+            }
+        }
+
+        WHEN( "a rule is made from the selected line while the editor is open" )
+        {
+            QPointer<FooterEditor> open = session.openEditor( &window );
+            open->appendEntries( { { "Edited", "", "", true, {} } } );
+            QPointer<FooterEditor> editor = session.ruleFromSelectedLine( &window );
+
+            THEN( "the open editor gets the new rule, with its edits kept" )
+            {
+                REQUIRE( editor == open );
+                REQUIRE( editor->entries().size() == 3 );
+                REQUIRE( editor->entries().at( 1 ).key == "Edited" );
+            }
+        }
+    }
+
+    GIVEN( "a host with several Log Lines selected" )
+    {
+        selection.lines = QStringList{ kVinLine, "second", "third" };
+        FooterSession session( configDir.path(), &footer, selection.host() );
+
+        WHEN( "a rule is made from the selected line" )
+        {
+            QPointer<FooterEditor> editor = session.ruleFromSelectedLine( &window );
+
+            THEN( "it is made from the first one, and the hint says so" )
+            {
+                REQUIRE( editor );
+                FromLineUi ui( *editor );
+                REQUIRE( ui.line->text() == kVinLine );
+                REQUIRE( ui.hint->text().contains( "3 Log Lines are selected" ) );
+            }
+        }
+    }
+
+    GIVEN( "a host with no Log Line selected" )
+    {
+        FooterSession session( configDir.path(), &footer, selection.host() );
+
+        WHEN( "a rule is made from the selected line" )
+        {
+            auto* editor = session.ruleFromSelectedLine( &window );
+
+            THEN( "no editor opens; a message over the window, opened without blocking, says what "
+                  "to do" )
+            {
+                REQUIRE_FALSE( editor );
+                auto* hint = noSelectionHint();
+                REQUIRE( hint );
+                REQUIRE( hint->parentWidget() == &window );
+                REQUIRE( hint->text().contains( "Select" ) );
+                REQUIRE( hint->text().contains( "Log Line" ) );
+            }
+
+            AND_WHEN( "it is tried again while the message is open" )
+            {
+                QPointer<QMessageBox> first = noSelectionHint();
+                session.ruleFromSelectedLine( &window );
+
+                THEN( "the same message is shown, not a second one" )
+                {
+                    REQUIRE( noSelectionHint() == first );
+                    int boxes = 0;
+                    for ( auto* widget : QApplication::allWidgets() ) {
+                        if ( widget->objectName() == "noSelectedLineBox" ) {
+                            ++boxes;
+                        }
+                    }
+                    REQUIRE( boxes == 1 );
+                }
+            }
+        }
+
+        WHEN( "the editor's button is clicked" )
+        {
+            QPointer<FooterEditor> editor = session.openEditor( &window );
+            child<QToolButton>( *editor, "ruleFromLineButton" )->click();
+
+            THEN( "the message is shown over the editor, and no rule is added" )
+            {
+                auto* hint = noSelectionHint();
+                REQUIRE( hint );
+                REQUIRE( hint->parentWidget() == editor );
+                REQUIRE( editor->entries().size() == 1 );
+            }
+        }
+    }
+
+    GIVEN( "a host without the selected Log Lines, as before LogSquirl 26.11" )
+    {
+        FooterSession session( configDir.path(), &footer, HostFunctions() );
+
+        WHEN( "a rule is made from the selected line" )
+        {
+            auto* editor = session.ruleFromSelectedLine( &window );
+
+            THEN( "nothing happens" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( noSelectionHint() );
+            }
+        }
+
+        WHEN( "the editor is opened" )
+        {
+            QPointer<FooterEditor> editor = session.openEditor( &window );
+
+            THEN( "it does not offer the action" )
+            {
+                REQUIRE_FALSE( child<QToolButton>( *editor, "ruleFromLineButton" )
+                                   ->isVisibleTo( editor.data() ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "Destroying a footer session closes its message about the selected line",
+          "[rulefromline][footersession][lifetime]" )
+{
+    FooterDisplayWidget footer;
+    FakeSelection selection;
+    QWidget window;
+    auto session = std::make_unique<FooterSession>( QString(), &footer, selection.host() );
+
+    GIVEN( "the message that no Log Line is selected, open over the window" )
+    {
+        session->ruleFromSelectedLine( &window );
+        QPointer<QMessageBox> hint = noSelectionHint();
+        REQUIRE( hint );
+
+        WHEN( "the session is destroyed" )
+        {
+            session.reset();
+
+            THEN( "the message is gone at once" )
+            {
+                REQUIRE_FALSE( hint );
+            }
+        }
+    }
+}

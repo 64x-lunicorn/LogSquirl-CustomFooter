@@ -27,6 +27,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QMessageBox>
 
 #include <cstdint>
 #include <utility>
@@ -178,6 +179,8 @@ FooterSession::~FooterSession()
     // shutdown during a drag cannot be triggered from the UI, as the drag
     // holds the mouse until it ends.
     delete editor_.data();
+    // The message that no line is selected, if it is over another window.
+    delete noSelectedLine_.data();
     // Then the controller: it cancels a running scan and waits for it, and
     // drops results not yet shown.
     controller_.reset();
@@ -237,6 +240,13 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     }
     placeEditor( editor, over, host_ );
 
+    // Rule from selected line, where the host can hand the line over.
+    editor->offerRuleFromLine( has( HostFeature::SelectedLogLines ) );
+    QObject::connect( editor, &FooterEditor::ruleFromLineRequested, editor, [ this, editor ] {
+        guarded( host_, "making a rule from the selected line",
+                 [ this, editor ] { addRuleFromSelectedLine( *editor ); } );
+    } );
+
     // Apply button: save and rescan without closing the dialog.
     QObject::connect( editor, &FooterEditor::applied, editor,
                       [ this, editor ] { saveFrom( *editor ); } );
@@ -251,6 +261,65 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
 
     editor->open();
     return editor;
+}
+
+FooterEditor* FooterSession::ruleFromSelectedLine( QWidget* over )
+{
+    if ( !host_.selectedLogLines ) {
+        return nullptr;
+    }
+    if ( editor_ && editor_->isVisible() ) {
+        // Brought forward first, so that the message, if any, is over it.
+        auto* editor = openEditor( over );
+        return addRuleFromSelectedLine( *editor ) ? editor : nullptr;
+    }
+    const auto selected = host_.selectedLogLines();
+    if ( !selected || selected->lines.isEmpty() ) {
+        showNoSelectedLine( over );
+        return nullptr;
+    }
+    auto* editor = openEditor( over );
+    editor->addRuleFromLine( selected->lines.first(), static_cast<int>( selected->lines.size() ) );
+    return editor;
+}
+
+bool FooterSession::addRuleFromSelectedLine( FooterEditor& editor )
+{
+    // Read now, on the UI thread, as the host requires.
+    const auto selected = host_.selectedLogLines ? host_.selectedLogLines() : std::nullopt;
+    if ( !selected || selected->lines.isEmpty() ) {
+        showNoSelectedLine( &editor );
+        return false;
+    }
+    editor.addRuleFromLine( selected->lines.first(), static_cast<int>( selected->lines.size() ) );
+    return true;
+}
+
+void FooterSession::showNoSelectedLine( QWidget* over )
+{
+    if ( noSelectedLine_ && noSelectedLine_->parentWidget() == over ) {
+        noSelectedLine_->raise();
+        noSelectedLine_->activateWindow();
+        return;
+    }
+    delete noSelectedLine_.data();
+    // Opened, never run in a nested event loop of its own: deleting the
+    // session deletes the message.
+    const bool overEditor = over && over == editor_.data();
+    const auto text
+        = overEditor
+              ? QObject::tr( "No Log Line is selected in LogSquirl. Close the rule editor, select "
+                             "the Log Line with the value the rule should find, and choose "
+                             "Plugins → Custom Footer → Rule from selected line…" )
+              : QObject::tr( "No Log Line is selected in LogSquirl. Select the Log Line with the "
+                             "value the rule should find, and choose Plugins → Custom Footer → "
+                             "Rule from selected line… again." );
+    auto* box = new QMessageBox( QMessageBox::Information, QObject::tr( "Rule from Selected Line" ),
+                                 text, QMessageBox::Ok, over );
+    box->setObjectName( "noSelectedLineBox" );
+    box->setAttribute( Qt::WA_DeleteOnClose );
+    noSelectedLine_ = box;
+    box->open();
 }
 
 bool FooterSession::has( HostFeature feature ) const noexcept

@@ -28,6 +28,7 @@
 
 #include <memory>
 
+class QMessageBox;
 class QWidget;
 
 namespace custom_footer {
@@ -98,6 +99,26 @@ public:
      */
     FooterEditor* openEditor( QWidget* over );
 
+    /**
+     * Start a new rule from the Log Line selected in the host, as
+     * "Rule from selected line…" does: open the editor as openEditor()
+     * does, or bring the open one forward with its edits, and add a new
+     * simple rule there with that line shown, for the user to click or mark
+     * the value in. Of several selected lines the first is taken. Returns
+     * the editor, valid as openEditor()'s.
+     *
+     * Without a selected Log Line (or an open Log File), no rule is added:
+     * a message over the open editor, or else over @p over, says what to
+     * do, and nullptr is returned. The message is opened without blocking,
+     * shown once however often this is called, and deleted with the
+     * session. Does nothing and returns nullptr when the host does not offer
+     * the selected Log Lines (has( HostFeature::SelectedLogLines )).
+     *
+     * The editor offers the same as its [From selected line…] button,
+     * where the host offers it.
+     */
+    FooterEditor* ruleFromSelectedLine( QWidget* over );
+
     /// Whether the running host offers @p feature: its member of the
     /// HostFunctions the session was made with is set.
     bool has( HostFeature feature ) const noexcept;
@@ -112,6 +133,15 @@ private:
     /// handler of the footer's signal.
     void goToLine( const FooterValue& value ) noexcept;
 
+    /// Add a rule made from the selected Log Line to @p editor, or show
+    /// over it that none is selected. Returns whether a rule was added.
+    bool addRuleFromSelectedLine( FooterEditor& editor );
+
+    /// Say, over @p over, how to make a rule from a selected line; over
+    /// the editor, that it is to be closed first, as it blocks the window
+    /// that takes the selection.
+    void showNoSelectedLine( QWidget* over );
+
     const QString configDir_;
     const HostFunctions host_;
     QString activeFile_;
@@ -121,6 +151,8 @@ private:
     std::unique_ptr<FooterController> controller_;
     /// The editor from when it is opened until it is deleted.
     QPointer<FooterEditor> editor_;
+    /// The message that no Log Line is selected, while it is open.
+    QPointer<QMessageBox> noSelectedLine_;
 };
 
 } // namespace custom_footer

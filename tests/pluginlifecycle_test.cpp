@@ -772,11 +772,15 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
 
     WHEN( "init_ex() is called without the host's table or handle" )
     {
+        const int withoutTable
+            = logsquirl_plugin_init_ex( nullptr, &handle, sizeof( LogSquirlHostApi ) );
+        const int withoutHandle
+            = logsquirl_plugin_init_ex( &api, nullptr, sizeof( LogSquirlHostApi ) );
+
         THEN( "it fails without calling the host" )
         {
-            REQUIRE( logsquirl_plugin_init_ex( nullptr, &handle, sizeof( LogSquirlHostApi ) )
-                     == 1 );
-            REQUIRE( logsquirl_plugin_init_ex( &api, nullptr, sizeof( LogSquirlHostApi ) ) == 1 );
+            REQUIRE( withoutTable == 1 );
+            REQUIRE( withoutHandle == 1 );
             REQUIRE( host().calls.isEmpty() );
         }
     }

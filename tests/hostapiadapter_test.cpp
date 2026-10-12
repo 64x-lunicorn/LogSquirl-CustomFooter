@@ -423,21 +423,34 @@ SCENARIO( "The adapter goes to a Log Line of the host", "[hostapiadapter]" )
 
     WHEN( "the host shows the line" )
     {
+        const bool shown = host.goToLogLine( 42 );
+
         THEN( "it succeeds, with the line number passed as it is, from 1" )
         {
-            REQUIRE( host.goToLogLine( 42 ) );
+            REQUIRE( shown );
             REQUIRE( table().wentTo == QList<std::uint64_t>{ 42 } );
         }
     }
 
-    WHEN( "the host has no such line, or no Log File" )
+    WHEN( "the host has no such line" )
     {
+        table().goToResult = LOGSQUIRL_LOG_LINES_OUT_OF_RANGE;
+        const bool shown = host.goToLogLine( 1000000 );
+
         THEN( "it fails" )
         {
-            table().goToResult = LOGSQUIRL_LOG_LINES_OUT_OF_RANGE;
-            REQUIRE_FALSE( host.goToLogLine( 1000000 ) );
-            table().goToResult = LOGSQUIRL_LOG_LINES_NO_LOG_FILE;
-            REQUIRE_FALSE( host.goToLogLine( 1 ) );
+            REQUIRE_FALSE( shown );
+        }
+    }
+
+    WHEN( "the host has no Log File open" )
+    {
+        table().goToResult = LOGSQUIRL_LOG_LINES_NO_LOG_FILE;
+        const bool shown = host.goToLogLine( 1 );
+
+        THEN( "it fails" )
+        {
+            REQUIRE_FALSE( shown );
         }
     }
 }
@@ -464,10 +477,14 @@ SCENARIO( "The adapter reads the Log Lines selected in the host", "[hostapiadapt
             REQUIRE_FALSE( selected->truncated );
         }
 
-        THEN( "the copy stays when the host's buffer changes" )
+        AND_WHEN( "the host's buffer changes" )
         {
             table().selection.fill( 'x' );
-            REQUIRE( selected->lines.at( 0 ) == "VIN: W0L000051T2123456" );
+
+            THEN( "the copy stays" )
+            {
+                REQUIRE( selected->lines.at( 0 ) == "VIN: W0L000051T2123456" );
+            }
         }
     }
 
@@ -499,16 +516,26 @@ SCENARIO( "The adapter reads the Log Lines selected in the host", "[hostapiadapt
         }
     }
 
-    WHEN( "nothing is selected, or no Log File is open" )
+    WHEN( "nothing is selected" )
     {
+        table().selectionResult = LOGSQUIRL_LOG_LINES_NO_SELECTION;
+        const auto selected = host.selectedLogLines();
+
+        THEN( "there is nothing, after one call of the host" )
+        {
+            REQUIRE_FALSE( selected );
+            REQUIRE( table().calls == QStringList{ "get_selected_log_lines" } );
+        }
+    }
+
+    WHEN( "no Log File is open" )
+    {
+        table().selectionResult = LOGSQUIRL_LOG_LINES_NO_LOG_FILE;
+        const auto selected = host.selectedLogLines();
+
         THEN( "there is nothing" )
         {
-            table().selectionResult = LOGSQUIRL_LOG_LINES_NO_SELECTION;
-            REQUIRE_FALSE( host.selectedLogLines() );
-            table().selectionResult = LOGSQUIRL_LOG_LINES_NO_LOG_FILE;
-            REQUIRE_FALSE( host.selectedLogLines() );
-            REQUIRE( table().calls
-                     == QStringList{ "get_selected_log_lines", "get_selected_log_lines" } );
+            REQUIRE_FALSE( selected );
         }
     }
 }

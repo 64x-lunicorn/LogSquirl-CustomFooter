@@ -19,16 +19,22 @@
 
 #pragma once
 
+#include "footerentry.h"
 #include "hostfunctions.h"
 
+#include <QList>
+#include <QPointer>
 #include <QString>
 
 #include <memory>
+
+class QWidget;
 
 namespace custom_footer {
 
 class FooterController;
 class FooterDisplayWidget;
+class FooterEditor;
 
 /**
  * Everything one loaded footer plugin needs: the rules and the line limit
@@ -47,9 +53,11 @@ public:
     /// and must outlive the session.
     FooterSession( const QString& configDir, FooterDisplayWidget* footer, HostFunctions host = {} );
 
-    /// Shuts down, in this order: stops the controller, which cancels a
-    /// running scan and waits for it, so that the footer is no longer
-    /// updated.
+    /// Shuts down, in this order: deletes the editor at once, open or closed
+    /// but not yet deleted, with its dialogs, its preview (stopped and
+    /// waited for), its timers and its pending events; then stops the
+    /// controller, which cancels a running scan and waits for it, so that
+    /// the footer is no longer updated.
     ///
     /// When it returns, no plugin code runs: no thread, timer, queued event
     /// or callback reaches the session or anything it made. The host may
@@ -59,15 +67,36 @@ public:
     FooterSession( const FooterSession& ) = delete;
     FooterSession& operator=( const FooterSession& ) = delete;
 
-    /// The one active file, for the footer. Empty: none. The same path
-    /// again scans it again for changes.
+    /// The one active file, for the footer and the editor, also one opened
+    /// later. Empty: none. The same path again scans it again for changes.
     void setActiveFile( const QString& filePath );
 
+    /**
+     * Open the rule editor over @p over, or over the application-modal
+     * window that blocks it, where it is usable; or move the open one there
+     * and raise it. Returns immediately: the editor never runs a nested
+     * event loop.
+     *
+     * The editor starts with the rules and the line limit of the config dir
+     * and the active file. OK and Apply save its rules and show them in the
+     * footer; a failed save is logged as a warning, and the rules are loaded
+     * again all the same. A closed editor is deleted later.
+     *
+     * The returned editor is valid until it is deleted after closing, or
+     * the session is destroyed.
+     */
+    FooterEditor* openEditor( QWidget* over );
+
 private:
+    /// Save the editor's rules and show them in the footer.
+    void save( const QList<FooterEntry>& entries );
+
     const QString configDir_;
     const HostFunctions host_;
     QString activeFile_;
     std::unique_ptr<FooterController> controller_;
+    /// The editor from when it is opened until it is deleted.
+    QPointer<FooterEditor> editor_;
 };
 
 } // namespace custom_footer

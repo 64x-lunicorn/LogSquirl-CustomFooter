@@ -27,13 +27,18 @@
 
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
+#include "footereditor.h"
 #include "footersession.h"
 #include "hostfunctions.h"
 #include "logsquirl_plugin_api.h"
 
 #include <QCoreApplication>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QLabel>
+#include <QPointer>
+#include <QPushButton>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
@@ -81,6 +86,22 @@ QStringList shown( const FooterDisplayWidget& footer )
         values.append( value.key + "=" + value.value );
     }
     return values;
+}
+
+template <typename Widget>
+Widget* child( QObject& parent, const char* name )
+{
+    auto* widget = parent.findChild<Widget*>( name );
+    REQUIRE( widget );
+    return widget;
+}
+
+/// Click the editor's Apply button, as the user does.
+void clickApply( FooterEditor& editor )
+{
+    auto* buttons = editor.findChild<QDialogButtonBox*>();
+    REQUIRE( buttons );
+    buttons->button( QDialogButtonBox::Apply )->click();
 }
 
 /// What a session logged through its host functions.
@@ -203,6 +224,173 @@ SCENARIO( "A footer session shows the values of the active file", "[footersessio
                 REQUIRE( log.warnings
                          == QStringList{ "Custom Footer: the host gave no config directory; rules "
                                          "are neither loaded nor saved" } );
+            }
+        }
+    }
+}
+
+SCENARIO( "A footer session opens the rule editor with its rules and active file",
+          "[footersession][footereditor]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), { rule( "VIN" ) } ) );
+    REQUIRE( FooterConfig::saveMaxLines( configDir.path(), 3 ) );
+    const auto first = logDir.path() + "/first.log";
+    const auto second = logDir.path() + "/second.log";
+    writeFile( first, "a\nb\nc\nd\nVIN: FIRST\nMode: M1\n" );
+    writeFile( second, "VIN: SECOND\nMode: M2\n" );
+
+    FooterDisplayWidget footer;
+    Log log;
+    FooterSession session( configDir.path(), &footer, log.host() );
+    session.setActiveFile( second );
+
+    GIVEN( "the editor, opened over a window" )
+    {
+        QWidget window;
+        QPointer<FooterEditor> editor = session.openEditor( &window );
+        REQUIRE( editor );
+
+        THEN( "it is open without blocking, over that window, with the rules of the config dir" )
+        {
+            REQUIRE( editor->isVisible() );
+            REQUIRE( editor->parentWidget() == &window );
+            REQUIRE( editor->entries().size() == 1 );
+            REQUIRE( editor->entries().at( 0 ).key == "VIN" );
+        }
+
+        THEN( "it previews the footer's active file" )
+        {
+            REQUIRE( editor->activeFile() == second );
+        }
+
+        WHEN( "the active file changes" )
+        {
+            session.setActiveFile( first );
+
+            THEN( "the editor follows it, with the footer's line limit" )
+            {
+                REQUIRE( editor->activeFile() == first );
+                auto* count = child<QLabel>( *editor, "previewCount" );
+                REQUIRE( processUntil( [ count ] {
+                    return count->text()
+                           == "0 matching lines in the first 3 lines: the scan stops at this line "
+                              "limit.";
+                } ) );
+            }
+        }
+
+        WHEN( "it is opened again" )
+        {
+            auto* again = session.openEditor( &window );
+
+            THEN( "the same editor is raised" )
+            {
+                REQUIRE( again == editor );
+                REQUIRE( editor->isVisible() );
+            }
+        }
+
+        WHEN( "it is opened again from another window" )
+        {
+            QWidget other;
+            auto* again = session.openEditor( &other );
+
+            THEN( "the same editor moves over that window, still an open dialog" )
+            {
+                REQUIRE( again == editor );
+                REQUIRE( editor->parentWidget() == &other );
+                REQUIRE( editor->isWindow() );
+                REQUIRE( editor->isVisible() );
+            }
+        }
+
+        WHEN( "a rule is added and Apply is clicked" )
+        {
+            editor->appendEntries( { rule( "Mode" ) } );
+            clickApply( *editor );
+
+            THEN( "the rules are saved, the footer shows them, and the editor stays open" )
+            {
+                REQUIRE( FooterConfig::loadEntries( configDir.path() ).size() == 2 );
+                REQUIRE( processUntil(
+                    [ & ] { return shown( footer ) == QStringList{ "VIN=SECOND", "Mode=M2" }; } ) );
+                REQUIRE( editor );
+                REQUIRE( editor->isVisible() );
+                REQUIRE( log.warnings.isEmpty() );
+            }
+        }
+
+        WHEN( "a rule is added and the editor is accepted" )
+        {
+            editor->appendEntries( { rule( "Mode" ) } );
+            editor->accept();
+
+            THEN( "the rules are saved, the footer shows them, and the editor is deleted" )
+            {
+                REQUIRE( FooterConfig::loadEntries( configDir.path() ).size() == 2 );
+                REQUIRE( processUntil(
+                    [ & ] { return shown( footer ) == QStringList{ "VIN=SECOND", "Mode=M2" }; } ) );
+                QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+                REQUIRE_FALSE( editor );
+            }
+
+            AND_WHEN( "the editor is opened again before the closed one was deleted" )
+            {
+                QPointer<FooterEditor> reopened = session.openEditor( &window );
+
+                THEN( "a new one is open, with the saved rules and the active file" )
+                {
+                    REQUIRE_FALSE( editor );
+                    REQUIRE( reopened );
+                    REQUIRE( reopened->isVisible() );
+                    REQUIRE( reopened->entries().size() == 2 );
+                    REQUIRE( reopened->activeFile() == second );
+                }
+            }
+        }
+
+        WHEN( "a rule is added and the editor is cancelled" )
+        {
+            editor->appendEntries( { rule( "Mode" ) } );
+            editor->reject();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "nothing is saved, and the editor is deleted" )
+            {
+                REQUIRE( FooterConfig::loadEntries( configDir.path() ).size() == 1 );
+                REQUIRE_FALSE( editor );
+            }
+        }
+    }
+}
+
+SCENARIO( "A footer session without a config dir saves nothing", "[footersession]" )
+{
+    FooterDisplayWidget footer;
+    Log log;
+    FooterSession session( {}, &footer, log.host() );
+    log.warnings.clear();
+
+    GIVEN( "the open editor with a new rule" )
+    {
+        QPointer<FooterEditor> editor = session.openEditor( nullptr );
+        REQUIRE( editor );
+        editor->appendEntries( { rule( "VIN" ) } );
+
+        WHEN( "Apply is clicked" )
+        {
+            clickApply( *editor );
+
+            THEN( "a warning says the rules could not be saved, and the editor stays open" )
+            {
+                REQUIRE( log.warnings
+                         == QStringList{ "Custom Footer: could not save the rules to the config "
+                                         "directory" } );
+                REQUIRE( editor->isVisible() );
             }
         }
     }

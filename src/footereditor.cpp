@@ -162,25 +162,14 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
              &FooterEditor::showCurrentRule );
     connect( panel_, &RuleDetailPanel::edited, this, &FooterEditor::storePanelInCurrentRule );
 
-    // The rule check follows every change of the rows, before anything
-    // else looks at it. Moved rules keep their marks; only the listing is
-    // renumbered.
+    // The model's rule check is up to date with every signal of the model;
+    // after a change of the rows, only the listing is shown again, with the
+    // new rule numbers. Moved rules keep their marks.
     connect( model_, &RuleListModel::ruleChanged, this, &FooterEditor::ruleChanged );
-    connect(
-        model_, &RuleListModel::rowsInserted, this,
-        [ this ]( const QModelIndex&, int first, int last ) { checkInsertedRows( first, last ); } );
-    connect( model_, &RuleListModel::rowsRemoved, this,
-             [ this ]( const QModelIndex&, int first, int last ) {
-                 check_.removeRules( first, last - first + 1 );
-                 showProblems();
-             } );
-    connect(
-        model_, &RuleListModel::rowsMoved, this,
-        [ this ]( const QModelIndex&, int first, int last, const QModelIndex&, int destination ) {
-            check_.moveRules( first, last - first + 1, destination );
-            showProblems();
-        } );
-    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::checkAllRows );
+    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::showProblems );
     connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::updateButtons );
@@ -297,7 +286,7 @@ void FooterEditor::addFromTemplate()
         connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRule );
     }
     // Only rules the scanner uses make the new one an alternative.
-    templateDialog_->reset( check_.keysInUse() );
+    templateDialog_->reset( model_->check().keysInUse() );
     // Not exec(): the dialog stays window-modal, and tests can drive it.
     templateDialog_->open();
 }
@@ -440,9 +429,7 @@ void FooterEditor::storePanelInCurrentRule()
     if ( row < 0 ) {
         return;
     }
-    model_->setEntry( row, panel_->entry() );
-    model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
-    checkRow( row );
+    model_->setEntry( row, panel_->entry(), panel_->unfinishedSimpleRule() );
     showProblems();
     schedulePreview();
 }
@@ -454,7 +441,6 @@ void FooterEditor::ruleChanged( int row )
     if ( row == currentRow() ) {
         panel_->showEnabled( model_->entry( row ).enabled );
     }
-    checkRow( row );
     showProblems();
     // Another rule of the key may supply its value now.
     schedulePreview();
@@ -491,47 +477,12 @@ void FooterEditor::moveEntry( int from, int to )
     list_->scrollTo( model_->index( to, RuleListModel::KeyColumn ) );
 }
 
-void FooterEditor::checkRow( int row )
-{
-    check_.setRule( row, { model_->entry( row ), model_->unfinishedSimpleRule( row ) } );
-    markRows( row, row );
-}
-
-void FooterEditor::checkAllRows()
-{
-    // A reset leaves no unfinished simple rules.
-    QList<RuleCheck::Rule> rules;
-    for ( const auto& entry : model_->entries() ) {
-        rules.append( entry );
-    }
-    check_.setRules( rules );
-    markRows( 0, model_->rowCount() - 1 );
-    showProblems();
-}
-
-void FooterEditor::checkInsertedRows( int first, int last )
-{
-    QList<RuleCheck::Rule> rules;
-    for ( int row = first; row <= last; ++row ) {
-        rules.append( { model_->entry( row ), model_->unfinishedSimpleRule( row ) } );
-    }
-    check_.insertRules( first, rules );
-    markRows( first, last );
-    showProblems();
-}
-
-void FooterEditor::markRows( int first, int last )
-{
-    for ( int row = first; row <= last; ++row ) {
-        model_->setProblems( row, check_.problems( row ) );
-    }
-}
-
 void FooterEditor::showProblems()
 {
-    const bool valid = check_.canSave();
+    const auto& check = model_->check();
+    const bool valid = check.canSave();
     panel_->setProblems( model_->problems( currentRow() ) );
-    problemLabel_->setText( check_.listing().join( '\n' ) );
+    problemLabel_->setText( check.listing().join( '\n' ) );
     problemLabel_->setVisible( !valid );
     buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
     buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
@@ -550,8 +501,7 @@ void FooterEditor::schedulePreview( RulePreviewer::Start start )
     }
     // A rule that cannot match anything, e.g. with an invalid pattern or
     // as an unfinished simple rule: the check's problem says why, and
-    // nothing is scanned. The model's copy of the problems is the selected
-    // row's even while rows change.
+    // nothing is scanned.
     const auto problem = model_->problems( row ).preventingMatches();
     if ( !problem.isEmpty() ) {
         previewer_->clear();

@@ -25,6 +25,7 @@
 #include <QCoreApplication>
 #include <QHash>
 #include <QList>
+#include <QRegularExpression>
 #include <QString>
 #include <QStringList>
 
@@ -79,11 +80,12 @@ struct RuleProblems {
  * there. The scanner uses an enabled rule with a line pattern (isUsed()),
  * unless it has problems; the rules can be saved only without any.
  *
- * The check keeps the problems of a list of rules, which the editor changes
- * as its rows change: setRule() checks only the rule it is given, inserted
- * rules are checked once, and removing or moving rules checks nothing. Each
- * pattern is compiled once per check, however often it is checked; its
- * error is remembered.
+ * The check holds a list of rules with their problems: the editor's rule
+ * list keeps its rows in it, so a rule and its problems are changed, moved
+ * and removed together. setRule() checks only the rule it is given,
+ * inserted rules are checked once, and removing or moving rules checks
+ * nothing. Each pattern is compiled once per check, however often it is
+ * checked; its error is remembered.
  */
 class RuleCheck {
     Q_DECLARE_TR_FUNCTIONS( RuleCheck )
@@ -95,8 +97,9 @@ public:
     /// A rule as checked: the rule, and the simple rule being written in its
     /// row whose end character keeps it from having patterns yet.
     struct Rule {
-        Rule( const FooterEntry& entry = {},
-              const std::optional<SimpleRule>& unfinishedSimpleRule = std::nullopt )
+        Rule() = default;
+        explicit Rule( const FooterEntry& entry,
+                       const std::optional<SimpleRule>& unfinishedSimpleRule = std::nullopt )
             : entry( entry )
             , unfinishedSimpleRule( unfinishedSimpleRule )
         {
@@ -117,24 +120,38 @@ public:
     /// The problems of one rule, compiling its patterns.
     static RuleProblems problemsOf( const Rule& rule );
 
+    /// The problems of one rule whose patterns @p linePattern and
+    /// @p valuePattern are compiled already, so they are not compiled again.
+    static RuleProblems problemsOf( const Rule& rule, const QRegularExpression& linePattern,
+                                    const QRegularExpression& valuePattern );
+
     /// The lines listing @p problems of the rule in @p row, counting rows
     /// from 0: "Rule N: …", one per problem, in their order.
     static QStringList listing( int row, const RuleProblems& problems );
 
     /// Check all rules anew.
     void setRules( const QList<Rule>& rules );
-    /// Check the rule in @p row again, and only it.
+    /// Replace the rule in @p row, and check it again, and only it.
     void setRule( int row, const Rule& rule );
     /// Check the new rules, inserted before @p row.
     void insertRules( int row, const QList<Rule>& rules );
     void removeRules( int row, int count );
+    /// Whether moveRules() moves anything with these arguments.
+    bool canMoveRules( int first, int count, int destination ) const;
     /// Move @p count rules from @p first to before @p destination, which is
     /// counted before the move, as QAbstractItemModel::moveRows() does.
-    void moveRules( int first, int count, int destination );
+    /// Returns false, moving nothing, if canMoveRules() does.
+    bool moveRules( int first, int count, int destination );
 
     int count() const
     {
         return static_cast<int>( rows_.size() );
+    }
+
+    /// The rule in @p row, which must exist.
+    const Rule& rule( int row ) const
+    {
+        return rows_.at( row ).rule;
     }
 
     RuleProblems problems( int row ) const;
@@ -151,10 +168,10 @@ public:
 
 private:
     struct Row {
+        Rule rule;
         RuleProblems problems;
         /// Whether the scanner uses the rule.
         bool used = false;
-        QString key;
     };
 
     Row check( const Rule& rule );

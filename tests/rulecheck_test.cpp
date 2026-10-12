@@ -37,10 +37,10 @@ using namespace custom_footer;
 
 namespace {
 
-FooterEntry rule( const QString& key, const QString& linePattern,
-                  const QString& valuePattern = QString(), bool enabled = true )
+RuleCheck::Rule rule( const QString& key, const QString& linePattern,
+                      const QString& valuePattern = QString(), bool enabled = true )
 {
-    return { key, linePattern, valuePattern, enabled, {} };
+    return RuleCheck::Rule( { key, linePattern, valuePattern, enabled, {} } );
 }
 
 /// A simple rule ending at a character that is not given yet.
@@ -50,6 +50,12 @@ SimpleRule withoutEndCharacter()
     simple.textBefore = "user=";
     simple.valueEnd = ValueEnd::Character;
     return simple;
+}
+
+/// @p rule while its simple rule has no end character yet.
+RuleCheck::Rule unfinished( const RuleCheck::Rule& rule )
+{
+    return RuleCheck::Rule( rule.entry, withoutEndCharacter() );
 }
 
 const QString kNeedsKey = "a rule with a line pattern needs a key";
@@ -113,13 +119,13 @@ std::vector<Case> cases()
           {},
           { invalidLine( "(" ) } },
         { "an unfinished simple rule among valid ones",
-          { rule( "A", "a=(\\S+)" ), { rule( "User", "" ), withoutEndCharacter() } },
+          { rule( "A", "a=(\\S+)" ), unfinished( rule( "User", "" ) ) },
           { {}, { "", "", "", kNoEndCharacter } },
           { "Rule 2: " + kNoEndCharacter },
           { "A" },
           { "", kNoEndCharacter } },
         { "an unfinished simple rule with an invalid value pattern",
-          { { rule( "User", "", "(" ), withoutEndCharacter() } },
+          { unfinished( rule( "User", "", "(" ) ) },
           { { "", "", invalidValue( "(" ), kNoEndCharacter } },
           { "Rule 1: " + invalidValue( "(" ), "Rule 1: " + kNoEndCharacter },
           {},
@@ -168,7 +174,12 @@ SCENARIO( "RuleCheck lists why rules cannot be used", "[rulecheck]" )
                     REQUIRE( check.problems( row ) == c.problems.at( row ) );
                     REQUIRE( check.problems( row ).preventingMatches()
                              == c.preventingMatches.at( row ) );
+                    const auto& entry = c.rules.at( row ).entry;
                     REQUIRE( RuleCheck::problemsOf( c.rules.at( row ) ) == c.problems.at( row ) );
+                    REQUIRE( RuleCheck::problemsOf( c.rules.at( row ),
+                                                    QRegularExpression( entry.linePattern ),
+                                                    QRegularExpression( entry.valuePattern ) )
+                             == c.problems.at( row ) );
                 }
                 REQUIRE( check.listing() == c.listing );
                 REQUIRE( check.canSave() == c.listing.isEmpty() );
@@ -183,7 +194,8 @@ SCENARIO( "RuleCheck lists why rules cannot be used", "[rulecheck]" )
                     const auto& entry = c.rules.at( row ).entry;
                     entries.append( entry );
                     if ( RuleCheck::isUsed( entry ) ) {
-                        reported += RuleCheck::listing( row, RuleCheck::problemsOf( entry ) );
+                        reported += RuleCheck::listing(
+                            row, RuleCheck::problemsOf( RuleCheck::Rule( entry ) ) );
                     }
                 }
                 REQUIRE( FooterScanner( entries ).problems() == reported );
@@ -279,7 +291,7 @@ SCENARIO( "RuleCheck checks only what changed, compiling each pattern once", "[r
 
         WHEN( "rules are inserted" )
         {
-            check.insertRules( 0, { rule( "", "new (\\S+)" ), rules.at( 7 ).entry } );
+            check.insertRules( 0, { rule( "", "new (\\S+)" ), rules.at( 7 ) } );
 
             THEN( "only the patterns not seen before are compiled, and rules are renumbered" )
             {

@@ -42,6 +42,17 @@ QString oneLine( QString text )
     return text;
 }
 
+/// New rules, as the check holds them: none is an unfinished simple rule.
+QList<RuleCheck::Rule> rulesOf( const QList<FooterEntry>& entries )
+{
+    QList<RuleCheck::Rule> rules;
+    rules.reserve( entries.size() );
+    for ( const auto& entry : entries ) {
+        rules.append( RuleCheck::Rule( entry ) );
+    }
+    return rules;
+}
+
 /// The rows of a drag within the rule list: the drag token of the model
 /// they come from, so that no other list takes them, and the row numbers.
 const QString RuleRowsMimeType
@@ -58,25 +69,22 @@ RuleListModel::RuleListModel( QObject* parent )
 QList<FooterEntry> RuleListModel::entries() const
 {
     QList<FooterEntry> result;
-    result.reserve( rules_.size() );
-    for ( const auto& rule : rules_ ) {
-        result.append( rule.entry );
+    result.reserve( check_.count() );
+    for ( int row = 0; row < check_.count(); ++row ) {
+        result.append( check_.rule( row ).entry );
     }
     return result;
 }
 
 const FooterEntry& RuleListModel::entry( int row ) const
 {
-    return rules_.at( row ).entry;
+    return check_.rule( row ).entry;
 }
 
 void RuleListModel::setEntries( const QList<FooterEntry>& entries )
 {
     beginResetModel();
-    rules_.clear();
-    for ( const auto& entry : entries ) {
-        rules_.append( { entry, {} } );
-    }
+    check_.setRules( rulesOf( entries ) );
     endResetModel();
 }
 
@@ -85,20 +93,19 @@ void RuleListModel::appendEntries( const QList<FooterEntry>& entries )
     if ( entries.isEmpty() ) {
         return;
     }
-    const int first = static_cast<int>( rules_.size() );
+    const int first = check_.count();
     beginInsertRows( QModelIndex(), first, first + static_cast<int>( entries.size() ) - 1 );
-    for ( const auto& entry : entries ) {
-        rules_.append( { entry, {} } );
-    }
+    check_.insertRules( first, rulesOf( entries ) );
     endInsertRows();
 }
 
-void RuleListModel::setEntry( int row, const FooterEntry& entry )
+void RuleListModel::setEntry( int row, const FooterEntry& entry,
+                              const std::optional<SimpleRule>& unfinishedSimpleRule )
 {
-    if ( row < 0 || row >= rules_.size() ) {
+    if ( row < 0 || row >= check_.count() ) {
         return;
     }
-    rules_[ row ].entry = entry;
+    check_.setRule( row, RuleCheck::Rule( entry, unfinishedSimpleRule ) );
     emitRowChanged( row );
 }
 
@@ -110,33 +117,18 @@ bool RuleListModel::moveRule( int from, int to )
 
 std::optional<SimpleRule> RuleListModel::unfinishedSimpleRule( int row ) const
 {
-    return row >= 0 && row < rules_.size() ? rules_.at( row ).unfinishedSimpleRule : std::nullopt;
-}
-
-void RuleListModel::setUnfinishedSimpleRule( int row, const std::optional<SimpleRule>& rule )
-{
-    if ( row >= 0 && row < rules_.size() ) {
-        rules_[ row ].unfinishedSimpleRule = rule;
-    }
+    return row >= 0 && row < check_.count() ? check_.rule( row ).unfinishedSimpleRule
+                                            : std::nullopt;
 }
 
 RuleProblems RuleListModel::problems( int row ) const
 {
-    return row >= 0 && row < rules_.size() ? rules_.at( row ).problems : RuleProblems();
-}
-
-void RuleListModel::setProblems( int row, const RuleProblems& problems )
-{
-    if ( row < 0 || row >= rules_.size() || rules_.at( row ).problems == problems ) {
-        return;
-    }
-    rules_[ row ].problems = problems;
-    emitRowChanged( row );
+    return check_.problems( row );
 }
 
 int RuleListModel::rowCount( const QModelIndex& parent ) const
 {
-    return parent.isValid() ? 0 : static_cast<int>( rules_.size() );
+    return parent.isValid() ? 0 : check_.count();
 }
 
 int RuleListModel::columnCount( const QModelIndex& parent ) const
@@ -146,10 +138,11 @@ int RuleListModel::columnCount( const QModelIndex& parent ) const
 
 QVariant RuleListModel::data( const QModelIndex& index, int role ) const
 {
-    if ( !index.isValid() || index.row() >= rules_.size() ) {
+    if ( !index.isValid() || index.row() >= check_.count() ) {
         return {};
     }
-    const auto& rule = rules_.at( index.row() );
+    const auto& rule = check_.rule( index.row() );
+    const auto problems = check_.problems( index.row() );
     const bool keyColumn = index.column() == KeyColumn;
 
     switch ( role ) {
@@ -178,14 +171,13 @@ QVariant RuleListModel::data( const QModelIndex& index, int role ) const
         }
         return {};
     case Qt::BackgroundRole:
-        return rule.problems.isEmpty() ? QVariant()
-                                       : QVariant( QBrush( problemBackgroundColor() ) );
+        return problems.isEmpty() ? QVariant() : QVariant( QBrush( problemBackgroundColor() ) );
     case Qt::ToolTipRole: {
         QStringList lines;
         if ( !keyColumn && !rule.entry.linePattern.isEmpty() ) {
             lines.append( rule.entry.linePattern );
         }
-        lines += rule.problems.all();
+        lines += problems.all();
         return lines.isEmpty() ? QVariant() : QVariant( lines.join( QLatin1Char( '\n' ) ) );
     }
     default:
@@ -225,14 +217,15 @@ Qt::ItemFlags RuleListModel::flags( const QModelIndex& index ) const
 
 bool RuleListModel::setData( const QModelIndex& index, const QVariant& value, int role )
 {
-    if ( !index.isValid() || index.row() >= rules_.size() || index.column() != KeyColumn
+    if ( !index.isValid() || index.row() >= check_.count() || index.column() != KeyColumn
          || role != Qt::CheckStateRole ) {
         return false;
     }
     const bool enabled = value.toInt() == Qt::Checked;
-    auto& entry = rules_[ index.row() ].entry;
-    if ( entry.enabled != enabled ) {
-        entry.enabled = enabled;
+    auto rule = check_.rule( index.row() );
+    if ( rule.entry.enabled != enabled ) {
+        rule.entry.enabled = enabled;
+        check_.setRule( index.row(), rule );
         emitRowChanged( index.row() );
         Q_EMIT ruleChanged( index.row() );
     }
@@ -241,11 +234,11 @@ bool RuleListModel::setData( const QModelIndex& index, const QVariant& value, in
 
 bool RuleListModel::removeRows( int row, int count, const QModelIndex& parent )
 {
-    if ( parent.isValid() || row < 0 || count <= 0 || row + count > rules_.size() ) {
+    if ( parent.isValid() || row < 0 || count <= 0 || row + count > check_.count() ) {
         return false;
     }
     beginRemoveRows( QModelIndex(), row, row + count - 1 );
-    rules_.remove( row, count );
+    check_.removeRules( row, count );
     endRemoveRows();
     return true;
 }
@@ -253,22 +246,15 @@ bool RuleListModel::removeRows( int row, int count, const QModelIndex& parent )
 bool RuleListModel::moveRows( const QModelIndex& sourceParent, int sourceRow, int count,
                               const QModelIndex& destinationParent, int destinationChild )
 {
-    const int size = static_cast<int>( rules_.size() );
-    if ( sourceParent.isValid() || destinationParent.isValid() || count <= 0 || sourceRow < 0
-         || sourceRow + count > size || destinationChild < 0 || destinationChild > size
-         || ( destinationChild >= sourceRow && destinationChild <= sourceRow + count ) ) {
+    if ( sourceParent.isValid() || destinationParent.isValid()
+         || !check_.canMoveRules( sourceRow, count, destinationChild ) ) {
         return false;
     }
     if ( !beginMoveRows( QModelIndex(), sourceRow, sourceRow + count - 1, QModelIndex(),
                          destinationChild ) ) {
         return false;
     }
-    const auto moved = rules_.mid( sourceRow, count );
-    rules_.remove( sourceRow, count );
-    const int insertAt = destinationChild > sourceRow ? destinationChild - count : destinationChild;
-    for ( int i = 0; i < count; ++i ) {
-        rules_.insert( insertAt + i, moved.at( i ) );
-    }
+    check_.moveRules( sourceRow, count, destinationChild );
     endMoveRows();
     return true;
 }
@@ -331,7 +317,7 @@ std::optional<RuleListModel::DraggedRows> RuleListModel::draggedRows( const QMim
         qint32 row = -1;
         stream >> row;
         // The list selects one rule; a drag of several must be one block.
-        if ( stream.status() != QDataStream::Ok || row < 0 || row >= rules_.size()
+        if ( stream.status() != QDataStream::Ok || row < 0 || row >= check_.count()
              || ( i > 0 && row != rows.first + i ) ) {
             return std::nullopt;
         }
@@ -361,7 +347,7 @@ bool RuleListModel::dropMimeData( const QMimeData* data, Qt::DropAction action, 
     }
 
     // Without a row, e.g. below the last rule, the rules go to the end.
-    const int size = static_cast<int>( rules_.size() );
+    const int size = check_.count();
     const int before = row < 0 ? size : std::min( row, size );
     if ( before >= dragged->first && before <= dragged->first + dragged->count ) {
         return false; // Dropped where it already is.

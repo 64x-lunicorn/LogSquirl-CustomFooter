@@ -30,8 +30,6 @@
 
 #include <optional>
 
-#include <optional>
-
 namespace custom_footer {
 
 /// The colour marking what keeps the rules from being saved, in the rule
@@ -50,12 +48,14 @@ inline QColor problemBackgroundColor()
 }
 
 /**
- * The rules of the editor, in their order, each with the problems the
- * RuleCheck found in it, for display.
+ * The rules of the editor, in their order, each with its problems.
  *
- * Every rule is one row holding the whole FooterEntry, mappings included,
- * so a rule's data and marks stay together however the rows are inserted,
- * removed or moved. The list shows the enabled state as the check box of
+ * The rows are kept in a RuleCheck, the one source of the problems: every
+ * rule is one row holding the whole FooterEntry, mappings included, and
+ * its problems, which the check updates in the same step as the rule, so a
+ * rule's data and marks stay together however the rows are changed,
+ * inserted, removed or moved, and no signal of the model ever comes before
+ * its problems are up to date. The list shows the enabled state as the check box of
  * the key column, the key, and the line pattern; the rest is edited in the
  * detail panel through setEntry().
  *
@@ -75,14 +75,16 @@ public:
     QList<FooterEntry> entries() const;
     const FooterEntry& entry( int row ) const;
 
-    /// Replace all rules. Their problems are cleared.
+    /// Replace all rules, and check them.
     void setEntries( const QList<FooterEntry>& entries );
 
     /// Append rules after the existing ones.
     void appendEntries( const QList<FooterEntry>& entries );
 
-    /// Replace the rule in @p row, e.g. with the one edited in the panel.
-    void setEntry( int row, const FooterEntry& entry );
+    /// Replace the rule in @p row, e.g. with the one edited in the panel,
+    /// and its unfinished simple rule, and check it again.
+    void setEntry( int row, const FooterEntry& entry,
+                   const std::optional<SimpleRule>& unfinishedSimpleRule = std::nullopt );
 
     /// Move the rule in @p from so that it ends up in @p to.
     bool moveRule( int from, int to );
@@ -91,11 +93,18 @@ public:
     /// cannot be generated yet, as its end character is missing or
     /// unusable; its entry's patterns are empty meanwhile. Editor state:
     /// never part of entries(), but kept with the row when rules move.
+    /// Set with setEntry().
     std::optional<SimpleRule> unfinishedSimpleRule( int row ) const;
-    void setUnfinishedSimpleRule( int row, const std::optional<SimpleRule>& rule );
 
+    /// What the rule check found in the rule in @p row.
     RuleProblems problems( int row ) const;
-    void setProblems( int row, const RuleProblems& problems );
+
+    /// The check of all rules: their listing, whether they can be saved,
+    /// the keys in use.
+    const RuleCheck& check() const
+    {
+        return check_;
+    }
 
     int rowCount( const QModelIndex& parent = QModelIndex() ) const override;
     int columnCount( const QModelIndex& parent = QModelIndex() ) const override;
@@ -130,12 +139,6 @@ Q_SIGNALS:
     void aboutToDropRules();
 
 private:
-    struct Rule {
-        FooterEntry entry;
-        RuleProblems problems;
-        std::optional<SimpleRule> unfinishedSimpleRule = std::nullopt;
-    };
-
     void emitRowChanged( int row );
 
     struct DraggedRows {
@@ -150,7 +153,8 @@ private:
     /// not an address, so the payload tells nothing about the process.
     quint64 dragToken_;
 
-    QList<Rule> rules_;
+    /// The rows, with their problems.
+    RuleCheck check_;
 };
 
 } // namespace custom_footer

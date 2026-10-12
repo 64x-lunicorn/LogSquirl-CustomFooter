@@ -20,7 +20,6 @@
 #pragma once
 
 #include "footerentry.h"
-#include "rulecheck.h"
 #include "rulepreviewer.h"
 
 #include <QDialog>
@@ -54,11 +53,10 @@ class RuleTemplateDialog;
  * so they stay together whichever way the list changes. Edits in the panel
  * are stored into the selected rule as they are made.
  *
- * Rules are checked as they are edited, by a RuleCheck: the editor only
- * shows what it finds. A problem, such as an invalid pattern or an enabled
- * rule with a line pattern but no key, is marked at its field and in the
- * list, listed below it, and blocks OK and Apply. Rules may share a key:
- * they are alternatives for its value.
+ * Rules are checked as they are edited, by the RuleCheck that holds the
+ * model's rows: the editor only shows what it finds. A problem, such as an invalid pattern or an
+ * enabled rule with a line pattern but no key, is marked at its field and in the list, listed below
+ * it, and blocks OK and Apply. Rules may share a key: they are alternatives for its value.
  *
  * The panel previews the selected rule against the active file, which the
  * plugin passes in with setActiveFile(): shortly after an edit stops, a
@@ -119,15 +117,6 @@ private:
     void appendAndSelect( const FooterEntry& entry );
     void moveEntry( int from, int to );
 
-    /// Check the rule in @p row again, and only it.
-    void checkRow( int row );
-    /// Check all rules anew, as the model was reset.
-    void checkAllRows();
-    /// Check the new rules in rows @p first to @p last.
-    void checkInsertedRows( int first, int last );
-    /// Mark the check's problems of the rules in @p first to @p last in the
-    /// model, for the list and the panel.
-    void markRows( int first, int last );
     /// Show a warning without blocking: opened with open().
     void showError( const QString& title, const QString& text, const QString& objectName );
 
@@ -137,11 +126,6 @@ private:
     /// problems at the panel's fields, and allow OK and Apply only when the
     /// rules can be saved.
     void showProblems();
-
-    /// Follows the model's rows: an edit checks only the edited rule, and
-    /// moving or removing rules checks nothing. Each pattern is compiled
-    /// once for the dialog's lifetime.
-    RuleCheck check_;
 
     RuleListModel* model_ = nullptr;
     RuleListView* list_ = nullptr;

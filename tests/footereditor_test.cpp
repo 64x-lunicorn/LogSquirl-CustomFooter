@@ -852,6 +852,78 @@ SCENARIO( "FooterEditor shows the rules' problems and blocks OK and Apply", "[fo
     }
 }
 
+SCENARIO( "FooterEditor shows the current rule's problems while rows change", "[footereditor]" )
+{
+    // Whether the panel and the listing show exactly what the check says of
+    // the rules as they are now.
+    const auto showsCurrentProblems = []( const EditorUi& ui ) {
+        const auto problems = ui.model->problems( ui.currentRow() );
+        const auto shows
+            = [ & ]( const QLineEdit* field, const QLabel* reason, const QString& problem ) {
+                  return problem.isEmpty()
+                             ? EditorUi::unmarked( field, reason )
+                             : EditorUi::marked( field, reason ) && reason->text() == problem;
+              };
+        return shows( ui.key, ui.keyProblem, problems.key )
+               && shows( ui.linePattern, ui.linePatternProblem, problems.linePattern )
+               && shows( ui.valuePattern, ui.valuePatternProblem, problems.valuePattern )
+               && ui.problems->text() == ui.model->check().listing().join( '\n' );
+    };
+
+    GIVEN( "a rule with an invalid line pattern, a valid one, and one without a key" )
+    {
+        FooterEditor editor( { { "Bad", "(", "", true, {} },
+                               entryWithMapping( "A" ),
+                               { "", "k=(\\S+)", "", true, {} } } );
+        EditorUi ui( editor );
+
+        WHEN( "the selected invalid rule is removed from under the selection" )
+        {
+            ui.select( 0 );
+            REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
+            REQUIRE( ui.model->removeRows( 0, 1 ) );
+
+            THEN( "the rule selected now is shown with its own problems" )
+            {
+                REQUIRE( ui.currentRow() >= 0 );
+                REQUIRE( ui.key->text() == ui.model->entry( ui.currentRow() ).key );
+                REQUIRE( showsCurrentProblems( ui ) );
+                REQUIRE( ui.problems->text() == "Rule 2: a rule with a line pattern needs a key" );
+            }
+        }
+
+        WHEN( "the selected rule without a key is moved to the top" )
+        {
+            ui.select( 2 );
+            REQUIRE( ui.model->moveRule( 2, 0 ) );
+
+            THEN( "it stays selected with its mark, and the listing is renumbered" )
+            {
+                REQUIRE( ui.currentRow() == 0 );
+                REQUIRE( EditorUi::marked( ui.key, ui.keyProblem ) );
+                REQUIRE( showsCurrentProblems( ui ) );
+                REQUIRE( ui.problems->text().startsWith( "Rule 1: a rule with a line pattern needs "
+                                                         "a key\nRule 2: invalid line pattern" ) );
+            }
+        }
+
+        WHEN( "a rule is moved past the selected one, and another one appended" )
+        {
+            ui.select( 1 );
+            REQUIRE( ui.model->moveRule( 0, 2 ) );
+            editor.appendEntries( { { "Worse", "[", "", true, {} } } );
+
+            THEN( "the selected rule is still shown unmarked, and every problem is listed" )
+            {
+                REQUIRE( ui.key->text() == "A" );
+                REQUIRE( showsCurrentProblems( ui ) );
+                REQUIRE( ui.problems->text().split( '\n' ).size() == 3 );
+                REQUIRE( ui.problems->text().contains( "Rule 4: invalid line pattern" ) );
+            }
+        }
+    }
+}
+
 SCENARIO( "FooterEditor keeps the dialog open for Return and Escape in the panel's fields",
           "[footereditor]" )
 {

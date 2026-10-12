@@ -29,24 +29,23 @@ namespace custom_footer {
 
 namespace {
 
-/// The problems of @p rule, with @p patternError telling why a pattern
-/// does not compile.
-template <typename PatternError>
-RuleProblems problemsWith( const RuleCheck::Rule& rule, PatternError&& patternError )
+/// The problems of @p rule, whose line and value patterns do not compile
+/// for the given reasons, or do where these are empty.
+RuleProblems problemsWith( const RuleCheck::Rule& rule, const QString& linePatternError,
+                           const QString& valuePatternError )
 {
     const auto& entry = rule.entry;
     RuleProblems problems;
     if ( RuleCheck::isUsed( entry ) && entry.key.trimmed().isEmpty() ) {
         problems.key = RuleCheck::tr( "a rule with a line pattern needs a key" );
     }
-    const auto patternProblem = [ &patternError ]( const QString& pattern, const QString& what ) {
-        const auto error = patternError( pattern );
+    const auto patternProblem = []( const QString& error, const QString& what ) {
         return error.isEmpty() ? QString() : RuleCheck::tr( "%1: %2" ).arg( what, error );
     };
     problems.linePattern
-        = patternProblem( entry.linePattern, RuleCheck::tr( "invalid line pattern" ) );
+        = patternProblem( linePatternError, RuleCheck::tr( "invalid line pattern" ) );
     problems.valuePattern
-        = patternProblem( entry.valuePattern, RuleCheck::tr( "invalid value pattern" ) );
+        = patternProblem( valuePatternError, RuleCheck::tr( "invalid value pattern" ) );
     if ( rule.unfinishedSimpleRule ) {
         problems.endCharacter = endCharacterProblem( *rule.unfinishedSimpleRule );
     }
@@ -88,7 +87,17 @@ bool RuleCheck::isUsed( const FooterEntry& entry )
 
 RuleProblems RuleCheck::problemsOf( const Rule& rule )
 {
-    return problemsWith( rule, &FooterScanner::patternError );
+    return problemsWith( rule, FooterScanner::patternError( rule.entry.linePattern ),
+                         FooterScanner::patternError( rule.entry.valuePattern ) );
+}
+
+RuleProblems RuleCheck::problemsOf( const Rule& rule, const QRegularExpression& linePattern,
+                                    const QRegularExpression& valuePattern )
+{
+    const auto errorOf = []( const QRegularExpression& regex ) {
+        return regex.isValid() ? QString() : regex.errorString();
+    };
+    return problemsWith( rule, errorOf( linePattern ), errorOf( valuePattern ) );
 }
 
 QStringList RuleCheck::listing( int row, const RuleProblems& problems )
@@ -131,12 +140,17 @@ void RuleCheck::removeRules( int row, int count )
     rows_.remove( row, count );
 }
 
-void RuleCheck::moveRules( int first, int count, int destination )
+bool RuleCheck::canMoveRules( int first, int count, int destination ) const
 {
     const int size = this->count();
-    if ( count <= 0 || first < 0 || first + count > size || destination < 0 || destination > size
-         || ( destination >= first && destination <= first + count ) ) {
-        return;
+    return count > 0 && first >= 0 && first + count <= size && destination >= 0
+           && destination <= size && ( destination < first || destination > first + count );
+}
+
+bool RuleCheck::moveRules( int first, int count, int destination )
+{
+    if ( !canMoveRules( first, count, destination ) ) {
+        return false;
     }
     const auto moved = rows_.mid( first, count );
     rows_.remove( first, count );
@@ -144,6 +158,7 @@ void RuleCheck::moveRules( int first, int count, int destination )
     for ( int i = 0; i < count; ++i ) {
         rows_.insert( insertAt + i, moved.at( i ) );
     }
+    return true;
 }
 
 RuleProblems RuleCheck::problems( int row ) const
@@ -174,9 +189,10 @@ QStringList RuleCheck::keysInUse() const
     QStringList keys;
     QSet<QString> seen;
     for ( const auto& row : rows_ ) {
-        if ( row.used && !seen.contains( row.key ) ) {
-            seen.insert( row.key );
-            keys.append( row.key );
+        const auto& key = row.rule.entry.key;
+        if ( row.used && !seen.contains( key ) ) {
+            seen.insert( key );
+            keys.append( key );
         }
     }
     return keys;
@@ -185,10 +201,10 @@ QStringList RuleCheck::keysInUse() const
 RuleCheck::Row RuleCheck::check( const Rule& rule )
 {
     Row row;
-    row.problems = problemsWith(
-        rule, [ this ]( const QString& pattern ) { return patternError( pattern ); } );
+    row.rule = rule;
+    row.problems = problemsWith( rule, patternError( rule.entry.linePattern ),
+                                 patternError( rule.entry.valuePattern ) );
     row.used = isUsed( rule.entry ) && row.problems.isEmpty();
-    row.key = rule.entry.key;
     return row;
 }
 

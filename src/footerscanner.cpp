@@ -190,7 +190,9 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
         }
 
         // Skipped for the problems the editor shows, in its words.
-        const auto problems = RuleCheck::problemsOf( entry );
+        auto rule = compile( entry, i );
+        const auto problems
+            = RuleCheck::problemsOf( RuleCheck::Rule( entry ), rule.lineRegex, rule.valueRegex );
         if ( !problems.isEmpty() ) {
             problems_ += RuleCheck::listing( i, problems );
             continue;
@@ -199,7 +201,7 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
         if ( !keys_.contains( entry.key ) ) {
             keys_.append( entry.key );
         }
-        rules_.append( compile( entry, i ) );
+        rules_.append( std::move( rule ) );
     }
 }
 
@@ -384,13 +386,15 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     }
     // A rule without a key still matches; only its patterns can keep it
     // from matching.
-    const auto problem = RuleCheck::problemsOf( entry ).preventingMatches();
+    const auto selected = compile( entry, rule );
+    const auto problem
+        = RuleCheck::problemsOf( RuleCheck::Rule( entry ), selected.lineRegex, selected.valueRegex )
+              .preventingMatches();
     if ( !problem.isEmpty() ) {
         preview.status = Preview::Status::InvalidPattern;
         preview.error = problem;
         return preview;
     }
-    const auto selected = compile( entry, rule );
     if ( filePath.isEmpty() ) {
         preview.status = Preview::Status::NoFile;
         return preview;

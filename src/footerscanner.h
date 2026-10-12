@@ -246,7 +246,8 @@ private:
     /// the one extraction valueOf() and matchOf() share.
     static std::optional<Matches> matchesOf( const Rule& rule, const QString& line );
 
-    /// Compile a rule that has no problems (RuleCheck).
+    /// Compile a rule. Its patterns are compiled on first use, and once:
+    /// RuleCheck::problemsOf() tells from them whether it can be used.
     static Rule compile( const FooterEntry& entry, int index );
 
     /// The value a rule extracts from a line, if it matches, and where. Only

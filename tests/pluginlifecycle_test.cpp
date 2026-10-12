@@ -70,6 +70,11 @@ struct FakeHost {
     /// register_active_file_callback() throws, as a failing host function
     /// would: the plugin's initialisation fails at that point.
     bool failActiveFileCallback = false;
+    /// What the last open_regex_lab() got, to answer as the user would.
+    QString regexLabPattern;
+    int regexLabFlags = 0;
+    LogSquirlRegexLabCallbackFn regexLabCallback = nullptr;
+    void* regexLabUserData = nullptr;
 };
 
 FakeHost& host()
@@ -136,8 +141,13 @@ LogSquirlHostApi fakeApi()
           };
     // The functions of LogSquirl 26.11, which the plugin reads only when the
     // size the host passes reports them.
-    api.open_regex_lab = []( void*, const char*, int, LogSquirlRegexLabCallbackFn, void* ) {
+    api.open_regex_lab = []( void*, const char* pattern, int flags,
+                             LogSquirlRegexLabCallbackFn callback, void* userData ) {
         host().calls.append( "open_regex_lab" );
+        host().regexLabPattern = QString::fromUtf8( pattern );
+        host().regexLabFlags = flags;
+        host().regexLabCallback = callback;
+        host().regexLabUserData = userData;
         return 0;
     };
     api.go_to_log_line = []( void*, uint64_t ) {
@@ -783,6 +793,100 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
             REQUIRE( withoutHandle == 1 );
             REQUIRE( host().calls.isEmpty() );
         }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin tests a rule's pattern in the host's Regex Lab", "[plugin][regexlab]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    GIVEN( "the plugin loaded by LogSquirl 26.11, with the rule editor open" )
+    {
+        REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+        logsquirl_plugin_configure( nullptr );
+        QPointer<FooterEditor> editor = openEditorWindow();
+        REQUIRE( editor );
+        auto* test = editor->findChild<QToolButton*>( "testLinePatternButton" );
+        REQUIRE( test );
+
+        WHEN( "Test… is clicked" )
+        {
+            test->click();
+
+            THEN( "the host opens its Regex Lab with the rule's pattern, matching case" )
+            {
+                REQUIRE( host().calls.contains( "open_regex_lab" ) );
+                REQUIRE( host().regexLabPattern == "VIN:\\s+(\\S+)" );
+                REQUIRE( host().regexLabFlags == LOGSQUIRL_REGEX_LAB_MATCH_CASE );
+            }
+
+            AND_WHEN( "the user applies a pattern without Match case" )
+            {
+                host().regexLabCallback( host().regexLabUserData, LOGSQUIRL_REGEX_LAB_APPLIED,
+                                         "vin=(\\S+)", 0 );
+
+                THEN( "the rule has it, ignoring case" )
+                {
+                    REQUIRE( editor->entries().at( 0 ).linePattern == "(?i)vin=(\\S+)" );
+                    REQUIRE( editor->findChild<QLineEdit*>( "linePatternEdit" )->text()
+                             == "(?i)vin=(\\S+)" );
+                }
+            }
+
+            AND_WHEN( "the user cancels" )
+            {
+                host().regexLabCallback( host().regexLabUserData, LOGSQUIRL_REGEX_LAB_CANCELLED,
+                                         nullptr, 0 );
+
+                THEN( "the rule is unchanged, and Test… is offered again" )
+                {
+                    REQUIRE( editor->entries().at( 0 ).linePattern == "VIN:\\s+(\\S+)" );
+                    REQUIRE( test->isEnabled() );
+                }
+            }
+
+            AND_WHEN( "the plugin is shut down while the Lab is open, and an answer comes late" )
+            {
+                logsquirl_plugin_shutdown();
+                host().regexLabCallback( host().regexLabUserData, LOGSQUIRL_REGEX_LAB_APPLIED,
+                                         "vin=(\\S+)", 0 );
+
+                THEN( "the editor is gone, and nothing is saved" )
+                {
+                    REQUIRE_FALSE( editor );
+                    REQUIRE( FooterConfig::loadEntries( configDir.path() ).at( 0 ).linePattern
+                             == "VIN:\\s+(\\S+)" );
+                }
+            }
+        }
+    }
+
+    GIVEN( "the plugin loaded by LogSquirl 26.10, with the rule editor open" )
+    {
+        BaseHostTable base( api );
+        REQUIRE( logsquirl_plugin_init( base.api(), &handle ) == 0 );
+        logsquirl_plugin_configure( nullptr );
+        QPointer<FooterEditor> editor = openEditorWindow();
+        REQUIRE( editor );
+        auto* test = editor->findChild<QToolButton*>( "testLinePatternButton" );
+        REQUIRE( test );
+
+        THEN( "Test… is disabled, saying what it needs" )
+        {
+            REQUIRE_FALSE( test->isEnabled() );
+            REQUIRE( test->toolTip() == "Needs LogSquirl 26.11 or later" );
+        }
+
+        logsquirl_plugin_shutdown();
     }
 
     logsquirl_plugin_shutdown();

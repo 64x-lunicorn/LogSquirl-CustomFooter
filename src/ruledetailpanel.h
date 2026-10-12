@@ -40,6 +40,9 @@ namespace custom_footer {
 
 class RulePreviewView;
 
+/// One of a rule's two patterns.
+enum class PatternField { Line, Value };
+
 /**
  * The form for one rule: enabled, key, line pattern, value pattern and the
  * value mappings, each field with the reason it keeps the rules from being
@@ -56,6 +59,12 @@ class RulePreviewView;
  *
  * The panel only edits a copy: every change emits edited(), and the owner
  * stores entry() into its rule. showEntry() does not emit edited().
+ *
+ * Next to each pattern, Test… asks the owner to open it in LogSquirl's
+ * Regex Lab (patternTestRequested()), and setPattern() brings an applied
+ * pattern back. Test… of the line pattern is offered in simple mode too,
+ * for the generated pattern; the value pattern's is not, as simple mode
+ * has none.
  *
  * The layout is a column of sections, so that more of them, such as a
  * live preview, can be added below the form.
@@ -98,6 +107,16 @@ public:
     /// macOS, do not end the edit themselves.
     void commitPendingEdit();
 
+    /// Why Test… cannot open the Regex Lab now, e.g. as the host has none;
+    /// shown as the buttons' tooltip, and they are disabled. Empty: it can.
+    void setPatternTestUnavailable( const QString& reason );
+
+    /// Put @p pattern into @p field as if the user had typed it, and emit
+    /// edited() if it changed. A changed pattern of a rule in simple mode
+    /// switches it to advanced first, as if Advanced had been checked, as
+    /// only advanced mode edits patterns by hand.
+    void setPattern( PatternField field, const QString& pattern );
+
     /// The live preview section, below the rule's fields.
     RulePreviewView* previewView() const
     {
@@ -113,6 +132,9 @@ Q_SIGNALS:
     /// The user changed the rule in the panel.
     void edited();
 
+    /// The user clicked Test… next to the pattern in @p field.
+    void patternTestRequested( PatternField field );
+
 private Q_SLOTS:
     void advancedToggled( bool advanced );
     void simpleFieldEdited();
@@ -126,7 +148,7 @@ private:
     /// A line edit in the form, with the label below it that says why its
     /// content keeps the rules from being saved.
     QLineEdit* addField( QFormLayout* form, const QString& label, const QString& objectName,
-                         QLabel** problemLabel );
+                         QLabel** problemLabel, QToolButton** testButton = nullptr );
     /// Handle Return and Escape in @p field, as in every field of the form.
     void watchField( QLineEdit* field );
     /// A hidden label for why a field keeps the rules from being saved.
@@ -141,6 +163,8 @@ private:
     void setAdvanced( bool advanced );
     /// Offer switching to simple mode only while the patterns allow it.
     void updateAdvancedCheck();
+    /// Enable Test… where it can be used, with a tooltip saying why not.
+    void updateTestButtons();
 
     QCheckBox* enabledCheck_ = nullptr;
     QLineEdit* keyEdit_ = nullptr;
@@ -149,6 +173,10 @@ private:
     QLabel* keyProblem_ = nullptr;
     QLabel* linePatternProblem_ = nullptr;
     QLabel* valuePatternProblem_ = nullptr;
+    QToolButton* testLinePatternButton_ = nullptr;
+    QToolButton* testValuePatternButton_ = nullptr;
+    /// Why Test… cannot open the Regex Lab now; empty when it can.
+    QString testUnavailable_;
 
     QCheckBox* advancedCheck_ = nullptr;
     QLineEdit* textBeforeEdit_ = nullptr;

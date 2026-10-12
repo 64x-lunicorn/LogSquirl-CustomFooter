@@ -48,6 +48,7 @@
 #include <QToolButton>
 
 #include <memory>
+#include <stdexcept>
 
 using namespace custom_footer;
 
@@ -633,5 +634,125 @@ SCENARIO( "Destroying a footer session leaves nothing of the plugin running",
             }
         }
         modal.reject();
+    }
+}
+
+SCENARIO( "A footer session lets the editor test patterns in the host's Regex Lab",
+          "[footersession][regexlab]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), { rule( "VIN" ) } ) );
+    FooterDisplayWidget footer;
+    Log log;
+
+    // The host's Regex Lab: it keeps the answer, and, like the host, never
+    // answers once the context is gone.
+    int opened = 0;
+    RegexLabPattern asked;
+    QPointer<const QObject> context;
+    RegexLabDone done;
+    bool throws = false;
+    auto host = log.host();
+    host.openRegexLab
+        = [ & ]( const RegexLabPattern& pattern, const QObject* askedBy, RegexLabDone answer ) {
+              ++opened;
+              if ( throws ) {
+                  throw std::runtime_error( "no Lab today" );
+              }
+              asked = pattern;
+              context = askedBy;
+              done = std::move( answer );
+              return true;
+          };
+    const auto apply = [ & ]( const QString& pattern ) {
+        REQUIRE( done );
+        auto answer = std::move( done );
+        done = nullptr;
+        if ( context ) {
+            answer( RegexLabPattern{ pattern, true } );
+        }
+    };
+
+    GIVEN( "a session on a host without the Regex Lab" )
+    {
+        FooterSession session( configDir.path(), &footer, log.host() );
+        QPointer<FooterEditor> editor = session.openEditor( nullptr );
+
+        THEN( "the editor's Test… is disabled, saying what it needs" )
+        {
+            auto* test = child<QToolButton>( *editor, "testLinePatternButton" );
+            REQUIRE_FALSE( test->isEnabled() );
+            REQUIRE( test->toolTip() == "Needs LogSquirl 26.11 or later" );
+        }
+    }
+
+    GIVEN( "a session on a host with the Regex Lab, and the editor open" )
+    {
+        auto session = std::make_unique<FooterSession>( configDir.path(), &footer, host );
+        QPointer<FooterEditor> editor = session->openEditor( nullptr );
+        REQUIRE( editor );
+        auto* test = child<QToolButton>( *editor, "testLinePatternButton" );
+        REQUIRE( test->isEnabled() );
+
+        WHEN( "Test… is clicked, a pattern applied in the Lab, and Apply clicked" )
+        {
+            test->click();
+            REQUIRE( opened == 1 );
+            REQUIRE( asked.pattern == "VIN:\\s+(\\S+)" );
+            REQUIRE( context == editor );
+            apply( "VIN=(\\S+)" );
+            clickApply( *editor );
+
+            THEN( "the applied pattern is saved" )
+            {
+                REQUIRE( FooterConfig::loadEntries( configDir.path() ).at( 0 ).linePattern
+                         == "VIN=(\\S+)" );
+            }
+        }
+
+        WHEN( "opening the Lab throws" )
+        {
+            throws = true;
+            test->click();
+
+            THEN( "it is logged, and Test… is offered again" )
+            {
+                REQUIRE( opened == 1 );
+                REQUIRE( log.all.join( '\n' ).contains( "opening the Regex Lab failed" ) );
+                REQUIRE( test->isEnabled() );
+            }
+        }
+
+        WHEN( "the editor is accepted while the Lab is open" )
+        {
+            test->click();
+            editor->accept();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "the rules are saved without the Lab's pattern, and its answer is dropped" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( context );
+                apply( "VIN=(\\S+)" );
+                REQUIRE( FooterConfig::loadEntries( configDir.path() ).at( 0 ).linePattern
+                         == "VIN:\\s+(\\S+)" );
+            }
+        }
+
+        WHEN( "the session is destroyed while the Lab is open" )
+        {
+            test->click();
+            session.reset();
+
+            THEN( "the editor is gone, and a late answer reaches nothing" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( context );
+                apply( "VIN=(\\S+)" );
+                REQUIRE( FooterConfig::loadEntries( configDir.path() ).at( 0 ).linePattern
+                         == "VIN:\\s+(\\S+)" );
+            }
+        }
     }
 }

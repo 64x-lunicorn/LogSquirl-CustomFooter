@@ -41,6 +41,67 @@
 
 namespace custom_footer {
 
+namespace {
+
+/// The inline option that makes a whole pattern ignore case, the only way
+/// a rule says so.
+const QString ignoreCase = QStringLiteral( "(?i)" );
+
+/// How long the pattern's leading start-of-pattern items are, such as
+/// (*CRLF) or (*UTF): PCRE takes them only before everything else, (?i)
+/// included.
+qsizetype startItemsLength( const QString& pattern )
+{
+    qsizetype length = 0;
+    while ( pattern.mid( length ).startsWith( QStringLiteral( "(*" ) ) ) {
+        const auto end = pattern.indexOf( QLatin1Char( ')' ), length );
+        if ( end < 0 ) {
+            break;
+        }
+        length = end + 1;
+    }
+    return length;
+}
+
+/// A rule's pattern as the Regex Lab tests it: (?i) at its start, after
+/// any start-of-pattern items, becomes the Lab's Match case flag, as long
+/// as more of the pattern follows it.
+RegexLabPattern toRegexLab( const QString& pattern )
+{
+    const auto start = startItemsLength( pattern );
+    const auto rest = pattern.mid( start );
+    if ( rest.startsWith( ignoreCase ) && rest.size() > ignoreCase.size() ) {
+        return { pattern.left( start ) + rest.mid( ignoreCase.size() ), false };
+    }
+    return { pattern, true };
+}
+
+/// An applied pattern as a rule's pattern: without Match case, (?i) at its
+/// start, after any start-of-pattern items, unless it is there already or
+/// nothing would follow it.
+QString fromRegexLab( const RegexLabPattern& applied )
+{
+    const auto start = startItemsLength( applied.pattern );
+    const auto rest = applied.pattern.mid( start );
+    if ( applied.matchesCase || rest.isEmpty() || rest.startsWith( ignoreCase ) ) {
+        return applied.pattern;
+    }
+    return applied.pattern.left( start ) + ignoreCase + rest;
+}
+
+/// The pattern of @p entry in @p field.
+QString& patternOf( FooterEntry& entry, PatternField field )
+{
+    return field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+}
+
+const QString& patternOf( const FooterEntry& entry, PatternField field )
+{
+    return field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+}
+
+} // namespace
+
 FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     : QDialog( parent )
 {
@@ -161,6 +222,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( list_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
              &FooterEditor::showCurrentRule );
     connect( panel_, &RuleDetailPanel::edited, this, &FooterEditor::storePanelInCurrentRule );
+    connect( panel_, &RuleDetailPanel::patternTestRequested, this, &FooterEditor::testPattern );
 
     // The model's rule check is up to date with every signal of the model;
     // after a change of the rows, only the listing is shown again, with the
@@ -203,6 +265,8 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
         panel_->commitPendingEdit();
         Q_EMIT applied();
     } );
+
+    updatePatternTest();
 
     // ── Populate ─────────────────────────────────────────────────────────
     model_->setEntries( entries );
@@ -259,6 +323,12 @@ QString FooterEditor::activeFile() const
 void FooterEditor::setMaxLines( int maxLines )
 {
     previewer_->setMaxLines( maxLines );
+}
+
+void FooterEditor::setRegexLab( OpenRegexLab openRegexLab )
+{
+    openRegexLab_ = std::move( openRegexLab );
+    updatePatternTest();
 }
 
 void FooterEditor::done( int result )
@@ -446,7 +516,82 @@ void FooterEditor::ruleChanged( int row )
     schedulePreview();
 }
 
+void FooterEditor::testPattern( PatternField field )
+{
+    panel_->commitPendingEdit();
+    const int row = currentRow();
+    if ( row < 0 || !openRegexLab_ || regexLabOpen_ || closing_ ) {
+        return;
+    }
+    const auto pattern = toRegexLab( patternOf( model_->entry( row ), field ) );
+    // Follows the rule when rules move, and is invalid once it is removed.
+    const QPersistentModelIndex rule( model_->index( row, RuleListModel::KeyColumn ) );
+
+    setRegexLabOpen( true );
+    // The host never answers once this editor is destroyed.
+    const bool opened = openRegexLab_(
+        pattern, this,
+        [ this, rule, field, pattern ]( const std::optional<RegexLabPattern>& applied ) {
+            regexLabAnswered( rule, field, pattern, applied );
+        } );
+    if ( !opened ) {
+        setRegexLabOpen( false );
+    }
+}
+
 // ── Private helpers ──────────────────────────────────────────────────────
+
+void FooterEditor::regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                                     const RegexLabPattern& opened,
+                                     const std::optional<RegexLabPattern>& applied )
+{
+    setRegexLabOpen( false );
+    // Cancelled, the editor closed (its rules are saved or dropped already),
+    // or the rule removed: nothing to write the pattern into. Applied as it
+    // was opened: nothing to change, not even edits made meanwhile.
+    if ( !applied || closing_ || !rule.isValid()
+         || ( applied->pattern == opened.pattern && applied->matchesCase == opened.matchesCase ) ) {
+        return;
+    }
+    const auto pattern = fromRegexLab( *applied );
+    const int row = rule.row();
+    if ( row == currentRow() ) {
+        // As if typed: the panel stores it, and the check and the preview follow.
+        panel_->setPattern( field, pattern );
+        return;
+    }
+    auto entry = model_->entry( row );
+    auto& target = patternOf( entry, field );
+    if ( target == pattern ) {
+        return;
+    }
+    target = pattern;
+    // A pattern written by hand: no longer an unfinished simple rule.
+    model_->setEntry( row, entry );
+    showProblems();
+    // Another rule of the key may supply its value now.
+    schedulePreview();
+}
+
+void FooterEditor::setRegexLabOpen( bool open )
+{
+    regexLabOpen_ = open;
+    updatePatternTest();
+}
+
+void FooterEditor::updatePatternTest()
+{
+    if ( !openRegexLab_ ) {
+        panel_->setPatternTestUnavailable( tr( "Needs LogSquirl 26.11 or later" ) );
+    }
+    else if ( regexLabOpen_ ) {
+        panel_->setPatternTestUnavailable(
+            tr( "The Regex Lab is open: apply or cancel it there first" ) );
+    }
+    else {
+        panel_->setPatternTestUnavailable( {} );
+    }
+}
 
 int FooterEditor::currentRow() const
 {

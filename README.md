@@ -132,6 +132,32 @@ opens, a rule whose patterns have that form is shown in simple mode, every
 other rule in advanced mode. Simple rules are saved as their patterns, so the
 config and JSON formats do not change.
 
+### Testing a pattern in the Regex Lab
+
+**Test…** next to the line pattern and next to the value pattern opens the
+pattern in LogSquirl's **Regex Lab**, to try it against sample lines and
+change it there. **Apply** in the Lab puts the pattern into the rule, just as
+if you had typed it: the validation marks and the live preview follow, and
+it is saved with OK or Apply in the editor. **Cancel**, or closing the Lab,
+changes nothing.
+
+- Rules have no "match case" setting of their own: they match case unless
+  the pattern starts with `(?i)`. The Lab opens with **Match case** on, or
+  off for a pattern starting with `(?i)` (shown without it). If you apply
+  with Match case off, the rule's pattern gets `(?i)` in front (after
+  start-of-pattern items such as `(*CRLF)`, which must come first).
+- Applying the pattern exactly as the Lab opened with it changes nothing.
+- In simple mode, Test… of the line pattern opens the generated pattern.
+  Applying it unchanged keeps the rule simple; applying a changed pattern
+  switches the rule to Advanced with that pattern, as editing it by hand
+  would. A simple rule has no value pattern, so its Test… is disabled.
+- One Lab is open for the editor at a time; Test… is disabled until you
+  apply or cancel it. The pattern goes to the rule you opened the Lab for,
+  even if you select another rule or move it meanwhile. If you remove that
+  rule, or close the editor, before applying, the Lab's pattern is not used.
+- Test… needs LogSquirl 26.11 or later. On older versions it is disabled
+  and says so in its tooltip; everything else works as before.
+
 ### Rule templates
 
 **From template…** next to the add button adds a ready-made rule to adjust

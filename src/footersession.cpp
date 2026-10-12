@@ -206,6 +206,18 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     editor_ = editor;
     editor->setMaxLines( FooterConfig::loadMaxLines( configDir_ ) );
     editor->setActiveFile( activeFile_ );
+    if ( host_.openRegexLab ) {
+        // Test… opens the host's Regex Lab; a failure to open it is logged
+        // instead of thrown into the editor's button handler.
+        editor->setRegexLab(
+            [ this ]( const RegexLabPattern& pattern, const QObject* context, RegexLabDone done ) {
+                bool opened = false;
+                guarded( host_, "opening the Regex Lab", [ & ] {
+                    opened = host_.openRegexLab( pattern, context, std::move( done ) );
+                } );
+                return opened;
+            } );
+    }
     placeEditor( editor, over, host_ );
 
     // Apply button: save and rescan without closing the dialog.

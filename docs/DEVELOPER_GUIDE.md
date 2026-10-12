@@ -54,6 +54,9 @@ sequenceDiagram
     Plugin->>Host: api->register_footer_widget(footerWidget)
     Plugin->>Plugin: Create a FooterSession on it
     Note right of Plugin: The session's FooterController loads the rules<br/>and logs their problems as warnings
+    opt the session has HostFeature::SelectedLogLines (26.11)
+        Plugin->>Host: api->register_menu_action("Custom Footer", "Rule from selected line…", callback)
+    end
     Plugin->>Host: api->register_active_file_callback(onActiveFileChanged)
     Plugin->>Host: api->get_active_file_path() (on the UI thread)
     Plugin->>Plugin: FooterSession::setActiveFile(current file)
@@ -74,6 +77,13 @@ sequenceDiagram
     Plugin->>Plugin: User edits rules, clicks OK (FooterEditor::finished)
     Plugin->>Plugin: The session saves the rules (FooterConfig::saveEntries())
     Plugin->>Plugin: and reloads them (FooterController::reloadConfig())
+
+    Note over Host,Plugin: User clicks "Custom Footer → Rule from selected line…" (26.11)
+
+    Host->>Plugin: onRuleFromLineMenuAction() callback
+    Plugin->>Plugin: FooterSession::ruleFromSelectedLine(main window)
+    Plugin->>Host: api->get_selected_log_lines() (on the UI thread)
+    Plugin->>Plugin: Editor with a new rule and the first line, or a message: no line selected
 
     Note over Host,Plugin: Host unloads the plugin
 
@@ -230,6 +240,7 @@ FooterSession( const QString& configDir, FooterDisplayWidget* footer, HostFuncti
 ~FooterSession();
 void setActiveFile( const QString& filePath );
 FooterEditor* openEditor( QWidget* over );
+FooterEditor* ruleFromSelectedLine( QWidget* over );
 bool has( HostFeature feature ) const noexcept;
 ```
 
@@ -245,6 +256,22 @@ and reloads them, and a failed save is logged as a warning and reloads
 all the same. The editor never touches `FooterConfig`. All members run on
 the UI thread.
 
+`ruleFromSelectedLine()` is the second way into the editor, for
+[Rule from a selected line](#rule-from-a-selected-line): it reads
+`HostFunctions::selectedLogLines()` at once, opens the editor as
+`openEditor()` does (or brings the open one forward, edits kept) and calls
+`FooterEditor::addRuleFromLine()` with the first line. Without a selection
+it opens no editor and shows a message instead: a `QMessageBox` opened with
+`open()`, never `exec()`, over the open editor or else over the given
+window, tracked by the session, shown once however often it is asked for,
+and deleted in the destructor right after the editor. Over the editor the
+message says to close it first, as the window-modal editor blocks the
+window that takes the selection. Without the host function it does
+nothing. The editor's **From selected line…** button reaches the same code
+through the editor's `ruleFromLineRequested()` signal, which the session
+connects when it opens the editor; it offers the button
+(`offerRuleFromLine()`) only when `has( HostFeature::SelectedLogLines )`.
+
 `HostFunctions` (`hostfunctions.h`) is what the session needs from the
 host, as a value: `log`, and the three [host functions](#host-functions)
 of LogSquirl 26.11. A member the running host does not offer stays empty,
@@ -258,7 +285,9 @@ what it needs of them when the session opens it: `openEditor()` hands
 it the Regex Lab with `FooterEditor::setRegexLab()`, wrapped in
 `guarded()` so that a throwing host function is logged and counts as a
 Lab that did not open, or nothing on a host without it (see
-[Regex Lab](#regex-lab)).
+[Regex Lab](#regex-lab)). It offers the editor's **From selected line…**
+button only with `SelectedLogLines`, and the C entry points ask the same
+before they register the menu for a rule from the selected line.
 
 **Go to a value's Log Line (#21).** The session wires the footer itself;
 the footer widget never learns about the host. Where `has(
@@ -357,7 +386,14 @@ order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
 the active-file callback, and pushes `get_active_file_path()` into the
-session. If any step throws, `init_ex()` logs it, shuts down and fails. The
+session. Only where the session has `HostFeature::SelectedLogLines`
+(LogSquirl 26.11), it registers a second menu action right after creating
+the session: `register_menu_action( "Custom Footer", "Rule from selected
+line…" )`, which LogSquirl puts into a submenu *Plugins → Custom Footer*
+(the menu path is a slash-separated path of submenus since 26.10); "Custom
+Footer…" stays where it was. A base table sees exactly the calls of 0.4.0,
+which the FakeHost call-order tests pin; a 26.11 table's order is pinned
+too. If any step throws, `init_ex()` logs it, shuts down and fails. The
 active file is read only there and in the host's active-file callback,
 both on the UI thread, which LogSquirl 26.11 requires; the session never
 asks the host. `shutdown()` destroys the session, then
@@ -368,7 +404,8 @@ what a host and a user see: registrations, the editor's window, saved
 files and log messages.
 
 **Why this design.** The session has two verbs, `setActiveFile()` and
-`openEditor()`, and everything else (saving, reloading, the line limit,
+`openEditor()` (with `ruleFromSelectedLine()` as a second way to open the
+editor, #22), and everything else (saving, reloading, the line limit,
 placing the editor) happens behind them; public `save()`/`reload()`
 methods or a `RuleStore` port would be shallow pass-throughs with the
 editor as their only caller. Config I/O, the editor's lifetime and the
@@ -480,6 +517,8 @@ hidden global test state.
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, the rule that supplied it, and the Log Line it was found in |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click and, where offered, asks to go to its Log Line on a double-click |
 | **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
+| **RuleFromLine** | `rulefromline.h/.cpp` | Makes a simple rule and a key from a sample line and the value marked in it |
+| **SelectedLinePicker** | `selectedlinepicker.h/.cpp` | The editor's view of the Log Line a rule is made from: click or mark the value |
 | **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values, and the dialog choosing one |
 
 ## Scanning Algorithm
@@ -764,6 +803,67 @@ host function, and the session destroyed with a Lab open;
 `tests/pluginlifecycle_test.cpp` goes through `init_ex()` and the
 FakeHost's `open_regex_lab` (flags, Apply, Cancel, an answer after
 shutdown) and checks the disabled buttons after `init()`.
+
+### Rule from a selected line
+
+`rulefromline.h` holds two free functions, independent of the editor:
+
+- **`ruleFromLine( line, start, length )`** makes the `SimpleRule` that
+  finds the value marked in a sample line, with `suggestedKey()` of its
+  text and the value itself. The mark loses the whitespace around it; a
+  length of 0 is a click and marks the word starting at the first
+  non-whitespace at or after it. Whitespace is ASCII whitespace, as `\s`
+  in the patterns. The text before the value is the word before it (words
+  are separated by whitespace), with the word before that when it has no
+  letter or digit (`id =`). Candidate value ends are whitespace, the code
+  point right after the value (if `endCharacterProblem()` accepts it), and
+  the end of the line. Every candidate is **verified**: the generated
+  pattern, compiled as the scanner compiles it, must capture exactly the
+  marked value at its position in the line; the first that does is taken.
+  If none does, the text grows by one more word to the left and the ends
+  are tried again, so a text that also occurs earlier in the line
+  (`a: 1\ta: 2`) becomes long enough to find the marked occurrence. Nothing
+  comes back for an empty mark, a mark outside the line, a value at the
+  start of the line (no text before it), or a value no simple rule finds.
+  Escaping is `simpleLinePattern()`'s, so special characters, tabs and
+  Unicode before the value are matched literally.
+- **`suggestedKey( textBefore )`** is the text's longest word, the last of
+  equally long ones, where a word is letters and digits of any script and
+  `_`, with `.` and `-` inside it: `VIN:` → `VIN`, `[sensor.temp](°C):` →
+  `sensor.temp`. Empty without a letter or digit; the rule check then marks
+  the missing key once a pattern exists.
+
+In the editor, `addRuleFromLine( line, selectedLines )` appends an empty
+`FooterEntry` (no pattern yet, so it blocks nothing), selects it, and shows
+the line in a `SelectedLinePicker` above the detail panel: a read-only,
+fixed-font `QLineEdit` (no 32767-character limit, as the host hands over up
+to 1 MiB) and a hint. The picker emits `marked( start, length )` on every
+click (`cursorPositionChanged`) and mark (`selectionChanged`), each mark
+once. The editor remembers the rule's row as a `QPersistentModelIndex`, so
+the line moves with the rule (also by drag & drop) and is dropped when the
+rule is removed or the rules are replaced; the picker is shown only while
+that row is selected. On a mark the editor runs `ruleFromLine()`, writes
+the patterns with `applySimpleRule()` into the row and shows the rule
+again, which puts the panel into simple mode and previews it soon (not
+after the typing pause). The key is replaced only while it is empty or
+still the key suggested last, so a key the user typed is kept. A mark that
+makes no rule leaves the rule as it was, and the hint says why. One line at
+a time: a second `addRuleFromLine()` makes a new rule and moves the picker
+to it; the earlier rule keeps what it got. The line is editor state only;
+nothing of it reaches `entries()`, a save or an export, so the config
+format is unchanged.
+
+Several selected lines: the rule is made from the first, the one the user
+most likely meant at the top of the selection, and the hint says how many
+were selected. The host's `truncated` flag does not matter for it.
+
+Tests: `tests/rulefromline_test.cpp` (the functions, through the scanner),
+`tests/rulefromselectedline_test.cpp` (editor and session with fake
+`HostFunctions`: marking, clicking, key suggestion, moving and removing
+the rule, several lines, no selection, a host without the function,
+destruction with the message open), and the 26.11 FakeHost scenarios in
+`tests/pluginlifecycle_test.cpp` (menu registration only on a 26.11 table,
+the selection read on click, saving the rule).
 
 ### Rule templates
 

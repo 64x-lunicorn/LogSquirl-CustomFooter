@@ -224,6 +224,19 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     return editor;
 }
 
+bool FooterSession::has( HostFeature feature ) const noexcept
+{
+    switch ( feature ) {
+    case HostFeature::RegexLab:
+        return static_cast<bool>( host_.openRegexLab );
+    case HostFeature::GoToLogLine:
+        return static_cast<bool>( host_.goToLogLine );
+    case HostFeature::SelectedLogLines:
+        return static_cast<bool>( host_.selectedLogLines );
+    }
+    return false;
+}
+
 void FooterSession::saveFrom( const FooterEditor& editor ) noexcept
 {
     guarded( host_, "saving the rules", [ this, &editor ] {

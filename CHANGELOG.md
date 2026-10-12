@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line pattern, value pattern, end character. The preview of a rule with
   an invalid pattern says so in the same words, and the template dialog's
   note about an alternative no longer counts rules the footer skips.
+- **Host functions of LogSquirl 26.11** — the plugin is built against the
+  plugin API of LogSquirl 26.11 and learns whether the running LogSquirl
+  offers the Regex Lab, Go to line and the selected Log Lines, which
+  upcoming features need. It still runs on LogSquirl 26.10, without them.
+  The LogSquirl log says which ones it found (`Custom Footer plugin ready.
+  Host functions: …`); nothing else changes for users.
 
 ### Fixed
 - **The live preview kept an old value** — once the rule editor's preview

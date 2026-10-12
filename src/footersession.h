@@ -87,6 +87,10 @@ public:
      */
     FooterEditor* openEditor( QWidget* over );
 
+    /// Whether the running host offers @p feature: its member of the
+    /// HostFunctions the session was made with is set.
+    bool has( HostFeature feature ) const noexcept;
+
 private:
     /// Save the editor's rules and show them in the footer. Logs instead
     /// of throwing, as it runs in a handler of the editor's signals.

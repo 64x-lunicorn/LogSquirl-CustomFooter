@@ -29,6 +29,7 @@ add_executable(logsquirl_custom_footer_tests
     footerconfig_maxlines_test.cpp
     footercontroller_test.cpp
     footersession_test.cpp
+    hostapiadapter_test.cpp
     filechangesource_test.cpp
     filefollower_test.cpp
     footerdisplaywidget_test.cpp
@@ -62,6 +63,7 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/footerconfig.cpp"
         "${CMAKE_SOURCE_DIR}/src/footercontroller.cpp"
         "${CMAKE_SOURCE_DIR}/src/footersession.cpp"
+        "${CMAKE_SOURCE_DIR}/src/hostapiadapter.cpp"
         "${CMAKE_SOURCE_DIR}/src/activefilewatcher.cpp"
         "${CMAKE_SOURCE_DIR}/src/filechangesource.cpp"
         "${CMAKE_SOURCE_DIR}/src/followerclock.cpp"

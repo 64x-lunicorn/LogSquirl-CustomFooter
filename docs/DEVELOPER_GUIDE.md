@@ -6,17 +6,33 @@ LogSquirl Plugin SDK is used, and how to extend or adapt the code.
 ## Plugin SDK Overview
 
 The LogSquirl Plugin SDK is a **pure C ABI** interface.  A plugin is a
-shared library (`.dylib` / `.so` / `.dll`) that exports four C functions:
+shared library (`.dylib` / `.so` / `.dll`) that exports these C functions:
 
 | Symbol | Purpose |
 |--------|---------|
 | `logsquirl_plugin_get_info()` | Return static metadata (called before init) |
-| `logsquirl_plugin_init()` | Receive host API, set up the plugin |
+| `logsquirl_plugin_init_ex()` | Receive host API and its size, set up the plugin (LogSquirl 26.11) |
+| `logsquirl_plugin_init()` | The same for older hosts: `init_ex()` with `LOGSQUIRL_HOST_API_BASE_SIZE` |
 | `logsquirl_plugin_shutdown()` | Tear down, release all resources |
 | `logsquirl_plugin_configure()` | Open a settings dialog (optional) |
 
 The host provides a function-pointer table (`LogSquirlHostApi`) that the
-plugin uses to interact with the application.
+plugin uses to interact with the application. The vendored header
+`include/logsquirl_plugin_api.h` is the one of LogSquirl 26.11 (a verbatim
+copy of LogSquirl's `src/plugins/include/logsquirl_plugin_api.h`).
+
+**A growing table** (LogSquirl ADR 0017). Functions added to the host API
+are appended to the end of the table, and `LOGSQUIRL_PLUGIN_API_VERSION`
+stays 1. LogSquirl 26.11 calls `logsquirl_plugin_init_ex()` with the size
+of its table; LogSquirl 26.10 knows only `logsquirl_plugin_init()`, and its
+table ends where the added functions begin. `LOGSQUIRL_HOST_API_HAS( size,
+member )` says whether a table of that size holds a member. The plugin keeps
+the host's pointer, never copies the table (a copy would read the whole
+struct of our header, past the end of an older host's table), and never
+reads a member `LOGSQUIRL_HOST_API_HAS` does not report. LogSquirl 26.11
+added three functions, which the footer will use (#20–#22):
+`open_regex_lab`, `go_to_log_line` and `get_selected_log_lines`; see
+[Host functions](#host-functions).
 
 ## Plugin Lifecycle
 
@@ -28,8 +44,10 @@ sequenceDiagram
     Host->>Plugin: logsquirl_plugin_get_info()
     Plugin-->>Host: &kPluginInfo (id, name, version, type, …)
 
-    Host->>Plugin: logsquirl_plugin_init(api, handle)
-    Plugin->>Plugin: Keep api + handle, build HostFunctions from api
+    Host->>Plugin: logsquirl_plugin_init_ex(api, handle, api_size)
+    Note right of Host: LogSquirl 26.10 calls logsquirl_plugin_init(api, handle),<br/>which is init_ex with LOGSQUIRL_HOST_API_BASE_SIZE
+    Plugin->>Plugin: Keep api + handle, build HostFunctions from api (HostApiAdapter)
+    Note right of Plugin: Only the members api_size reports are read
     Plugin->>Host: api->get_config_dir() (a warning if there is none)
     Plugin->>Host: api->register_menu_action("Plugins", "Custom Footer…", callback)
     Plugin->>Plugin: Create the FooterDisplayWidget
@@ -39,6 +57,7 @@ sequenceDiagram
     Plugin->>Host: api->register_active_file_callback(onActiveFileChanged)
     Plugin->>Host: api->get_active_file_path() (on the UI thread)
     Plugin->>Plugin: FooterSession::setActiveFile(current file)
+    Plugin->>Host: api->log_message("… ready. Host functions: …", the ones the session has)
     Plugin-->>Host: return 0 (success)
 
     Note over Host,Plugin: User opens or switches to a log file
@@ -63,6 +82,7 @@ sequenceDiagram
     Note right of Plugin: delete the rule editor, cancel and wait for its preview;<br/>then cancel and wait for a running scan
     Plugin->>Host: api->unregister_footer_widget(footerWidget)
     Plugin->>Plugin: Delete the footer widget
+    Plugin->>Plugin: Destroy the HostApiAdapter (drops Regex Lab answers still awaited)
 ```
 
 `plugin.cpp` is only the adapter between the host's C API and the
@@ -148,7 +168,17 @@ the editor before any child is deleted.
 
 No exception may leave an entry point or host callback; they run their work
 through `guarded()` (`hostfunctions.h`), which logs the failure instead. The
-handlers the session connects to the editor's signals do the same.
+handlers the session connects to the editor's signals do the same, and so
+does the Regex Lab's answer (`onRegexLabAnswer()` in `hostapiadapter.cpp`).
+
+The host functions of LogSquirl 26.11 (`HostFunctions::openRegexLab`,
+`goToLogLine`, `selectedLogLines`) must be called on the UI thread only, as
+must `get_active_file_path`: the host refuses them elsewhere
+(`LOGSQUIRL_LOG_LINES_NOT_ON_UI_THREAD`, or a Lab that does not open). Menu
+actions, host callbacks and widget signals all run there, so the editor
+calls them from its handlers; never from a scan or preview worker. The
+Regex Lab's answer comes on the UI thread too, and the adapter's table of
+Labs awaiting an answer is touched there only, without a lock.
 
 ## Footer Session
 
@@ -171,6 +201,7 @@ FooterSession( const QString& configDir, FooterDisplayWidget* footer, HostFuncti
 ~FooterSession();
 void setActiveFile( const QString& filePath );
 FooterEditor* openEditor( QWidget* over );
+bool has( HostFeature feature ) const noexcept;
 ```
 
 The constructor loads the rules and starts the controller on the footer,
@@ -186,11 +217,57 @@ all the same. The editor never touches `FooterConfig`. All members run on
 the UI thread.
 
 `HostFunctions` (`hostfunctions.h`) is what the session needs from the
-host, as a value: today only `log`. A member the running host does not
-offer stays empty, and the session goes without it, so an older host is
-just the default value. `plugin.cpp` fills it from the host's function
-table; tests fill it with lambdas. The controller gets its warning sink
-from the session as a plain function, built from `log`.
+host, as a value: `log`, and the three [host functions](#host-functions)
+of LogSquirl 26.11. A member the running host does not offer stays empty,
+and the session goes without it, so an older host is just the default
+value. `HostApiAdapter` fills it from the host's function table; tests
+fill it with lambdas. The controller gets its warning sink from the
+session as a plain function, built from `log`. `has( HostFeature )` tells
+whether the host offers `HostFeature::RegexLab`, `GoToLogLine` or
+`SelectedLogLines`, derived from which members are set; the editor
+features of #20–#22 ask it before they show their buttons.
+
+### Host functions
+
+LogSquirl 26.11 appended three functions to the host API (LogSquirl
+#662 and #663). `HostApiAdapter` (`hostapiadapter.h/.cpp`, part of the C
+ABI adapter) turns each into a C++ member of `HostFunctions` that hides
+the C details, and sets it only when `LOGSQUIRL_HOST_API_HAS( api_size,
+… )` reports it. All three run on the UI thread only (see
+[Threading](#threading)) and are valid until shutdown.
+
+| Member | Host function | Behaviour |
+|--------|---------------|-----------|
+| `bool openRegexLab( const RegexLabPattern& pattern, const QObject* context, RegexLabDone done )` | `open_regex_lab` | Opens the Regex Lab with the pattern and its Match case flag and returns at once: true when it opened. `done` is called later, at most once: with the applied pattern on Apply, with `std::nullopt` on Cancel or when the Lab's window closes. Never once `context` (the editor that asked) is destroyed, nor after shutdown. |
+| `bool goToLogLine( std::uint64_t lineNumber )` | `go_to_log_line` | Selects the line in the tab in front and scrolls it into view, as Go to line does. Lines count from 1, as LogSquirl shows them. False without a Log File, or for a line it does not have (yet). |
+| `std::optional<SelectedLogLines> selectedLogLines()` | `get_selected_log_lines` | The selected Log Lines, copied at once (the host's buffer lasts only until the next call), split at `'\n'`, `truncated` when the host handed over only the first ones (1000 lines, 1 MiB). `std::nullopt` without a selection or a Log File. |
+
+**The Regex Lab's answer.** The host calls back once, on the UI thread,
+with the `user_data` the plugin passed. The adapter owns what the answer
+needs (`done`, a `QPointer` to `context`) in a table of Labs awaiting an
+answer, and gives the host a number from that table as `user_data`, never
+a pointer, and numbers are never reused. An answer finds its entry, takes
+it out, and calls `done` only while `context` lives; a second answer, or
+one after the adapter is gone, finds nothing and does nothing. A Lab that
+does not open is taken out at once. `logsquirl_plugin_shutdown()` destroys
+the adapter after the session, which drops the entries still there, and
+their `done` functions with them. The host does its part as well: it never
+answers after shutdown and closes a Lab still open then (LogSquirl ADR
+0017, #662). An editor feature only has to call
+`host.openRegexLab( { pattern, matchesCase }, this, [this]( auto applied ) { … } )`.
+
+At the end of `init_ex()` the plugin logs which host functions the session
+has: `Custom Footer plugin ready. Host functions: Regex Lab, Go to line,
+selected Log Lines.` on LogSquirl 26.11, `… Host functions: none.` on
+26.10. Users see no change. `tests/hostapiadapter_test.cpp` drives the
+adapter with a fake table that records calls, answers the Lab with Apply
+or Cancel, and answers late, after the editor or the adapter is gone;
+`tests/pluginlifecycle_test.cpp` loads the plugin through `init_ex()` with
+a 26.11-sized table and through `init()` and `init_ex()` with a base table
+in a heap block of exactly `LOGSQUIRL_HOST_API_BASE_SIZE` bytes, so that a
+read past the table is a real out-of-bounds read, which an
+AddressSanitizer build (`-DCMAKE_CXX_FLAGS="-fsanitize=address
+-fno-omit-frame-pointer"`) reports.
 
 **Shutdown postcondition.** The destructor deletes the editor at once,
 open or closed but not yet deleted, with its dialogs, its preview
@@ -205,18 +282,21 @@ open, with a closed editor waiting to be deleted, and with the editor over
 an application-modal window.
 
 **What stays in the C ABI adapter.** `plugin.cpp` keeps file-local state
-only: the host's table and handle, the `HostFunctions` built from it, the
-footer widget (owned there, as the host must unregister it after the
-session is gone) and the session. `init()` calls the host in the same
+only: the host's table and handle, the `HostApiAdapter` with the
+`HostFunctions` built from it, the footer widget (owned there, as the
+host must unregister it after the session is gone) and the session.
+`init_ex()` refuses a table smaller than `LOGSQUIRL_HOST_API_BASE_SIZE`;
+`init()` is `init_ex()` with that size. Either calls the host in the same
 order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
 the active-file callback, and pushes `get_active_file_path()` into the
-session. If any step throws, `init()` logs it, shuts down and fails. The
+session. If any step throws, `init_ex()` logs it, shuts down and fails. The
 active file is read only there and in the host's active-file callback,
 both on the UI thread, which LogSquirl 26.11 requires; the session never
 asks the host. `shutdown()` destroys the session, then
-unregisters and deletes the footer widget. The FakeHost tests in
+unregisters and deletes the footer widget, and destroys the
+`HostApiAdapter` last, as the session's host functions call it. The FakeHost tests in
 `tests/pluginlifecycle_test.cpp` drive these entry points and observe only
 what a host and a user see: registrations, the editor's window, saved
 files and log messages.
@@ -311,7 +391,8 @@ hidden global test state.
 |--------|---------|----------------|
 | **Plugin entry** | `plugin.cpp`, `plugin.h` | C ABI exports: translate between the host API and the session |
 | **FooterSession** | `footersession.h/.cpp` | Rules and line limit in the config dir, active file, controller, editor lifetime, shutdown order |
-| **HostFunctions** | `hostfunctions.h` | What the plugin needs from the host, as a value; `guarded()` |
+| **HostFunctions** | `hostfunctions.h` | What the plugin needs from the host, as a value, its 26.11 functions optional; `guarded()` |
+| **HostApiAdapter** | `hostapiadapter.h/.cpp` | Turns the host's C table into `HostFunctions`, reading only the members its size reports; owns the Regex Lab answers awaited |
 | **FooterEntry** | `footerentry.h` | Data model: key, linePattern, valuePattern, mappings |
 | **FooterController** | `footercontroller.h/.cpp` | Cached rules, background scans, file watching |
 | **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |

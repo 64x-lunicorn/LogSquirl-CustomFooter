@@ -23,20 +23,25 @@
  *
  * Exported symbols:
  *   - logsquirl_plugin_get_info()   → static metadata
- *   - logsquirl_plugin_init()       → register widgets and callbacks
+ *   - logsquirl_plugin_init_ex()    → register widgets and callbacks (26.11)
+ *   - logsquirl_plugin_init()       → the same, for older hosts
  *   - logsquirl_plugin_shutdown()   → clean up widgets
  *   - logsquirl_plugin_configure()  → open rule editor dialog
  *
  * PLUGIN LIFECYCLE
  * ────────────────
  *   1. Host calls get_info() to read metadata.
- *   2. Host calls init(api, handle) — we make the footer widget and a
+ *   2. Host calls init_ex(api, handle, api_size), or an older host
+ *      init(api, handle), which is init_ex() with the base table's size —
+ *      we turn the table into HostFunctions (HostApiAdapter, which reads
+ *      only the members api_size reports), make the footer widget and a
  *      FooterSession on it, and register the widget, a menu action and an
  *      active-file callback.
  *   3. When the active file changes, onActiveFileChanged() hands it to the
  *      session, for the footer and the rule editor.
  *   4. Host calls shutdown() — destroying the session stops everything of
- *      the plugin; then the footer widget is unregistered and deleted.
+ *      the plugin; then the footer widget is unregistered and deleted, and
+ *      the adapter drops the Regex Lab answers still awaited.
  *
  * This file only translates between the host API and the session. No
  * exception may leave an entry point or a callback: the host is C.
@@ -46,14 +51,18 @@
 
 #include "footerdisplaywidget.h"
 #include "footersession.h"
+#include "hostapiadapter.h"
 #include "hostfunctions.h"
 
 #include <QString>
+#include <QStringList>
 
 #include <memory>
 
 using custom_footer::FooterDisplayWidget;
 using custom_footer::FooterSession;
+using custom_footer::HostApiAdapter;
+using custom_footer::HostFeature;
 using custom_footer::HostFunctions;
 
 // ── Static plugin info ──────────────────────────────────────────────────
@@ -76,8 +85,16 @@ namespace {
 struct Plugin {
     const LogSquirlHostApi* api = nullptr;
     void* handle = nullptr;
-    /// Built from api; empty while the plugin is not initialised.
-    HostFunctions host;
+    /// The host functions of api; destroyed last, after the session.
+    std::unique_ptr<HostApiAdapter> hostApi;
+
+    /// hostApi's functions; empty while the plugin is not initialised.
+    const HostFunctions& host() const noexcept
+    {
+        static const HostFunctions none;
+        return hostApi ? hostApi->functions() : none;
+    }
+
     /// Owned here, as the host must unregister it after the session is gone.
     FooterDisplayWidget* footer = nullptr;
     std::unique_ptr<FooterSession> session;
@@ -91,16 +108,22 @@ Plugin& plugin()
     return *instance;
 }
 
-/// What the session needs from the host, from its function table.
-HostFunctions hostFunctions( const LogSquirlHostApi* api, void* handle )
+/// "Custom Footer plugin ready.", with the host functions the session has.
+QString readyMessage( const FooterSession& session )
 {
-    HostFunctions host;
-    if ( api->log_message ) {
-        host.log = [ api, handle ]( int level, const QString& message ) {
-            api->log_message( handle, level, message.toUtf8().constData() );
-        };
+    QStringList offered;
+    if ( session.has( HostFeature::RegexLab ) ) {
+        offered.append( QStringLiteral( "Regex Lab" ) );
     }
-    return host;
+    if ( session.has( HostFeature::GoToLogLine ) ) {
+        offered.append( QStringLiteral( "Go to line" ) );
+    }
+    if ( session.has( HostFeature::SelectedLogLines ) ) {
+        offered.append( QStringLiteral( "selected Log Lines" ) );
+    }
+    return QStringLiteral( "Custom Footer plugin ready. Host functions: %1." )
+        .arg( offered.isEmpty() ? QStringLiteral( "none" )
+                                : offered.join( QStringLiteral( ", " ) ) );
 }
 
 /// A string from the host, or an empty one for none.
@@ -116,7 +139,7 @@ QString fromHost( const char* text )
 /// Called by the host, on the UI thread, when the active file changes.
 static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
-    guarded( plugin().host, "scanning the active file", [ filePath ] {
+    guarded( plugin().host(), "scanning the active file", [ filePath ] {
         if ( auto* session = plugin().session.get() ) {
             session->setActiveFile( fromHost( filePath ) );
         }
@@ -126,7 +149,7 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
 /// Called when the user clicks "Custom Footer…" in the Plugins menu.
 static void onEditorMenuAction( void* /* userData */ )
 {
-    guarded( plugin().host, "the rule editor", [] {
+    guarded( plugin().host(), "the rule editor", [] {
         auto& state = plugin();
         if ( state.session ) {
             state.session->openEditor( state.footer ? state.footer->window() : nullptr );
@@ -145,7 +168,14 @@ LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( vo
 
 LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle )
 {
-    if ( !api || !handle ) {
+    // An older host: its table ends where the functions added later begin.
+    return logsquirl_plugin_init_ex( api, handle, LOGSQUIRL_HOST_API_BASE_SIZE );
+}
+
+LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* api, void* handle,
+                                                      size_t api_size )
+{
+    if ( !api || !handle || api_size < LOGSQUIRL_HOST_API_BASE_SIZE ) {
         return 1;
     }
 
@@ -155,12 +185,18 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     }
 
     auto& state = plugin();
+    try {
+        // The pointer is kept, the table never copied; only the members
+        // api_size reports are read.
+        state.hostApi = std::make_unique<HostApiAdapter>( api, handle, api_size );
+    } catch ( ... ) {
+        return 1;
+    }
     state.api = api;
     state.handle = handle;
-    state.host = hostFunctions( api, handle );
 
-    const bool ok = guarded( state.host, "initialisation", [ &state, api, handle ] {
-        const auto& host = state.host;
+    const bool ok = guarded( state.host(), "initialisation", [ &state, api, handle ] {
+        const auto& host = state.host();
         host.logMessage( LOGSQUIRL_LOG_INFO,
                          QStringLiteral( "Custom Footer plugin initialising…" ) );
 
@@ -188,7 +224,7 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
         // thread, and pushed into the session, which never asks the host.
         state.session->setActiveFile( fromHost( api->get_active_file_path( handle ) ) );
 
-        host.logMessage( LOGSQUIRL_LOG_INFO, QStringLiteral( "Custom Footer plugin ready." ) );
+        host.logMessage( LOGSQUIRL_LOG_INFO, readyMessage( *state.session ) );
     } );
 
     if ( !ok ) {
@@ -201,9 +237,9 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
     auto& state = plugin();
-    guarded( state.host, "shutdown", [ &state ] {
-        state.host.logMessage( LOGSQUIRL_LOG_INFO,
-                               QStringLiteral( "Custom Footer plugin shutting down…" ) );
+    guarded( state.host(), "shutdown", [ &state ] {
+        state.host().logMessage( LOGSQUIRL_LOG_INFO,
+                                 QStringLiteral( "Custom Footer plugin shutting down…" ) );
 
         // First the session: when its destructor returns, no plugin code
         // runs, and the host may unload the library after this returns.
@@ -216,7 +252,9 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         }
     } );
 
-    state.host = {};
+    // Last the adapter, which the session's host functions call: a Regex
+    // Lab answer the host still sent would now find nothing.
+    state.hostApi.reset();
     state.api = nullptr;
     state.handle = nullptr;
 }
@@ -225,7 +263,7 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
 {
     // The editor is opened via the Plugins menu action.
     // configure() also opens it as a convenience, over the host's window.
-    guarded( plugin().host, "the rule editor", [ parent_widget ] {
+    guarded( plugin().host(), "the rule editor", [ parent_widget ] {
         if ( auto* session = plugin().session.get() ) {
             session->openEditor( static_cast<QWidget*>( parent_widget ) );
         }

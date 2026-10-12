@@ -531,6 +531,69 @@ SCENARIO( "FooterController scans a truncated or rotated file from its start",
     }
 }
 
+SCENARIO( "FooterController shows the Log Line of each value as the active file grows",
+          "[footercontroller][linenumber]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE(
+        FooterConfig::saveEntries( configDir.path(), { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                                       { "ID", "id=(\\S+)", "", true, {} } } ) );
+
+    const auto log = logDir.path() + "/lines.log";
+    writeFile( log, "starting up\nVIN: A\n" );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    // "key: value @ line" of every shown value.
+    const auto shownLines = [ &widget ] {
+        QStringList shown;
+        for ( const auto& value : widget.values() ) {
+            shown.append( QStringLiteral( "%1: %2 @ %3" )
+                              .arg( value.key, value.value )
+                              .arg( value.lineNumber ) );
+        }
+        return shown.join( " | " );
+    };
+
+    GIVEN( "an active file with one of the keys on its second line" )
+    {
+        controller->setActiveFile( log );
+        REQUIRE( processUntil( [ & ] { return shownLines() == "VIN: A @ 2"; } ) );
+
+        WHEN( "lines with the other key are appended, and the file is scanned on" )
+        {
+            writeFile( log, "noise\nVIN: LATER\nid=7\n", true );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "the new value has its line in the whole file, and the old one keeps its line" )
+            {
+                REQUIRE(
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 2 | ID: 7 @ 5"; } ) );
+
+                AND_WHEN( "the file is truncated and written again with the same values" )
+                {
+                    REQUIRE( scansSettle( *controller ) );
+                    writeFile( log, "VIN: A\nid=7\n" );
+                    fakes.changes->fire();
+                    fakes.clock->advance( kGap );
+
+                    THEN( "the lines come from the new scan from its start" )
+                    {
+                        REQUIRE( processUntil(
+                            [ & ] { return shownLines() == "VIN: A @ 1 | ID: 7 @ 2"; } ) );
+                    }
+                }
+            }
+        }
+    }
+}
+
 SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]" )
 {
     QTemporaryDir configDir;

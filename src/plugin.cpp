@@ -224,8 +224,9 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         }
 
         // Register menu action to open the rule editor, where a host
-        // without the selected Log Lines (26.10) has it, as with 0.4.0. The
-        // session, made below, reports the same from the same functions.
+        // without the selected Log Lines (26.10) has it, as with 0.4.0. One
+        // test for both menus: the host functions the session is made with,
+        // so it is what has( HostFeature::SelectedLogLines ) reports.
         const bool ruleFromLine = static_cast<bool>( host.selectedLogLines );
         if ( !ruleFromLine ) {
             api->register_menu_action( handle, "Plugins", "Custom Footer…", &onEditorMenuAction,
@@ -241,7 +242,7 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         // Where the host hands over the selected Log Lines (26.11), a rule
         // can be made from one: both actions go into a submenu
         // Plugins → Custom Footer.
-        if ( state.session->has( HostFeature::SelectedLogLines ) ) {
+        if ( ruleFromLine ) {
             api->register_menu_action( handle, "Custom Footer", "Edit Rules…", &onEditorMenuAction,
                                        nullptr );
             api->register_menu_action( handle, "Custom Footer", "Rule from Selected Line…",

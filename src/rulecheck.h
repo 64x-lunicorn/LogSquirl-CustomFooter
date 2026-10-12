@@ -117,9 +117,6 @@ public:
     /// otherwise; any other rule is ignored silently.
     static bool isUsed( const FooterEntry& entry );
 
-    /// The problems of one rule, compiling its patterns.
-    static RuleProblems problemsOf( const Rule& rule );
-
     /// The problems of one rule whose patterns @p linePattern and
     /// @p valuePattern are compiled already, so they are not compiled again.
     static RuleProblems problemsOf( const Rule& rule, const QRegularExpression& linePattern,

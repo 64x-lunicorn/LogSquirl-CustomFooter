@@ -85,12 +85,6 @@ bool RuleCheck::isUsed( const FooterEntry& entry )
     return entry.enabled && !entry.linePattern.isEmpty();
 }
 
-RuleProblems RuleCheck::problemsOf( const Rule& rule )
-{
-    return problemsWith( rule, FooterScanner::patternError( rule.entry.linePattern ),
-                         FooterScanner::patternError( rule.entry.valuePattern ) );
-}
-
 RuleProblems RuleCheck::problemsOf( const Rule& rule, const QRegularExpression& linePattern,
                                     const QRegularExpression& valuePattern )
 {

@@ -400,18 +400,16 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         return preview;
     }
 
-    // The rules the footer would take the key's value from: the enabled and
-    // valid ones with this key, in list order, as the constructor keeps them.
-    QList<Rule> keyRules;
-    if ( !entry.key.trimmed().isEmpty() ) {
-        QList<FooterEntry> sameKey = entries;
-        for ( auto& other : sameKey ) {
-            other.enabled = other.enabled && other.key == entry.key;
-        }
-        keyRules = FooterScanner( sameKey ).rules_;
-        preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
-                                         [ rule ]( const Rule& r ) { return r.index != rule; } );
+    // The rules the footer would take the key's value from: the enabled
+    // ones with this key that the rule check accepts, in list order, as the
+    // constructor keeps them. None for a rule without a key.
+    QList<FooterEntry> sameKey = entries;
+    for ( auto& other : sameKey ) {
+        other.enabled = other.enabled && other.key == entry.key;
     }
+    const QList<Rule> keyRules = FooterScanner( sameKey ).rules_;
+    preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
+                                     [ rule ]( const Rule& r ) { return r.index != rule; } );
 
     QFile file( filePath );
     if ( !file.open( QIODevice::ReadOnly ) ) {

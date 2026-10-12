@@ -134,6 +134,13 @@ std::vector<Case> cases()
     };
 }
 
+/// The problems of one rule on its own, with its patterns compiled here.
+RuleProblems problemsOf( const RuleCheck::Rule& rule )
+{
+    return RuleCheck::problemsOf( rule, QRegularExpression( rule.entry.linePattern ),
+                                  QRegularExpression( rule.entry.valuePattern ) );
+}
+
 /// Compiles like the scanner and counts how often it does.
 struct CountingCompiler {
     int* count;
@@ -174,12 +181,7 @@ SCENARIO( "RuleCheck lists why rules cannot be used", "[rulecheck]" )
                     REQUIRE( check.problems( row ) == c.problems.at( row ) );
                     REQUIRE( check.problems( row ).preventingMatches()
                              == c.preventingMatches.at( row ) );
-                    const auto& entry = c.rules.at( row ).entry;
-                    REQUIRE( RuleCheck::problemsOf( c.rules.at( row ) ) == c.problems.at( row ) );
-                    REQUIRE( RuleCheck::problemsOf( c.rules.at( row ),
-                                                    QRegularExpression( entry.linePattern ),
-                                                    QRegularExpression( entry.valuePattern ) )
-                             == c.problems.at( row ) );
+                    REQUIRE( problemsOf( c.rules.at( row ) ) == c.problems.at( row ) );
                 }
                 REQUIRE( check.listing() == c.listing );
                 REQUIRE( check.canSave() == c.listing.isEmpty() );
@@ -194,8 +196,8 @@ SCENARIO( "RuleCheck lists why rules cannot be used", "[rulecheck]" )
                     const auto& entry = c.rules.at( row ).entry;
                     entries.append( entry );
                     if ( RuleCheck::isUsed( entry ) ) {
-                        reported += RuleCheck::listing(
-                            row, RuleCheck::problemsOf( RuleCheck::Rule( entry ) ) );
+                        reported
+                            += RuleCheck::listing( row, problemsOf( RuleCheck::Rule( entry ) ) );
                     }
                 }
                 REQUIRE( FooterScanner( entries ).problems() == reported );

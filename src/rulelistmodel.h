@@ -55,9 +55,9 @@ inline QColor problemBackgroundColor()
  * its problems, which the check updates in the same step as the rule, so a
  * rule's data and marks stay together however the rows are changed,
  * inserted, removed or moved, and no signal of the model ever comes before
- * its problems are up to date. The list shows the enabled state as the check box of
- * the key column, the key, and the line pattern; the rest is edited in the
- * detail panel through setEntry().
+ * its problems are up to date. The list shows the enabled state as the
+ * check box of the key column, the key, and the line pattern; the rest is
+ * edited in the detail panel through setEntry().
  *
  * Rules are reordered by dragging them within the list: a drop moves the
  * dragged rules with moveRows(), so nothing is left for the view to remove

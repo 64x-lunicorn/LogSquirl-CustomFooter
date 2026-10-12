@@ -54,9 +54,10 @@ class RuleTemplateDialog;
  * are stored into the selected rule as they are made.
  *
  * Rules are checked as they are edited, by the RuleCheck that holds the
- * model's rows: the editor only shows what it finds. A problem, such as an invalid pattern or an
- * enabled rule with a line pattern but no key, is marked at its field and in the list, listed below
- * it, and blocks OK and Apply. Rules may share a key: they are alternatives for its value.
+ * model's rows: the editor only shows what it finds. A problem, such as an
+ * invalid pattern or an enabled rule with a line pattern but no key, is
+ * marked at its field and in the list, listed below it, and blocks OK and
+ * Apply. Rules may share a key: they are alternatives for its value.
  *
  * The panel previews the selected rule against the active file, which the
  * plugin passes in with setActiveFile(): shortly after an edit stops, a

@@ -165,9 +165,10 @@ on after such a skip. Like a scan, a preview takes the file's size when it
 opens it, before reading (`Preview::fileSize`), so a line appended while
 it reads is a change; and the size is still needed besides the end of the
 last complete line read, as a file truncated to that end has lost a last
-line without a line break that the preview showed. The preview always scans the file from its start, unlike the
-footer, which continues where it stopped. Setting the same active file
-again counts as a change (`FileFollower::nudge()`).
+line without a line break that the preview showed. The preview always
+scans the file from its start, unlike the footer, which continues where it
+stopped. Setting the same active file again counts as a change
+(`FileFollower::nudge()`).
 
 The editor never runs in a nested event loop: `exec()` would keep plugin
 frames on the stack, and the host may shut the plugin down, and unload

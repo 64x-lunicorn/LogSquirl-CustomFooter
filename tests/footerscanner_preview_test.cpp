@@ -437,14 +437,18 @@ SCENARIO( "FooterScanner tells whether a change of a file can alter a preview of
                 REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, preview ) );
             }
 
-            THEN( "a size taken with the line in it does not hide it, as it was not read" )
+            AND_WHEN( "the preview's size was taken with the line in it" )
             {
                 // What the preview held when its size was taken after the
                 // line was appended, between the end of the read and the
                 // size: the window the scanner offers no hook into.
                 auto sizedLate = preview;
                 sizedLate.fileSize = QFileInfo( path ).size();
-                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, sizedLate ) );
+
+                THEN( "the size does not hide the line, as it was not read" )
+                {
+                    REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, sizedLate ) );
+                }
             }
         }
     }
@@ -459,10 +463,19 @@ SCENARIO( "FooterScanner tells whether a change of a file can alter a preview of
         {
             overwriteAt( path, 6, "VIN: B" );
 
-            THEN( "it can alter it, and the preview redone finds the new value" )
+            THEN( "it can alter it" )
             {
                 REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, preview ) );
-                REQUIRE( FooterScanner::preview( path, entries, 0 ).value->value == "B" );
+            }
+
+            AND_WHEN( "the preview is redone" )
+            {
+                const auto redone = FooterScanner::preview( path, entries, 0 );
+
+                THEN( "it finds the new value" )
+                {
+                    REQUIRE( redone.value->value == "B" );
+                }
             }
         }
 

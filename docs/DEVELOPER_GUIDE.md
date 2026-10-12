@@ -260,6 +260,38 @@ it the Regex Lab with `FooterEditor::setRegexLab()`, wrapped in
 Lab that did not open, or nothing on a host without it (see
 [Regex Lab](#regex-lab)).
 
+**Go to a value's Log Line (#21).** The session wires the footer itself;
+the footer widget never learns about the host. Where `has(
+HostFeature::GoToLogLine )`, the constructor calls
+`footer->setGoToLineOffered( true )` and connects the footer's
+`goToLineRequested( const FooterValue& )` to a handler that calls
+`host.goToLogLine( value.lineNumber )`, on the UI thread like every
+widget signal, inside `guarded()`. When the host returns false (no Log
+File, or the line is gone since the scan, e.g. after a truncation), the
+handler calls `footer->notify( value.key, "Could not go to Log Line N" )`,
+a tooltip at the value like #15's "Copied", and no dialog. Without the
+host function the footer is told it is not offered, and nothing is
+connected. The destructor, after the controller is gone, disconnects and
+withdraws the offer, so the footer offers nothing that no one handles.
+
+On the widget side, `FooterDisplayWidget::setGoToLineOffered()` passes
+the offer to every `FooterValueItem`, also to those made later. An item
+can go to its line when it is offered and its value's `lineNumber` is
+known (`canGoToLine()`); then its context menu shows "Go to Log Line"
+(object name `goToLogLine`, hidden otherwise), its tooltip and accessible
+description say how, and a left double-click emits
+`goToLineRequested()`. Keyboard users open the context menu with the
+context menu key. **Click versus double-click:** a double-click arrives
+as press, release (a click, which copies, as #15 wants), double-click,
+release. The item takes the double-click event itself and does not pass
+it to `QToolButton`, so the second press does not press the button: no
+second copy and no second click. So a double-click copies once and then
+asks to go to the line; no timer tells clicks and double-clicks apart,
+which would delay the copy and make tests depend on time. Without the
+offer the double-click goes to `QToolButton` as before (two copies of
+the same value). `notify()` shows a message at a key's value through
+`FooterValueItem::showNotice()`, which "Copied" uses as well.
+
 ### Host functions
 
 LogSquirl 26.11 appended three functions to the host API (LogSquirl
@@ -305,7 +337,8 @@ AddressSanitizer build (`-DCMAKE_CXX_FLAGS="-fsanitize=address
 **Shutdown postcondition.** The destructor deletes the editor at once,
 open or closed but not yet deleted, with its dialogs, its preview
 (stopped and waited for), its timers and its pending events; then it
-destroys the controller, which cancels a running scan and waits for it.
+destroys the controller, which cancels a running scan and waits for it;
+then it disconnects from the footer.
 When the destructor returns, no plugin code runs: no thread, timer, queued
 event or callback reaches the session, the editor or the controller.
 `tests/footersession_test.cpp` checks this with the editor open while its
@@ -444,8 +477,8 @@ hidden global test state.
 | **LatestJob** | `latestjob.h` | One worker thread whose latest job alone hands over its result |
 | **RulePreviewer** | `rulepreviewer.h/.cpp` | Runs the live preview: debounced, through a file follower, outdated results dropped |
 | **RulePreviewView** | `rulepreviewview.h/.cpp` | The preview section of the detail panel: first match with highlights, values, count |
-| **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
-| **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
+| **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, the rule that supplied it, and the Log Line it was found in |
+| **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click and, where offered, asks to go to its Log Line on a double-click |
 | **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
 | **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values, and the dialog choosing one |
 
@@ -473,9 +506,15 @@ hidden global test state.
      the whole match is the value.
    - **Value Mapping**: If mappings are defined for the rule, substitute the
      raw value with the matching display value (exact string comparison).
-5. Each found value is a `FooterValue`: key, shown value, raw value and the
-   index of the rule that supplied it. `FooterScanner::footerValues()`
-   hands them to the widget in rule order, for display and tooltips.
+5. Each found value is a `FooterValue`: key, shown value, raw value, the
+   index of the rule that supplied it, and `lineNumber`, the Log Line it
+   was found in, counting from 1 as LogSquirl does (a line ends at `\n`,
+   so `\r\n` ends one line; a last line without a line break counts too;
+   0 where unknown). As a key keeps the first value found, its line is the
+   line of the shown value, also for rules sharing a key.
+   `FooterScanner::footerValues()` hands them to the widget in rule order,
+   for display, tooltips and going to the line. The preview's values carry
+   their line as well (`Preview::lineNumber`, `keyLineNumber`).
 6. Stop early once every key has a value.
 7. **Incremental rescans**: `scanFrom()` returns the scan's progress
    (offset and count of the complete lines scanned, the values found, and
@@ -486,6 +525,17 @@ hidden global test state.
    file that shrank, whose start or scanned end differs, or with another
    birth time, is scanned from its start. A last line without a line break
    is matched but not remembered, as it may still be being written.
+   **Line numbers across rescans:** the progress counts the complete lines
+   scanned, and a continued scan numbers its lines on from that count, so
+   a value found in the appended part has its line in the whole file,
+   and values kept from before keep theirs. A last line without a line
+   break gets the number it will have, and is read again with the same
+   number once complete. Where the 64 MiB limit stops the scan inside a
+   line, that line's start is matched with that line's number. A file
+   scanned from its start numbers afresh, so after a truncation or rotation
+   the lines come from the new scan. `tests/footerscanner_linenumber_test.cpp`
+   covers each case; `tests/footercontroller_test.cpp` checks the lines
+   the footer shows as a file grows and is truncated.
 
 ## Rule Editor
 

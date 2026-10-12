@@ -87,36 +87,39 @@ plugin runs, and the host may unload the library.
 Both workers are a `LatestJob` (`latestjob.h`): one worker thread, a
 generation counter, a cancel flag, and results handed to the GUI thread
 only for the latest job; `stop()` cancels, waits, and drops results not
-yet handed over. Both watch the active file with an `ActiveFileWatcher`,
-which collects changes for a pause, ignores queued changes of a file no
-longer active, and watches the file's directory while it is missing. It
+yet handed over. Both learn of changes of the active file from a
+`FileChangeSource`, which ignores queued changes of a file no longer
+active and watches the file's directory while it is missing. It
 reports a notification only when the file's existence, size,
 modification or birth time differ from when its owner last read it:
 Linux and Windows may report the owner's own reading, e.g. of the access
 time, and the owner would otherwise read the file again every pause for
 as long as it is open. A rewrite to the same size within the file
 system's time resolution goes unnoticed, as for the footer's rescans.
+The footer adds its pause with an `ActiveFileWatcher` (a `QTimer` around
+the change source) until it moves onto the file follower too (#35).
 
-The rule editor's live preview has a worker thread of its own, owned by
-`RulePreviewer`, with the same rules: every request (an edit, another
-selected rule, another active file) bumps its generation counter and
-cancels the running preview, and a result is emitted only for the latest
-request. An edit starts a preview after `RulePreviewer::kDelayMs` (300 ms)
-without another one; another rule or active file starts one with the next
-pass of the event loop (`Start::Soon`), coalesced with the change that
-follows, so removing the selected rule previews once, on the remaining
-rules. The active file is watched like the footer's: a change on disk
-previews it again after `kRescanDelayMs`, and a rotated file once it is
-recreated. A running preview of the file is not cancelled for a change
-but followed by one more. A preview for a change starts no sooner than
-`kRescanDelayMs` after the last one finished (`RulePreviewer::setClock()`
-lets tests set the time), so a busy log is never scanned back to back,
-and not at all when the change cannot alter it: lines appended beyond
-the limit the last preview stopped at, or a file left as it was
-(`FooterScanner::fileUnchangedFor()`, with the footer's identity checks). The
-preview always scans the file from its start, unlike the footer, which
-continues where it stopped. Setting the same active file again counts as
-a change.
+The rule editor's live preview follows the active file with a
+`FileFollower` (see [File follower](#file-follower)), owned by
+`RulePreviewer`, whose worker thread is its own. Every request (an edit,
+another selected rule, another active file) cancels the running preview,
+and a result is emitted only for the latest request. An edit starts a
+preview after `RulePreviewer::kDelayMs` (300 ms) without another one;
+another rule or active file starts one with the next pass of the event
+loop (`Start::Soon`), coalesced with the change that follows, so removing
+the selected rule previews once, on the remaining rules. Until the
+request starts, the follower is idle. Then the follower previews a change
+on disk again after `FollowerParts::kGapMs` (500 ms), and a rotated file
+once it is recreated. A running preview of the file is not cancelled for
+a change but followed by one more, no sooner than the gap after it
+finished, so a busy log is never scanned back to back, and not at all
+when the change cannot alter it: lines appended beyond the limit the last
+preview stopped at, or a file left as it was
+(`FooterScanner::fileUnchangedFor()`, with the footer's identity checks,
+as the follower's skip predicate); the file is watched on after such a
+skip. The preview always scans the file from its start, unlike the
+footer, which continues where it stopped. Setting the same active file
+again counts as a change (`FileFollower::nudge()`).
 
 The editor never runs in a nested event loop: `exec()` would keep plugin
 frames on the stack, and the host may shut the plugin down, and unload
@@ -133,9 +136,10 @@ rule template dialog are opened with `open()` too, parented to the editor, never
 one nested loop left is a drag in the rule list (`QDrag::exec()`); a
 shutdown during a drag cannot be triggered from the UI. The session keeps a `QPointer` to it
 until it is deleted, and the session's destructor deletes it at
-once: the editor's destructor stops the preview (`RulePreviewer::stop()` cancels,
-waits for the worker, stops its timers and deletes pending result
-watchers), and deleting the objects drops their timers and posted
+once: the editor's destructor stops the preview (`RulePreviewer::stop()`
+stops its edit timer and the follower, which cancels, waits for the
+worker, drops its wake-up and deletes pending result watchers), and
+deleting the objects drops their timers and posted
 events. Closing the editor (`done()`) stops the preview for good; an edit
 committed while it closes, such as an open mapping cell losing the
 focus, starts none (`FooterEditor::closing_`). The destructor commits a
@@ -229,6 +233,75 @@ adapter. Host features that later versions add become optional members
 of `HostFunctions`, and a query of which are set, without changing the
 session's shape.
 
+## File follower
+
+`FileFollower<Result>` (`filefollower.h`) follows the active file for an
+owner that needs the latest result of reading it: the editor's preview,
+and the footer after #35. The owner gives it a sink for results, and per
+set of inputs a job (file, previous result, cancel flag → result) and
+optionally a predicate saying whether a change can matter to the last
+result. It has three commands and a query:
+
+- `follow( file, job, matters )`: the inputs changed. Every earlier run
+  becomes outdated and its cancel flag is set, a pending rerun or wake-up
+  is dropped, the previous result forgotten, a new file handed to the
+  change source, and the job starts at once. `follow( {}, nullptr )` is
+  idle: nothing runs and nothing is followed.
+- `nudge()`: only the file changed, as when the change source reports a
+  change. During a run, one rerun is flagged and nothing cancelled; while
+  idle, a wake-up is set a gap from now, and no sooner than a gap after
+  the last run finished; while a wake-up is pending, nothing changes, so
+  a busy log never postpones it. A rerun waits a gap after its run too.
+  When the wake-up comes and the predicate says the change cannot matter,
+  nothing runs and the file is watched again; otherwise the job runs.
+- `stop()`: cancel, wait for the worker, and deliver nothing more.
+- `status()`: busy, waiting for the file, runs started and finished.
+
+Its invariants, documented in the header and tested in
+`tests/filefollower_test.cpp`: every run rearms the change source just
+before the job starts, so the file is watched whenever it is read; the
+job's previous result is a copy of the last one delivered since
+`follow()`, never one of an outdated or failed run; the sink gets only
+results of runs that are not outdated, never from within a command; a
+job that throws counts as finished without a result, and the gap and a
+rerun still apply; everything but the job runs on the context's thread.
+The gap is defined once, `FollowerParts::kGapMs` (500 ms).
+
+**Seams.** Two things are injected through the constructor
+(`FollowerParts`), each with two adapters:
+
+| Seam | Production adapter | Test adapter (`tests/followerfakes.h`) |
+|------|--------------------|-----------------------------------------|
+| `FollowerClock` (`followerclock.h`): `now()`, one `wakeAt()` | `QtFollowerClock`: `QElapsedTimer` and a single-shot `QTimer` | `ManualClock`: `setNow()` / `advance()` fire due wake-ups synchronously, in order |
+| `ChangeSource` (`changesource.h`): `changed`, `setFile()`, `rearm()`, `waitingForFile()` | `FileChangeSource`: `QFileSystemWatcher`, the stamp filter, the directory while the file is missing | `FakeChangeSource`: `fire()`, counts rearms, settable `waiting` |
+
+Null parts are the production adapters. The worker (`LatestJob`) is not a
+seam: it stays inside, so results can never arrive synchronously. Owners
+pass the parts through, e.g. `RulePreviewer( parent, parts )`; tests of
+the follower and of the preview move the clock and fire changes
+themselves, without real waiting and without reaching into the watcher.
+`FileChangeSource` is tested with real files
+(`tests/filechangesource_test.cpp`).
+
+**Shutdown.** After `stop()` or the destructor no job code runs, the
+sink is not called, no wake-up is pending, and the change source follows
+nothing. An owner declares the follower after what the sink touches, or
+calls `stop()` in its destructor, as `RulePreviewer` does. `follow()`
+starts afresh after `stop()`.
+
+**Why this design.** Three designs were compared: three commands
+(follow, nudge, stop), a ports-and-adapters design with four ports
+(clock, alarm, change source, worker) and seven methods, and a trivial
+default whose test fakes come from an ambient, globally overridable
+environment. The three commands are the two verbs of the ticket plus
+shutdown, and hide the whole state machine (rerun, gap, skip, watch on
+read, previous result, shutdown order): the module is deep, and every
+timing rule is in one place. The seams are exactly the ones the ticket
+names, clock and change source, injected through the constructor; an
+injected worker would only have a test adapter and weaken the promise
+that results never arrive synchronously, and an ambient override is
+hidden global test state.
+
 ## Module Overview
 
 | Module | File(s) | Responsibility |
@@ -244,9 +317,11 @@ session's shape.
 | **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
 | **RuleListView** | `rulelistview.h/.cpp` | The rule list: drag & drop and Ctrl+Shift+Up/Down to reorder rules |
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
-| **ActiveFileWatcher** | `activefilewatcher.h/.cpp` | Watches the active file, or its directory while it is missing, with a pause after changes |
+| **FileFollower** | `filefollower.h`, `followerclock.h/.cpp`, `changesource.h` | Follows the active file for an owner: runs its job, reruns after changes with a gap, skips changes that cannot matter |
+| **FileChangeSource** | `filechangesource.h/.cpp` | The file system's changes of the active file, or of its directory while it is missing, without the owner's own reads |
+| **ActiveFileWatcher** | `activefilewatcher.h/.cpp` | The footer's pause after changes of the active file, until the footer moves onto the follower (#35) |
 | **LatestJob** | `latestjob.h` | One worker thread whose latest job alone hands over its result |
-| **RulePreviewer** | `rulepreviewer.h/.cpp` | Runs the live preview: debounced, on a worker thread, outdated results dropped |
+| **RulePreviewer** | `rulepreviewer.h/.cpp` | Runs the live preview: debounced, through a file follower, outdated results dropped |
 | **RulePreviewView** | `rulepreviewview.h/.cpp` | The preview section of the detail panel: first match with highlights, values, count |
 | **FooterValue** | `footervalue.h` | A shown value: key, displayed and raw value, and the rule that supplied it |
 | **FooterDisplayWidget** | `footerdisplaywidget.h/.cpp` | Footer bar widget; one `FooterValueItem` per value, which copies it on a click |
@@ -360,10 +435,12 @@ in a detail panel on the right.
   rule enabled in the list, and rows inserted, removed or moved; not
   every `dataChanged()`, which validation marks emit too. The long line
   around the first match is cut between whole characters, never inside a
-  surrogate pair. Tests set the pauses to 0 (`setDelays()`) or start
-  a preview with `flush()`, so they wait for no real time, and replace
-  the preview function (`setPreviewFunction()`) to hold a preview on the
-  worker (`tests/rulepreview_test.cpp`).
+  surrogate pair. Tests set the pause after edits to 0
+  (`setEditDelay()`) or start a preview with `flush()`, pass the
+  follower a clock and change source of their own through the
+  constructor, so they wait for no real time, and replace the preview
+  function (`setPreviewFunction()`) to hold a preview on the worker
+  (`tests/rulepreview_test.cpp`).
 
 ### Simple mode
 

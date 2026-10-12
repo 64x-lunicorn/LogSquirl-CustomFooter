@@ -101,7 +101,7 @@ public:
 
     /**
      * Start a new rule from the Log Line selected in the host, as
-     * "Rule from selected line…" does: open the editor as openEditor()
+     * "Rule from Selected Line…" does: open the editor as openEditor()
      * does, or bring the open one forward with its edits, and add a new
      * simple rule there with that line shown, for the user to click or mark
      * the value in. Of several selected lines the first is taken. Returns

@@ -32,15 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   click does. Needs LogSquirl 26.11; on 26.10 the values only copy, as
   before.
 - **Rule from a selected line** — on LogSquirl 26.11, select the Log Line
-  with the value and choose *Plugins → Custom Footer → Rule from selected
-  line…*, or **From selected line…** in the rule editor. The editor opens
+  with the value and choose *Plugins → Custom Footer → Rule from Selected
+  Line…*, or **From selected line…** in the rule editor. The editor opens
   with a new rule in simple mode and shows the line: click where the value
   starts or mark it, and the text before the value, where the value ends
   and a key (`VIN:` → `VIN`) are filled in, with the extracted value in
   the preview at once. Special characters before the value are matched
-  literally. Of several selected lines the first is used. Without a
-  selection, a message says what to do. On LogSquirl 26.10 the action is
-  not offered, and the plugin registers its menu as before.
+  literally. A mark that makes no rule, e.g. because the text before the
+  value also appears earlier in the line, says why, and the editor says
+  when an earlier Log Line in the file supplies the value. Of several
+  selected lines the first is used. Without a selection or an open Log
+  File, a message says what to do. On LogSquirl 26.11 the editor moves to
+  *Plugins → Custom Footer → Edit Rules…*; on LogSquirl 26.10 the action is
+  not offered, and the menu stays *Plugins → Custom Footer…*.
 
 ### Changed
 - **Footer session** — one module now owns the rules in the config

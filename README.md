@@ -171,12 +171,13 @@ so: the new rule becomes an alternative for that key.
   invalid pattern, is skipped and reported in the LogSquirl log in the
   editor's words, such as `Rule 2: invalid line pattern: …`.
 - The active file is **watched**: when it changes, e.g. while following a
-  growing log, it is scanned again within about half a second, so values
-  that show up later in the file appear in the footer. Only the lines
-  appended since the last scan are read, and none once every key has a
-  value; a file that was truncated or replaced is scanned from its start.
-  If the file is rotated away, the footer picks it up again once it is
-  recreated.
+  growing log, it is scanned again about half a second later, so values
+  that show up later in the file appear in the footer. A change during a
+  scan is scanned half a second after that scan, never right after it.
+  Only the lines appended since the last scan are read, and none once
+  every key has a value; a file that was truncated or replaced is scanned
+  from its start. If the file is rotated away, the footer picks it up
+  again once it is recreated.
 - **Copy a value** by clicking it in the footer: exactly the value is copied,
   not its key, and a short "Copied" tooltip confirms it. Hover a value to see
   which rule supplied it and, for a mapped value, the raw value it replaced.
@@ -282,7 +283,7 @@ graph TD
     B --> G[FooterController]
     D[FooterConfig] -->|load rules| G
     G -->|scan on worker thread| C[FooterScanner]
-    H[File watcher] -->|file grew| G
+    H[File follower] -->|file grew| G
     G -->|latest scan results| E[FooterDisplayWidget]
     E -->|register_footer_widget| A
     B -->|edit rules| F[FooterEditor]

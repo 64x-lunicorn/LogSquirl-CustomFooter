@@ -42,8 +42,7 @@ namespace custom_footer {
  */
 struct FollowerParts {
     /// The one definition of the pause after a change of the file, and of
-    /// the gap between two runs. The footer's own pause
-    /// (FooterController::kRescanDelayMs) goes in favour of it with #35.
+    /// the gap between two runs, for the preview and the footer alike.
     static constexpr int kGapMs = 500;
 
     std::unique_ptr<FollowerClock> clock;
@@ -53,7 +52,7 @@ struct FollowerParts {
 
 /**
  * Follows the active file for an owner that needs the latest result of
- * reading it: the editor's preview, and later the footer.
+ * reading it: the editor's preview, and the footer.
  *
  * The owner provides the job, which reads the file on a worker thread, and
  * optionally a predicate saying whether a change can matter at all. It says
@@ -74,9 +73,11 @@ struct FollowerParts {
  *   the predicate says the change cannot matter to the last result, nothing
  *   runs; otherwise the job runs. A change made while the predicate or the
  *   job reads the file is therefore always reported.
- * - The change source is rearmed once just before every run's job starts,
- *   never between the predicate and the job: the file is watched whenever
- *   it is read.
+ * - The change source is rearmed once per run, before anything reads the
+ *   file: for a run of follow() just before its job, for a run of a
+ *   wake-up before the predicate, never between the predicate and the job;
+ *   and for a wake-up the predicate skips all the same. The file is
+ *   watched whenever it is read.
  * - The job gets a copy of the last result delivered since follow() as the
  *   previous one, or null. An outdated or failed run never becomes it.
  * - The sink only ever gets results of runs that are not outdated, and

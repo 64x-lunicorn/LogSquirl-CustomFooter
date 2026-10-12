@@ -64,7 +64,6 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/footercontroller.cpp"
         "${CMAKE_SOURCE_DIR}/src/footersession.cpp"
         "${CMAKE_SOURCE_DIR}/src/hostapiadapter.cpp"
-        "${CMAKE_SOURCE_DIR}/src/activefilewatcher.cpp"
         "${CMAKE_SOURCE_DIR}/src/filechangesource.cpp"
         "${CMAKE_SOURCE_DIR}/src/followerclock.cpp"
         "${CMAKE_SOURCE_DIR}/src/footerscanner.cpp"

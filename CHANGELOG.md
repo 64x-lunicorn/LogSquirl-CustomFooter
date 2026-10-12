@@ -15,10 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin's C entry points only translate between LogSquirl and it. Nothing
   changes for users.
 - **File follower** — the rule editor's live preview follows the active
-  file through a shared file follower, which the footer will use as well.
+  file through a shared file follower, which the footer uses as well.
   It behaves as before: it follows a growing, rotated or truncated file,
   leaves half a second between two previews of a changing file, and
   ignores notifications that are only the file being read.
+- **The footer follows the active file like the preview** — through the
+  same file follower. A file that changes while it is scanned is scanned
+  again half a second after that scan, as the preview does, instead of
+  right after it, so a busy log is never scanned back to back. The same
+  file made active again is scanned after the same pause. A change that
+  cannot alter the footer, such as a file left as it was, is not scanned.
+  A growing log is still scanned on from where the last scan stopped, and
+  not at all once every key has a value; a truncated or rotated file is
+  still scanned from its start.
 - **One rule check** decides whether a rule is usable, for the footer and
   the rule editor alike. The footer skips exactly the rules the editor
   marks, and reports them in the LogSquirl log in the editor's words, e.g.

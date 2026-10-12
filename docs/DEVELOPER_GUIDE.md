@@ -91,18 +91,40 @@ session, wrapped in `guarded()`.
 
 ## Threading
 
-Scans run on a single worker thread owned by `FooterController`. Every
-started scan increments a generation counter; a finished scan is shown only
-if no newer one was started, so switching files quickly never shows stale
-values. Another active file, or reloaded rules, cancel the running scan. A
-change of the active file does not: the running scan finishes, and one
-follow-up scan then covers every change made meanwhile, however many there
-were. Otherwise a log that changes more often than it can be scanned would
-never show values. The result reaches the widget through a `QFutureWatcher`
-on the GUI thread. `logsquirl_plugin_shutdown()` destroys the footer session
-first, which deletes the editor and then the controller; that cancels the
-running scan and waits for the worker: after it returns, no code of the
+The footer follows the active file with a `FileFollower` (see
+[File follower](#file-follower)), owned by `FooterController`, whose
+worker thread is its own. Every started scan increments a generation
+counter; a finished scan is shown only if no newer one was started, so
+switching files quickly never shows stale values. Another active file, or
+reloaded rules, cancel the running scan and scan afresh at once
+(`FileFollower::follow()`). A change of the active file does not cancel:
+the running scan finishes and is shown, and one follow-up scan then covers
+every change made meanwhile, however many there were, no sooner than
+`FollowerParts::kGapMs` (500 ms) after it finished, so the file is never
+scanned back to back. Otherwise a log that changes more often than it can
+be scanned would never show values. Setting the same active file again
+counts as a change (`FileFollower::nudge()`). The result reaches the widget
+through a `QFutureWatcher` on the GUI thread. `logsquirl_plugin_shutdown()`
+destroys the footer session first, which deletes the editor and then the
+controller; that stops the follower, which cancels the running scan, waits
+for the worker and drops its wake-up: after it returns, no code of the
 plugin runs, and the host may unload the library.
+
+The controller keeps only its own concerns: the rules, the scan progress
+and showing values. The scan progress is the follower's previous result:
+the job continues `FooterScanner::scanFrom()` from the last scan shown,
+which reads only what was appended to a file that only grew and scans a
+truncated or replaced one from its start; `follow()` forgets it, so
+another file or reloaded rules scan from the start. Kept there rather
+than in the controller, the progress can never come from an outdated,
+cancelled or failed scan. Where `scanFrom()` stays the one place that
+tracks progress, later per-value details of a match (e.g. its line
+number) can travel with it through incremental rescans. The follower's skip
+predicate is `FooterScanner::fileUnchangedFor()` for the last scan: a
+change is not scanned when the part of the file scanned is unchanged and
+either every key has a value or a limit was reached (so appended lines
+are not read, as in 0.4.0), or the file has the size it had when the scan
+opened it.
 
 Both workers are a `LatestJob` (`latestjob.h`): one worker thread, a
 generation counter, a cancel flag, and results handed to the GUI thread
@@ -116,8 +138,6 @@ Linux and Windows may report the owner's own reading, e.g. of the access
 time, and the owner would otherwise read the file again every pause for
 as long as it is open. A rewrite to the same size within the file
 system's time resolution goes unnoticed, as for the footer's rescans.
-The footer adds its pause with an `ActiveFileWatcher` (a `QTimer` around
-the change source) until it moves onto the file follower too (#35).
 
 The rule editor's live preview follows the active file with a
 `FileFollower` (see [File follower](#file-follower)), owned by
@@ -316,8 +336,8 @@ session's shape.
 ## File follower
 
 `FileFollower<Result>` (`filefollower.h`) follows the active file for an
-owner that needs the latest result of reading it: the editor's preview,
-and the footer after #35. The owner gives it a sink for results, and per
+owner that needs the latest result of reading it: the editor's preview
+(`RulePreviewer`) and the footer (`FooterController`). The owner gives it a sink for results, and per
 set of inputs a job (file, previous result, cancel flag → result) and
 optionally a predicate saying whether a change can matter to the last
 result. It has three commands and a query:
@@ -339,16 +359,16 @@ result. It has three commands and a query:
 - `status()`: busy, waiting for the file, runs started and finished.
 
 Its invariants, documented in the header and tested in
-`tests/filefollower_test.cpp`: the change source is rearmed once before
-every run, before the predicate too and never between it and the job,
-so the file is watched whenever it is read; the job's previous result
-is the last one delivered since `follow()`, never one of an outdated or
-failed run, even one already on its way; the sink gets only
-results of runs that are not outdated, never from within a command; a
-job that throws counts as finished without a result, and the gap and a
-rerun still apply; everything but the job runs on the context's thread.
-The gap is defined once, `FollowerParts::kGapMs` (500 ms); the footer's
-`FooterController::kRescanDelayMs` goes in favour of it with #35.
+`tests/filefollower_test.cpp`: the change source is rearmed once per run,
+before anything reads the file (for a wake-up before the predicate, never
+between it and the job), so the file is watched whenever it is read; the
+job's previous result is the last one delivered since `follow()`, never
+one of an outdated or failed run, even one already on its way; the sink
+gets only results of runs that are not outdated, never from within a
+command; a job that throws counts as finished without a result, and the
+gap and a rerun still apply; everything but the job runs on the
+context's thread. The gap is defined once, `FollowerParts::kGapMs`
+(500 ms), for the preview and the footer alike.
 
 **Seams.** Two things are injected through the constructor
 (`FollowerParts`), each with two adapters:
@@ -360,16 +380,20 @@ The gap is defined once, `FollowerParts::kGapMs` (500 ms); the footer's
 
 Null parts are the production adapters. The worker (`LatestJob`) is not a
 seam: it stays inside, so results can never arrive synchronously. Owners
-pass the parts through, e.g. `RulePreviewer( parent, parts )`; tests of
-the follower and of the preview move the clock and fire changes
-themselves, without real waiting and without reaching into the watcher.
+pass the parts through, `RulePreviewer( parent, parts )` and
+`FooterController( widget, configDir, warn, parent, parts )`; the session
+keeps the default. Tests of the follower, the preview and the footer
+controller move the clock and fire changes themselves, without real
+waiting and without reaching into the watcher; one smoke test of the
+controller runs on a real file with the production parts.
 `FileChangeSource` is tested with real files
 (`tests/filechangesource_test.cpp`).
 
 **Shutdown.** After `stop()` or the destructor no job code runs, the
 sink is not called, no wake-up is pending, and the change source follows
 nothing. An owner declares the follower after what the sink touches, or
-calls `stop()` in its destructor, as `RulePreviewer` does. `follow()`
+calls `stop()` in its destructor, as `RulePreviewer` and
+`FooterController` do (the controller declares it last as well). `follow()`
 starts afresh after `stop()`.
 
 **Why this design.** Three designs were compared: three commands
@@ -394,7 +418,7 @@ hidden global test state.
 | **HostFunctions** | `hostfunctions.h` | What the plugin needs from the host, as a value, its 26.11 functions optional; `guarded()` |
 | **HostApiAdapter** | `hostapiadapter.h/.cpp` | Turns the host's C table into `HostFunctions`, reading only the members its size reports; owns the Regex Lab answers awaited |
 | **FooterEntry** | `footerentry.h` | Data model: key, linePattern, valuePattern, mappings |
-| **FooterController** | `footercontroller.h/.cpp` | Cached rules, background scans, file watching |
+| **FooterController** | `footercontroller.h/.cpp` | Cached rules, scan progress and the shown values; scans through a file follower |
 | **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |
 | **FooterConfig** | `footerconfig.h/.cpp` | INI persistence + JSON import/export |
 | **RuleCheck** | `rulecheck.h/.cpp` | Decides whether a rule is usable and, if not, why, for the scanner and the editor |
@@ -404,7 +428,6 @@ hidden global test state.
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
 | **FileFollower** | `filefollower.h`, `followerclock.h/.cpp`, `changesource.h` | Follows the active file for an owner: runs its job, reruns after changes with a gap, skips changes that cannot matter |
 | **FileChangeSource** | `filechangesource.h/.cpp` | The file system's changes of the active file, or of its directory while it is missing, without the owner's own reads |
-| **ActiveFileWatcher** | `activefilewatcher.h/.cpp` | The footer's pause after changes of the active file, until the footer moves onto the follower (#35) |
 | **LatestJob** | `latestjob.h` | One worker thread whose latest job alone hands over its result |
 | **RulePreviewer** | `rulepreviewer.h/.cpp` | Runs the live preview: debounced, through a file follower, outdated results dropped |
 | **RulePreviewView** | `rulepreviewview.h/.cpp` | The preview section of the detail panel: first match with highlights, values, count |
@@ -443,9 +466,10 @@ hidden global test state.
 6. Stop early once every key has a value.
 7. **Incremental rescans**: `scanFrom()` returns the scan's progress (offset
    and count of the complete lines scanned, the values found, and bytes
-   identifying the file). When the watched file changes, the next scan
-   continues from there if the file only grew, and reads nothing once every
-   key has a value or a limit was reached. A file that shrank, whose start
+   identifying the file). When the followed file changes, the next scan
+   continues from there if the file only grew, and does not run at all once
+   every key has a value or a limit was reached
+   (`fileUnchangedFor( path, scan )`, the follower's skip predicate). A file that shrank, whose start
    or scanned end differs, or with another birth time, is scanned from its
    start. A last line without a line break is matched but not remembered,
    as it may still be being written.

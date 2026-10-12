@@ -76,6 +76,7 @@ void SelectedLinePicker::showLine( const QString& line, int selectedLines )
     }
     markStart_ = -1;
     markLength_ = -1;
+    earlierMatch_.clear();
     auto hint = tr( "Click where the value starts in this Log Line, or mark the value." );
     if ( selectedLines > 1 ) {
         hint += QLatin1Char( ' ' )
@@ -128,13 +129,25 @@ void SelectedLinePicker::showMarkIgnored( const QString& reason )
     setHint( reason );
 }
 
+void SelectedLinePicker::showRuleEdited()
+{
+    setHint( tr( "Click where the value starts in this Log Line, or mark the value, to make the "
+                 "rule from the line again." ) );
+}
+
 void SelectedLinePicker::showEarlierMatch( qint64 lineNumber, const QString& value )
 {
-    hint_->setText( hintText_ + QLatin1Char( ' ' )
-                    + tr( "In the active file, Log Line %1 matches first: the footer shows its "
-                          "value “%2”, not this line's." )
-                          .arg( lineNumber )
-                          .arg( value ) );
+    earlierMatch_ = tr( "In the active file, Log Line %1 matches first: the footer shows its "
+                        "value “%2”, not this line's." )
+                        .arg( lineNumber )
+                        .arg( value );
+    updateHint();
+}
+
+void SelectedLinePicker::clearEarlierMatch()
+{
+    earlierMatch_.clear();
+    updateHint();
 }
 
 void SelectedLinePicker::focusLine()
@@ -158,7 +171,13 @@ void SelectedLinePicker::markChanged()
 void SelectedLinePicker::setHint( const QString& hint )
 {
     hintText_ = hint;
-    hint_->setText( hint );
+    updateHint();
+}
+
+void SelectedLinePicker::updateHint()
+{
+    hint_->setText( earlierMatch_.isEmpty() ? hintText_
+                                            : hintText_ + QLatin1Char( ' ' ) + earlierMatch_ );
 }
 
 } // namespace custom_footer

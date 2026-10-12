@@ -544,7 +544,15 @@ void FooterEditor::storePanelInCurrentRule()
     if ( row < 0 ) {
         return;
     }
-    model_->setEntry( row, panel_->entry(), panel_->unfinishedSimpleRule() );
+    const auto before = model_->entry( row );
+    const auto edited = panel_->entry();
+    model_->setEntry( row, edited, panel_->unfinishedSimpleRule() );
+    if ( isLineRule( row )
+         && ( edited.linePattern != before.linePattern
+              || edited.valuePattern != before.valuePattern ) ) {
+        // The hint about the last mark no longer describes the rule.
+        linePicker_->showRuleEdited();
+    }
     showProblems();
     schedulePreview();
 }
@@ -701,8 +709,11 @@ bool FooterEditor::isLineRule( int row ) const
 void FooterEditor::showLineRulePreview( const FooterScanner::Preview& preview )
 {
     // The preview is always of the selected rule.
-    if ( !isLineRule( currentRow() ) || preview.status != FooterScanner::Preview::Status::Scanned
-         || !preview.value ) {
+    if ( !isLineRule( currentRow() ) ) {
+        return;
+    }
+    if ( preview.status != FooterScanner::Preview::Status::Scanned || !preview.value ) {
+        linePicker_->clearEarlierMatch();
         return;
     }
     // The preview's line is as matched: without a line break, and only the
@@ -717,6 +728,7 @@ void FooterEditor::showLineRulePreview( const FooterScanner::Preview& preview )
     }
     // Both may be only the start of a long line.
     if ( !matched.isEmpty() && ( shown.startsWith( matched ) || matched.startsWith( shown ) ) ) {
+        linePicker_->clearEarlierMatch();
         return;
     }
     linePicker_->showEarlierMatch( preview.lineNumber, preview.value->value );
@@ -758,6 +770,10 @@ void FooterEditor::schedulePreview( RulePreviewer::Start start )
     if ( !problem.isEmpty() ) {
         previewer_->clear();
         panel_->previewView()->showRuleProblem( problem );
+        if ( isLineRule( row ) ) {
+            // Nothing matches first now.
+            linePicker_->clearEarlierMatch();
+        }
         return;
     }
     previewer_->schedule( model_->entries(), row, start );

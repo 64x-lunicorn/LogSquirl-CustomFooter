@@ -487,6 +487,32 @@ SCENARIO( "The rule editor says when an earlier Log Line supplies the rule's val
                 REQUIRE( ui.hint->text().contains( "Log Line 2 matches first" ) );
                 REQUIRE( ui.hint->text().contains( "“EARLY1”" ) );
             }
+
+            AND_WHEN( "a mark that makes no rule follows" )
+            {
+                ui.mark( "2026-10-12" );
+
+                THEN( "the hint says why, and still that Log Line 2 matches first, as the rule "
+                      "is unchanged" )
+                {
+                    REQUIRE( ui.hint->text().contains( "starts the line" ) );
+                    REQUIRE( ui.hint->text().contains( "Log Line 2 matches first" ) );
+                }
+            }
+
+            AND_WHEN( "the rule is changed by hand so that only the selected line matches" )
+            {
+                ui.textBefore->setText( "speed=" );
+                REQUIRE(
+                    processUntil( [ &ui ] { return ui.previewValue->text().contains( "“5”" ); } ) );
+
+                THEN( "the hint no longer describes the old mark, nor an earlier Log Line" )
+                {
+                    REQUIRE_FALSE( ui.hint->text().contains( "WDB1234567" ) );
+                    REQUIRE_FALSE( ui.hint->text().contains( "matches first" ) );
+                    REQUIRE( ui.hint->text().contains( "Click where the value starts" ) );
+                }
+            }
         }
     }
 }

@@ -61,10 +61,17 @@ public:
     /// is emitted again.
     void showMarkIgnored( const QString& reason );
 
-    /// Add to the hint that in the active file Log Line @p lineNumber
-    /// matches first, so the footer shows its value @p value rather than
-    /// the shown line's. Until the hint changes otherwise.
+    /// Show that the rule was changed by hand: the hint no longer describes
+    /// a mark, and says how to make the rule from the line again.
+    void showRuleEdited();
+
+    /// Add to the hint, whatever it says, that in the active file Log Line
+    /// @p lineNumber matches first, so the footer shows its value @p value
+    /// rather than the shown line's; until the next call of this or of
+    /// clearEarlierMatch(), or showLine(). The owner calls one of them with
+    /// every preview of the rule, so the note follows the rule as it is.
     void showEarlierMatch( qint64 lineNumber, const QString& value );
+    void clearEarlierMatch();
 
     /// Put the focus into the line, to click or mark the value.
     void focusLine();
@@ -77,15 +84,17 @@ Q_SIGNALS:
 
 private:
     void markChanged();
-    /// Show @p hint, without a note of an earlier match.
+    /// Show @p hint, with the note of an earlier match, if any.
     void setHint( const QString& hint );
+    void updateHint();
 
     QLabel* hint_ = nullptr;
     QLineEdit* line_ = nullptr;
     /// Says that only the start of a long line is shown.
     QLabel* cutNote_ = nullptr;
-    /// The hint without a note of an earlier match.
+    /// The hint, and the note of an earlier match shown after it.
     QString hintText_;
+    QString earlierMatch_;
     /// The last mark emitted, to emit each once.
     qsizetype markStart_ = -1;
     qsizetype markLength_ = -1;

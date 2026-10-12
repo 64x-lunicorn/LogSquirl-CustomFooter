@@ -242,6 +242,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     if ( !file.open( QIODevice::ReadOnly ) ) {
         return scan;
     }
+    // Before reading: bytes appended while the scan reads count as unread.
+    scan.fileSize = file.size();
 
     auto& progress = scan.progress;
     scan.resumed = continues( file, from );
@@ -497,11 +499,22 @@ bool FooterScanner::fileUnchangedFor( const QString& filePath, const Preview& pr
     if ( preview.status != Preview::Status::Scanned || preview.filePath != filePath ) {
         return false;
     }
+    return unchangedSince( filePath, preview.read, preview.limitReached(), preview.fileSize );
+}
+
+bool FooterScanner::fileUnchangedFor( const QString& filePath, const Scan& scan )
+{
+    return unchangedSince( filePath, scan.progress, scan.progress.done, scan.fileSize );
+}
+
+bool FooterScanner::unchangedSince( const QString& filePath, const Progress& read, bool beyondRead,
+                                    qint64 size )
+{
     QFile file( filePath );
-    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, preview.read ) ) {
+    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, read ) ) {
         return false;
     }
-    return preview.limitReached() || file.size() == preview.fileSize;
+    return beyondRead || file.size() == size;
 }
 
 QList<FooterValue> FooterScanner::footerValues( const Values& values ) const

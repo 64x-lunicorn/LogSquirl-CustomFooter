@@ -232,3 +232,121 @@ SCENARIO( "FooterScanner starts over when the file was replaced", "[footerscanne
         }
     }
 }
+
+SCENARIO( "FooterScanner tells whether a change of a file can alter a scan of it",
+          "[footerscanner][resume]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/followed.log";
+    const FooterScanner scanner( vinAndIdRules() );
+
+    GIVEN( "a scan with a key still missing" )
+    {
+        writeBytes( path, "VIN: ABC\n" );
+        const auto scan = scanner.scanFrom( path, {} );
+        REQUIRE_FALSE( scan.progress.done );
+
+        THEN( "a file left as it was cannot alter it" )
+        {
+            REQUIRE( FooterScanner::fileUnchangedFor( path, scan ) );
+        }
+
+        WHEN( "lines are appended" )
+        {
+            writeBytes( path, "more\n", true );
+
+            THEN( "they can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+
+        WHEN( "a last line is begun, without a line break yet" )
+        {
+            writeBytes( path, "id=", true );
+
+            THEN( "it can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+    }
+
+    GIVEN( "a scan in which every key has a value" )
+    {
+        writeBytes( path, "VIN: ABC\nid=7\n" );
+        const auto scan = scanner.scanFrom( path, {} );
+        REQUIRE( scan.progress.done );
+
+        WHEN( "lines are appended" )
+        {
+            writeBytes( path, "VIN: LATER\nid=8\n", true );
+
+            THEN( "they cannot alter it" )
+            {
+                REQUIRE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+
+        WHEN( "the file is truncated and written again" )
+        {
+            writeBytes( path, "VIN: NEW\n" );
+
+            THEN( "it can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+
+        WHEN( "the file is replaced by a larger one with other content" )
+        {
+            REQUIRE( QFile::remove( path ) );
+            writeBytes( path, "VIN: REPLACED\nid=new\nand more\n" );
+
+            THEN( "it can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+
+        WHEN( "the file disappears" )
+        {
+            REQUIRE( QFile::remove( path ) );
+
+            THEN( "it can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+    }
+
+    GIVEN( "a scan that reached the line limit" )
+    {
+        writeBytes( path, "one\ntwo\n" );
+        const auto scan = scanner.scanFrom( path, {}, 2 );
+        REQUIRE( scan.progress.done );
+
+        WHEN( "matching lines are appended" )
+        {
+            writeBytes( path, "VIN: LATE\nid=2\n", true );
+
+            THEN( "they are beyond the limit and cannot alter it" )
+            {
+                REQUIRE( FooterScanner::fileUnchangedFor( path, scan ) );
+            }
+        }
+    }
+
+    GIVEN( "a scan of a file of which no complete line could be scanned" )
+    {
+        writeBytes( path, "VIN: PART" );
+        const auto scan = scanner.scanFrom( path, {} );
+        REQUIRE( scan.progress.offset == 0 );
+
+        THEN( "any change counts, as there is nothing to compare" )
+        {
+            REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+        }
+    }
+}

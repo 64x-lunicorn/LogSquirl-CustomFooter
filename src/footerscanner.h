@@ -84,6 +84,9 @@ public:
         Progress progress;
         /// Whether the scan continued from the given progress.
         bool resumed = false;
+        /// The file's size when the scan opened it, to tell whether a change
+        /// of it can alter the scan (fileUnchangedFor()).
+        qint64 fileSize = 0;
     };
 
     /// What one rule finds in a file, for the editor's live preview.
@@ -207,6 +210,16 @@ public:
      */
     static bool fileUnchangedFor( const QString& filePath, const Preview& preview );
 
+    /**
+     * Whether a change of @p filePath since @p scan of it cannot alter it:
+     * the part of the file scanned is unchanged, and either the scan is
+     * done (every key has a value, or a limit was reached), so appended
+     * lines are not scanned, or the file has its size still. A truncated or
+     * replaced file is changed, and so is one of which no complete line was
+     * scanned, as there is nothing to compare.
+     */
+    static bool fileUnchangedFor( const QString& filePath, const Scan& scan );
+
     /// The given values, once per key, at the position of the key's first rule.
     QList<FooterValue> footerValues( const Values& values ) const;
 
@@ -260,6 +273,12 @@ private:
 
     /// Whether the file is still the one the progress was made on.
     static bool continues( QFile& file, const Progress& from );
+
+    /// Whether the file still holds what @p read covers, and, unless
+    /// appended lines are beyond what was read (@p beyondRead), has
+    /// @p size still.
+    static bool unchangedSince( const QString& filePath, const Progress& read, bool beyondRead,
+                                qint64 size );
 
     QList<Rule> rules_;
     QStringList keys_; ///< Distinct keys, in the order of their first rule.

@@ -20,11 +20,16 @@
 #pragma once
 
 #include "footerentry.h"
+#include "hostfunctions.h"
+#include "ruledetailpanel.h"
 #include "rulepreviewer.h"
 
 #include <QDialog>
 #include <QList>
+#include <QPersistentModelIndex>
 #include <QString>
+
+#include <optional>
 
 class QDialogButtonBox;
 class QLabel;
@@ -65,6 +70,16 @@ class RuleTemplateDialog;
  * changes. Closing or destroying the dialog cancels a running preview and
  * waits for it; nothing restarts it afterwards, not even an edit committed
  * while the dialog closes.
+ *
+ * Test… next to a pattern opens it in LogSquirl's Regex Lab, through the
+ * function the plugin passes in with setRegexLab(). One Lab is open for
+ * the editor at a time, and Test… is disabled meanwhile. Apply in the Lab
+ * writes the pattern into the rule it was opened for, as if typed there,
+ * also when another rule is selected or the rule has moved; Cancel, a
+ * rule removed meanwhile, or a closed editor drop the answer. A rule has
+ * no match-case flag: the Lab gets "Match case" on, or off for a pattern
+ * that starts with (?i), which the Lab gets without it; an applied pattern
+ * gets (?i) in front when "Match case" came back off.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -80,6 +95,11 @@ public:
 
     /// The footer's line limit, which the preview scans with too.
     void setMaxLines( int maxLines );
+
+    /// How Test… opens the Regex Lab, with this editor as the context. Empty,
+    /// as by default: the host has none, and Test… is disabled, saying that
+    /// it needs LogSquirl 26.11 or later.
+    void setRegexLab( OpenRegexLab openRegexLab );
 
     /// Stops the preview for good before closing.
     void done( int result ) override;
@@ -110,6 +130,8 @@ private Q_SLOTS:
     void showCurrentRule();
     void storePanelInCurrentRule();
     void ruleChanged( int row );
+    /// Open the selected rule's pattern in @p field in the Regex Lab.
+    void testPattern( PatternField field );
 
 private:
     int currentRow() const;
@@ -120,6 +142,13 @@ private:
 
     /// Show a warning without blocking: opened with open().
     void showError( const QString& title, const QString& text, const QString& objectName );
+
+    /// The Regex Lab's answer for the pattern in @p field of @p rule, the
+    /// rule it was opened for, wherever it is now.
+    void regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                           const std::optional<RegexLabPattern>& applied );
+    /// Offer Test… only when the Regex Lab can be opened.
+    void updatePatternTest();
 
     /// Preview the selected rule, or show that none is.
     void schedulePreview( RulePreviewer::Start start = RulePreviewer::Start::AfterPause );
@@ -132,8 +161,11 @@ private:
     RuleListView* list_ = nullptr;
     RuleDetailPanel* panel_ = nullptr;
     RulePreviewer* previewer_ = nullptr;
-    /// The dialog is closing: no more previews.
+    /// The dialog is closing: no more previews, no more Regex Lab answers.
     bool closing_ = false;
+    OpenRegexLab openRegexLab_;
+    /// A Regex Lab opened by Test… has not answered yet.
+    bool regexLabOpen_ = false;
 
     QToolButton* addButton_ = nullptr;
     QToolButton* templateButton_ = nullptr;

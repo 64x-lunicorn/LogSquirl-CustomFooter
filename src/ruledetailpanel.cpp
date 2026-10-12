@@ -158,10 +158,10 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     advancedCheck_->installEventFilter( this );
     form->addRow( QString(), advancedCheck_ );
 
-    linePatternEdit_
-        = addField( form, tr( "&Line pattern:" ), "linePatternEdit", &linePatternProblem_ );
-    valuePatternEdit_
-        = addField( form, tr( "&Value pattern:" ), "valuePatternEdit", &valuePatternProblem_ );
+    linePatternEdit_ = addField( form, tr( "&Line pattern:" ), "linePatternEdit",
+                                 &linePatternProblem_, &testLinePatternButton_ );
+    valuePatternEdit_ = addField( form, tr( "&Value pattern:" ), "valuePatternEdit",
+                                  &valuePatternProblem_, &testValuePatternButton_ );
 
     // ── Its value mappings ───────────────────────────────────────────────
     auto* mappings = new QWidget( this );
@@ -214,6 +214,10 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     for ( auto* field : { linePatternEdit_, valuePatternEdit_ } ) {
         connect( field, &QLineEdit::textChanged, this, &RuleDetailPanel::patternEdited );
     }
+    connect( testLinePatternButton_, &QToolButton::clicked, this,
+             [ this ] { Q_EMIT patternTestRequested( PatternField::Line ); } );
+    connect( testValuePatternButton_, &QToolButton::clicked, this,
+             [ this ] { Q_EMIT patternTestRequested( PatternField::Value ); } );
     connect( mappingTable_, &QTableWidget::cellChanged, this, &RuleDetailPanel::edited );
     connect( mappingTable_, &QTableWidget::currentCellChanged, this,
              &RuleDetailPanel::updateMappingButtons );
@@ -297,6 +301,25 @@ void RuleDetailPanel::setProblems( const RuleProblems& problems )
     markField( endCharacterEdit_, endCharacterProblem_, problems.endCharacter );
     markField( linePatternEdit_, linePatternProblem_, problems.linePattern );
     markField( valuePatternEdit_, valuePatternProblem_, problems.valuePattern );
+}
+
+void RuleDetailPanel::setPatternTestUnavailable( const QString& reason )
+{
+    testUnavailable_ = reason;
+    updateTestButtons();
+}
+
+void RuleDetailPanel::setPattern( PatternField field, const QString& pattern )
+{
+    auto* edit = field == PatternField::Line ? linePatternEdit_ : valuePatternEdit_;
+    if ( edit->text() == pattern ) {
+        return;
+    }
+    if ( !advanced_ ) {
+        setAdvanced( true );
+    }
+    // Emits edited() through patternEdited(), as typing does.
+    edit->setText( pattern );
 }
 
 void RuleDetailPanel::focusKey()
@@ -465,7 +488,8 @@ void RuleDetailPanel::updateMappingButtons()
 }
 
 QLineEdit* RuleDetailPanel::addField( QFormLayout* form, const QString& label,
-                                      const QString& objectName, QLabel** problemLabel )
+                                      const QString& objectName, QLabel** problemLabel,
+                                      QToolButton** testButton )
 {
     auto* field = new QLineEdit( this );
     field->setObjectName( objectName );
@@ -478,7 +502,21 @@ QLineEdit* RuleDetailPanel::addField( QFormLayout* form, const QString& label,
 
     auto* column = new QVBoxLayout;
     column->setSpacing( 2 );
-    column->addWidget( field );
+    if ( testButton ) {
+        // linePatternEdit → testLinePatternButton
+        auto* test = new QToolButton( this );
+        test->setObjectName( "test" + objectName.left( 1 ).toUpper()
+                             + objectName.mid( 1 ).chopped( 4 ) + "Button" );
+        test->setText( tr( "Test…" ) );
+        *testButton = test;
+        auto* row = new QHBoxLayout;
+        row->addWidget( field, 1 );
+        row->addWidget( test );
+        column->addLayout( row );
+    }
+    else {
+        column->addWidget( field );
+    }
     column->addWidget( problem );
 
     auto* buddy = new QLabel( label, this );
@@ -551,6 +589,33 @@ void RuleDetailPanel::setAdvanced( bool advanced )
         valuePatternEdit_->setPlaceholderText( tr( "Not needed: the line pattern has the value" ) );
     }
     updateAdvancedCheck();
+    updateTestButtons();
+}
+
+void RuleDetailPanel::updateTestButtons()
+{
+    if ( !testUnavailable_.isEmpty() ) {
+        for ( auto* button : { testLinePatternButton_, testValuePatternButton_ } ) {
+            button->setEnabled( false );
+            button->setToolTip( testUnavailable_ );
+        }
+        return;
+    }
+    testLinePatternButton_->setEnabled( true );
+    testValuePatternButton_->setEnabled( advanced_ );
+    if ( advanced_ ) {
+        testLinePatternButton_->setToolTip(
+            tr( "Test the line pattern in LogSquirl's Regex Lab" ) );
+        testValuePatternButton_->setToolTip(
+            tr( "Test the value pattern in LogSquirl's Regex Lab" ) );
+    }
+    else {
+        testLinePatternButton_->setToolTip(
+            tr( "Test the generated line pattern in LogSquirl's Regex Lab; applying a changed "
+                "pattern switches the rule to Advanced" ) );
+        testValuePatternButton_->setToolTip(
+            tr( "Simple mode needs no value pattern: check Advanced to write one" ) );
+    }
 }
 
 void RuleDetailPanel::updateAdvancedCheck()

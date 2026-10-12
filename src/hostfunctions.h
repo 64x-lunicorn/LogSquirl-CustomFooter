@@ -44,6 +44,10 @@ struct RegexLabPattern {
 /// the user cancelled the Lab or closed it.
 using RegexLabDone = std::function<void( const std::optional<RegexLabPattern>& applied )>;
 
+/// Opens the host's Regex Lab: see HostFunctions::openRegexLab.
+using OpenRegexLab = std::function<bool( const RegexLabPattern& pattern, const QObject* context,
+                                         RegexLabDone done )>;
+
 /// The Log Lines selected in the host's tab in front, in the order of the
 /// Log File.
 struct SelectedLogLines {
@@ -90,8 +94,7 @@ struct HostFunctions {
      *
      * Empty when the host does not offer it (before LogSquirl 26.11).
      */
-    std::function<bool( const RegexLabPattern& pattern, const QObject* context, RegexLabDone done )>
-        openRegexLab;
+    OpenRegexLab openRegexLab;
 
     /**
      * Select Log Line @p lineNumber in the host's tab in front and scroll it

@@ -41,6 +41,35 @@
 
 namespace custom_footer {
 
+namespace {
+
+/// The inline option that makes a whole pattern ignore case, the only way
+/// a rule says so.
+const QString ignoreCase = QStringLiteral( "(?i)" );
+
+/// A rule's pattern as the Regex Lab tests it: (?i) in front becomes its
+/// Match case flag.
+RegexLabPattern toRegexLab( const QString& pattern )
+{
+    if ( pattern.startsWith( ignoreCase ) ) {
+        return { pattern.mid( ignoreCase.size() ), false };
+    }
+    return { pattern, true };
+}
+
+/// An applied pattern as a rule's pattern: without Match case, (?i) in
+/// front, unless it is there already or there is no pattern.
+QString fromRegexLab( const RegexLabPattern& applied )
+{
+    if ( applied.matchesCase || applied.pattern.isEmpty()
+         || applied.pattern.startsWith( ignoreCase ) ) {
+        return applied.pattern;
+    }
+    return ignoreCase + applied.pattern;
+}
+
+} // namespace
+
 FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     : QDialog( parent )
 {
@@ -161,6 +190,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( list_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
              &FooterEditor::showCurrentRule );
     connect( panel_, &RuleDetailPanel::edited, this, &FooterEditor::storePanelInCurrentRule );
+    connect( panel_, &RuleDetailPanel::patternTestRequested, this, &FooterEditor::testPattern );
 
     // The model's rule check is up to date with every signal of the model;
     // after a change of the rows, only the listing is shown again, with the
@@ -203,6 +233,8 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
         panel_->commitPendingEdit();
         Q_EMIT applied();
     } );
+
+    updatePatternTest();
 
     // ── Populate ─────────────────────────────────────────────────────────
     model_->setEntries( entries );
@@ -259,6 +291,12 @@ QString FooterEditor::activeFile() const
 void FooterEditor::setMaxLines( int maxLines )
 {
     previewer_->setMaxLines( maxLines );
+}
+
+void FooterEditor::setRegexLab( OpenRegexLab openRegexLab )
+{
+    openRegexLab_ = std::move( openRegexLab );
+    updatePatternTest();
 }
 
 void FooterEditor::done( int result )
@@ -446,7 +484,77 @@ void FooterEditor::ruleChanged( int row )
     schedulePreview();
 }
 
+void FooterEditor::testPattern( PatternField field )
+{
+    panel_->commitPendingEdit();
+    const int row = currentRow();
+    if ( row < 0 || !openRegexLab_ || regexLabOpen_ || closing_ ) {
+        return;
+    }
+    const auto& entry = model_->entry( row );
+    const auto pattern
+        = toRegexLab( field == PatternField::Line ? entry.linePattern : entry.valuePattern );
+    // Follows the rule when rules move, and is invalid once it is removed.
+    const QPersistentModelIndex rule( model_->index( row, RuleListModel::KeyColumn ) );
+
+    regexLabOpen_ = true;
+    updatePatternTest();
+    // The host never answers once this editor is destroyed.
+    const bool opened = openRegexLab_(
+        pattern, this, [ this, rule, field ]( const std::optional<RegexLabPattern>& applied ) {
+            regexLabAnswered( rule, field, applied );
+        } );
+    if ( !opened ) {
+        regexLabOpen_ = false;
+        updatePatternTest();
+    }
+}
+
 // ── Private helpers ──────────────────────────────────────────────────────
+
+void FooterEditor::regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                                     const std::optional<RegexLabPattern>& applied )
+{
+    regexLabOpen_ = false;
+    updatePatternTest();
+    // Cancelled, the editor closed (its rules are saved or dropped already),
+    // or the rule removed: nothing to write the pattern into.
+    if ( !applied || closing_ || !rule.isValid() ) {
+        return;
+    }
+    const auto pattern = fromRegexLab( *applied );
+    const int row = rule.row();
+    if ( row == currentRow() ) {
+        // As if typed: the panel stores it, and the check and the preview follow.
+        panel_->setPattern( field, pattern );
+        return;
+    }
+    auto entry = model_->entry( row );
+    auto& target = field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+    if ( target == pattern ) {
+        return;
+    }
+    target = pattern;
+    // A pattern written by hand: no longer an unfinished simple rule.
+    model_->setEntry( row, entry );
+    showProblems();
+    // Another rule of the key may supply its value now.
+    schedulePreview();
+}
+
+void FooterEditor::updatePatternTest()
+{
+    if ( !openRegexLab_ ) {
+        panel_->setPatternTestUnavailable( tr( "Needs LogSquirl 26.11 or later" ) );
+    }
+    else if ( regexLabOpen_ ) {
+        panel_->setPatternTestUnavailable(
+            tr( "The Regex Lab is open: apply or cancel it there first" ) );
+    }
+    else {
+        panel_->setPatternTestUnavailable( {} );
+    }
+}
 
 int FooterEditor::currentRow() const
 {

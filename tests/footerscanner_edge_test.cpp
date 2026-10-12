@@ -313,8 +313,8 @@ SCENARIO( "FooterScanner treats rules sharing a key as alternatives", "[footersc
             THEN( "the key is shown at the position of its first rule" )
             {
                 REQUIRE( ordered.size() == 2 );
-                REQUIRE( ordered[ 0 ] == FooterValue{ "Version", "2.0", "2.0", 2 } );
-                REQUIRE( ordered[ 1 ] == FooterValue{ "ID", "42", "42", 1 } );
+                REQUIRE( ordered[ 0 ] == FooterValue{ "Version", "2.0", "2.0", 2, 2 } );
+                REQUIRE( ordered[ 1 ] == FooterValue{ "ID", "42", "42", 1, 1 } );
             }
         }
     }

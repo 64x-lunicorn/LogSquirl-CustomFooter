@@ -32,13 +32,17 @@
 #include "hostfunctions.h"
 #include "logsquirl_plugin_api.h"
 
+#include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
+#include <QMenu>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QPushButton>
 #include <QStringList>
@@ -46,7 +50,9 @@
 #include <QThread>
 #include <QTimer>
 #include <QToolButton>
+#include <QToolTip>
 
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 
@@ -445,6 +451,235 @@ SCENARIO( "A footer session reports which host functions the host offers", "[foo
             REQUIRE_FALSE( session.has( HostFeature::RegexLab ) );
             REQUIRE( session.has( HostFeature::GoToLogLine ) );
             REQUIRE_FALSE( session.has( HostFeature::SelectedLogLines ) );
+        }
+    }
+}
+
+namespace {
+
+/// The footer's item showing the value of @p key, or null.
+FooterValueItem* itemOf( FooterDisplayWidget& footer, const QString& key )
+{
+    for ( auto* item : footer.findChildren<FooterValueItem*>() ) {
+        if ( item->value().key == key ) {
+            return item;
+        }
+    }
+    return nullptr;
+}
+
+/// The "Go to Log Line" entry of @p item's context menu, or null.
+QAction* goToLineAction( const FooterValueItem& item )
+{
+    for ( auto* action : item.contextMenu()->actions() ) {
+        if ( action->objectName() == QLatin1String( "goToLogLine" ) ) {
+            return action;
+        }
+    }
+    return nullptr;
+}
+
+/// Whether @p item's context menu offers "Go to Log Line".
+bool offersGoToLine( const FooterValueItem& item )
+{
+    const auto* action = goToLineAction( item );
+    return action && action->isVisible();
+}
+
+/// Choose "Go to Log Line" in the context menu of the value of @p key.
+void goToLineOf( FooterDisplayWidget& footer, const QString& key )
+{
+    auto* item = itemOf( footer, key );
+    REQUIRE( item );
+    REQUIRE( offersGoToLine( *item ) );
+    goToLineAction( *item )->trigger();
+}
+
+void doubleClick( QWidget* widget )
+{
+    const QPointF pos = widget->rect().center();
+    const QPointF global = widget->mapToGlobal( pos );
+    for ( const auto type : { QEvent::MouseButtonPress, QEvent::MouseButtonRelease,
+                              QEvent::MouseButtonDblClick, QEvent::MouseButtonRelease } ) {
+        const auto buttons = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton;
+        QMouseEvent event( type, pos, global, Qt::LeftButton, buttons, Qt::NoModifier );
+        QApplication::sendEvent( widget, &event );
+    }
+}
+
+} // namespace
+
+SCENARIO( "A footer session goes to the Log Line a value came from", "[footersession][gotoline]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    // Two rules sharing the key Mode; the second one matches first.
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "Mode", "mode=(\\S+)", "", true, {} },
+                                          { "Mode", "legacy-mode (\\S+)", "", true, {} },
+                                          rule( "VIN" ) } ) );
+    const auto log = logDir.path() + "/jump.log";
+    // Filler lines after the values, so that a line well inside the file
+    // can change in place without changing the bytes that identify it.
+    const QByteArray head = "starting\nlegacy-mode 4\nmode=0x04\n";
+    const QByteArray filler = "filler filler filler filler filler\n";
+    writeFile( log, head + filler.repeated( 30 ) );
+
+    FooterDisplayWidget footer;
+    footer.show();
+    Log log_;
+    auto host = log_.host();
+    QList<std::uint64_t> wentTo;
+    bool lineThere = true;
+    host.goToLogLine = [ & ]( std::uint64_t lineNumber ) {
+        wentTo.append( lineNumber );
+        return lineThere;
+    };
+    auto session = std::make_unique<FooterSession>( configDir.path(), &footer, host );
+    session->setActiveFile( log );
+    REQUIRE( processUntil( [ & ] { return shown( footer ) == QStringList{ "Mode=4" }; } ) );
+
+    WHEN( "the user goes to the Log Line of a key that rules share" )
+    {
+        goToLineOf( footer, "Mode" );
+
+        THEN( "the host goes to the line of the rule that supplied the shown value" )
+        {
+            REQUIRE( wentTo == QList<std::uint64_t>{ 2 } );
+        }
+    }
+
+    WHEN( "the user double-clicks the value" )
+    {
+        doubleClick( itemOf( footer, "Mode" ) );
+
+        THEN( "the host goes to its line, once" )
+        {
+            REQUIRE( wentTo == QList<std::uint64_t>{ 2 } );
+        }
+    }
+
+    WHEN( "a line already scanned changes in place, lines are appended, and it is scanned on" )
+    {
+        {
+            // A fresh scan would take VIN from the changed line, line 19.
+            QFile file( log );
+            REQUIRE( file.open( QIODevice::ReadWrite ) );
+            REQUIRE( file.seek( head.size() + filler.size() * 15 ) );
+            REQUIRE( file.write( "VIN: 999" ) == 8 );
+            REQUIRE( file.seek( file.size() ) );
+            REQUIRE( file.write( "noise\nVIN: ABC\n" ) > 0 );
+        }
+        session->setActiveFile( log );
+
+        THEN( "only the appended lines were scanned, so the scan was continued" )
+        {
+            REQUIRE( processUntil(
+                [ & ] { return shown( footer ) == QStringList{ "Mode=4", "VIN=ABC" }; } ) );
+        }
+
+        AND_WHEN( "the user goes to the Log Line of the new value, and of the old one" )
+        {
+            REQUIRE( processUntil(
+                [ & ] { return shown( footer ) == QStringList{ "Mode=4", "VIN=ABC" }; } ) );
+            goToLineOf( footer, "VIN" );
+            goToLineOf( footer, "Mode" );
+
+            THEN( "the host goes to the lines in the whole file" )
+            {
+                REQUIRE( wentTo == QList<std::uint64_t>{ 35, 2 } );
+            }
+        }
+    }
+
+    WHEN( "the host cannot go to the line" )
+    {
+        lineThere = false;
+        goToLineOf( footer, "Mode" );
+
+        THEN( "a short notice says so at the value, without a dialog" )
+        {
+            REQUIRE( wentTo == QList<std::uint64_t>{ 2 } );
+            REQUIRE( QToolTip::isVisible() );
+            REQUIRE( QToolTip::text().contains( "Log Line 2" ) );
+            REQUIRE( QApplication::activeModalWidget() == nullptr );
+        }
+    }
+
+    WHEN( "the host's function throws" )
+    {
+        session.reset();
+        host.goToLogLine = []( std::uint64_t ) -> bool { throw std::runtime_error( "broken" ); };
+        session = std::make_unique<FooterSession>( configDir.path(), &footer, host );
+        session->setActiveFile( log );
+        REQUIRE( processUntil( [ & ] { return shown( footer ) == QStringList{ "Mode=4" }; } ) );
+        goToLineOf( footer, "Mode" );
+
+        THEN( "it is logged, and nothing leaves the handler" )
+        {
+            REQUIRE( log_.all.join( '\n' ).contains( "broken" ) );
+        }
+    }
+
+    WHEN( "the session is destroyed" )
+    {
+        session.reset();
+        auto* item = itemOf( footer, "Mode" );
+        REQUIRE( item );
+
+        THEN( "the footer no longer offers it" )
+        {
+            REQUIRE_FALSE( offersGoToLine( *item ) );
+        }
+
+        AND_WHEN( "the value is double-clicked" )
+        {
+            doubleClick( item );
+
+            THEN( "the host is not asked" )
+            {
+                REQUIRE( wentTo.isEmpty() );
+            }
+        }
+    }
+}
+
+SCENARIO( "A footer session on a host without Go to line does not offer it",
+          "[footersession][gotoline]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), { rule( "VIN" ) } ) );
+    const auto log = logDir.path() + "/old-host.log";
+    writeFile( log, "noise\nVIN: ABC\n" );
+
+    FooterDisplayWidget footer;
+    footer.show();
+    Log log_;
+    FooterSession session( configDir.path(), &footer, log_.host() );
+    session.setActiveFile( log );
+    REQUIRE( processUntil( [ & ] { return shown( footer ) == QStringList{ "VIN=ABC" }; } ) );
+    auto* item = itemOf( footer, "VIN" );
+    REQUIRE( item );
+    REQUIRE( item->value().lineNumber == 2 );
+
+    THEN( "the value's context menu has no \"Go to Log Line\"" )
+    {
+        REQUIRE_FALSE( offersGoToLine( *item ) );
+    }
+
+    WHEN( "the value is clicked" )
+    {
+        QApplication::clipboard()->setText( "before" );
+        item->click();
+
+        THEN( "it is still copied" )
+        {
+            REQUIRE( QApplication::clipboard()->text() == "ABC" );
         }
     }
 }

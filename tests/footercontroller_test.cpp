@@ -531,6 +531,84 @@ SCENARIO( "FooterController scans a truncated or rotated file from its start",
     }
 }
 
+SCENARIO( "FooterController shows the Log Line of each value as the active file grows",
+          "[footercontroller][linenumber]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE(
+        FooterConfig::saveEntries( configDir.path(), { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                                       { "ID", "id=(\\S+)", "", true, {} } } ) );
+
+    const auto log = logDir.path() + "/lines.log";
+    // Filler lines after the value, so that a line well inside the file can
+    // change in place without changing the bytes that identify it.
+    const QByteArray head = "starting up\nVIN: A\n";
+    const QByteArray filler = "filler filler filler filler filler\n";
+    writeFile( log, head + filler.repeated( 30 ) );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    // "key: value @ line" of every shown value.
+    const auto shownLines = [ &widget ] {
+        QStringList shown;
+        for ( const auto& value : widget.values() ) {
+            shown.append( QStringLiteral( "%1: %2 @ %3" )
+                              .arg( value.key, value.value )
+                              .arg( value.lineNumber ) );
+        }
+        return shown.join( " | " );
+    };
+
+    GIVEN( "an active file with one of the keys on its second line" )
+    {
+        controller->setActiveFile( log );
+        REQUIRE( processUntil( [ & ] { return shownLines() == "VIN: A @ 2"; } ) );
+
+        REQUIRE( scansSettle( *controller ) );
+
+        WHEN( "a line already scanned changes in place, lines with the other key are appended, "
+              "and the change is reported" )
+        {
+            {
+                // A fresh scan would take ID from the changed line, line 18.
+                QFile file( log );
+                REQUIRE( file.open( QIODevice::ReadWrite ) );
+                REQUIRE( file.seek( head.size() + filler.size() * 15 ) );
+                REQUIRE( file.write( "id=999" ) == 6 );
+            }
+            writeFile( log, "noise\nVIN: LATER\nid=7\n", true );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "one more scan reads only the appended lines, numbered in the whole file, and "
+                  "the old value keeps its line" )
+            {
+                REQUIRE(
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 2 | ID: 7 @ 35"; } ) );
+                REQUIRE( controller->scansStarted() == 2 );
+            }
+        }
+
+        WHEN( "the file is truncated and written again with the same values" )
+        {
+            writeFile( log, "VIN: A\nid=7\n" );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "the lines come from the new scan from its start" )
+            {
+                REQUIRE(
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 1 | ID: 7 @ 2"; } ) );
+            }
+        }
+    }
+}
+
 SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]" )
 {
     QTemporaryDir configDir;
@@ -655,8 +733,8 @@ SCENARIO( "FooterController shows where each value came from", "[footercontrolle
         THEN( "the widget gets the raw value and the rule of each shown value" )
         {
             REQUIRE( processUntil( [ & ] { return widget.values().size() == 2; } ) );
-            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0 } );
-            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
+            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0, 2 } );
+            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1, 1 } );
         }
     }
 }

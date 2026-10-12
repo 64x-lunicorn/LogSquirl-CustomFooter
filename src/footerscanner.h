@@ -46,6 +46,11 @@ namespace custom_footer {
  * editor: an enabled rule without a line pattern is incomplete and
  * skipped; one with a line pattern but a problem, such as no key or an
  * invalid pattern, is skipped and reported in problems().
+ *
+ * Every value found carries the Log Line it was found in
+ * (FooterValue::lineNumber), counting from 1 in the whole file as the host
+ * does: a line ends with "\n", so a "\r\n" ends one line too, and a last
+ * line without a line break counts as well.
  */
 class FooterScanner {
 public:
@@ -106,7 +111,8 @@ public:
         bool enabled = true; ///< Whether the rule is enabled; a disabled one supplies nothing.
 
         /// The rule's first match, if any: the value the footer would show
-        /// from it, and the line it is in.
+        /// from it, and the line it is in. The value's lineNumber is
+        /// lineNumber, copied once the preview is made.
         std::optional<FooterValue> value;
         qint64 lineNumber = 0; ///< Of the first match, counting from 1.
         QString line;          ///< The first matching line, as matched: at most kMaxLineBytes.
@@ -130,7 +136,8 @@ public:
         /// Other enabled rules have the same key.
         bool sharedKey = false;
         /// The value the footer shows for the rule's key in this file, from
-        /// whichever of its rules supplies it, and the line it is in.
+        /// whichever of its rules supplies it, and the line it is in. The
+        /// value's lineNumber is keyLineNumber, as in the footer.
         std::optional<FooterValue> keyValue;
         qint64 keyLineNumber = 0;
 
@@ -183,6 +190,10 @@ public:
      * birth time, was replaced and is scanned from its start. A last line
      * without a line break is matched but not remembered in the progress, as
      * it may still be being written.
+     *
+     * A continued scan counts lines on from @p from, so the line numbers of
+     * the values it finds are those in the whole file; values kept from
+     * @p from keep theirs. A scan from the start numbers them afresh.
      *
      * A cancelled scan returns no values and empty progress.
      */
@@ -270,11 +281,13 @@ private:
     static Rule compile( const FooterEntry& entry, int index );
 
     /// The value a rule extracts from a line, if it matches, and where. Only
-    /// the preview needs where, once per preview.
+    /// the preview needs where, once per preview. The caller sets the value's
+    /// line number.
     static std::optional<Match> matchOf( const Rule& rule, const QString& line );
 
     /// The value a rule extracts from a line, if it matches; the scan's hot
-    /// path, so it computes nothing else.
+    /// path, so it computes nothing else. The caller sets the value's line
+    /// number.
     static std::optional<FooterValue> valueOf( const Rule& rule, const QString& line );
 
     /// Whether the file is still the one the progress was made on.

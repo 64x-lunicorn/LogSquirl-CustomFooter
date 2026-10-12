@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is dropped if that rule was removed or the editor closed. One Lab is
   open at a time. Needs LogSquirl 26.11; on 26.10 the buttons are disabled
   with the tooltip "Needs LogSquirl 26.11 or later".
+- **Go to the Log Line of a value** — double-click a value in the footer,
+  or choose "Go to Log Line" in its context menu (also reached with the
+  context menu key), and LogSquirl selects the line the value was found in
+  and scrolls to it in the tab in front. For a key that several rules
+  share, it is the line of the rule that supplied the shown value. The
+  line stays right as a growing log is scanned on, and comes from the new
+  scan after a truncation or rotation. If the line is no longer there, a
+  short "Could not go to Log Line …" tooltip says so. A value's tooltip
+  names its Log Line. A double-click copies the value too, as its first
+  click does. Needs LogSquirl 26.11; on 26.10 the values only copy, as
+  before.
 
 ### Changed
 - **Footer session** — one module now owns the rules in the config

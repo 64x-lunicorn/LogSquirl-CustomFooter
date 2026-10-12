@@ -25,6 +25,7 @@
 #include <QToolButton>
 #include <QWidget>
 
+class QAction;
 class QHBoxLayout;
 class QLabel;
 class QMenu;
@@ -36,9 +37,15 @@ namespace custom_footer {
  *
  * It takes the keyboard focus with Tab and copies on Space, Return or the
  * copy shortcut too, before any shortcut of the window. Its tooltip tells
- * which rule supplied the value, and the raw value a mapping replaced. Its
- * context menu offers copying the value, or key and value; more actions on
- * the value can be added to contextMenu().
+ * which rule supplied the value, the raw value a mapping replaced, and the
+ * Log Line it was found in. Its context menu offers copying the value, or
+ * key and value; more actions on the value can be added to contextMenu().
+ *
+ * Where going to the Log Line is offered (setGoToLineOffered()) and the
+ * value's line is known, a double-click and the context menu's "Go to Log
+ * Line" emit goToLineRequested(); the context menu key reaches it from the
+ * keyboard. A double-click begins with a click, so it copies the value too;
+ * its second press is not taken as another click.
  */
 class FooterValueItem : public QToolButton {
     Q_OBJECT
@@ -69,13 +76,37 @@ public:
     /// Put some text on the clipboard and confirm it briefly at this item.
     void copyText( const QString& text );
 
+    /// Show @p message briefly at this item, as a copy is confirmed, and
+    /// announce it to screen readers. No dialog.
+    void showNotice( const QString& message );
+
+    /// Whether the item offers going to the value's Log Line. Not by default.
+    void setGoToLineOffered( bool offered );
+
+    /// Whether going to the Log Line can be asked for now: it is offered,
+    /// and the value's line is known.
+    bool canGoToLine() const;
+
+signals:
+    /// The user asked to go to the value's Log Line.
+    void goToLineRequested();
+
 protected:
     bool event( QEvent* event ) override;
     void keyPressEvent( QKeyEvent* event ) override;
+    void mouseDoubleClickEvent( QMouseEvent* event ) override;
 
 private:
+    /// Show what can be done with the value: tooltip, accessible texts and
+    /// the context menu's entries.
+    void updateOffers();
+    /// Emit goToLineRequested(), if it can be asked for.
+    void requestGoToLine();
+
     FooterValue value_;
     QMenu* contextMenu_ = nullptr;
+    QAction* goToLine_ = nullptr;
+    bool goToLineOffered_ = false;
 };
 
 /**
@@ -84,6 +115,10 @@ private:
  *
  * The item of a key is kept while the key is shown, so that the keyboard
  * focus, a confirmation or an open context menu survive new values.
+ *
+ * It knows nothing of the host: whoever can go to a Log Line offers it with
+ * setGoToLineOffered(), handles goToLineRequested(), and may tell the user
+ * how it went with notify().
  */
 class FooterDisplayWidget : public QWidget {
     Q_OBJECT
@@ -103,6 +138,19 @@ public:
     /// Every shown key and value as "key: value", one per line.
     QString allValuesText() const;
 
+    /// Whether the values offer going to their Log Line, by a double-click
+    /// and in their context menu, to values shown later too. Not by default.
+    void setGoToLineOffered( bool offered );
+
+    /// Show @p message briefly at the value of @p key, as a copy is
+    /// confirmed; nothing when the key is not shown.
+    void notify( const QString& key, const QString& message );
+
+signals:
+    /// The user asked to go to the Log Line of @p value, which is known
+    /// (FooterValue::lineNumber > 0). Only emitted while it is offered.
+    void goToLineRequested( const FooterValue& value );
+
 private:
     /// A key and its value item, laid out together.
     struct Entry {
@@ -116,6 +164,7 @@ private:
     QHBoxLayout* layout_ = nullptr;
     QList<Entry> entries_;      ///< In the order shown.
     QList<QLabel*> separators_; ///< Between the entries.
+    bool goToLineOffered_ = false;
 };
 
 } // namespace custom_footer

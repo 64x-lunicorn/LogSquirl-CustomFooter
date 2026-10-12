@@ -607,3 +607,195 @@ SCENARIO( "Removing a copied value leaves other tooltips alone", "[footerdisplay
         }
     }
 }
+
+namespace {
+
+/// A double-click as the system delivers it: a click, then a double-click
+/// event in place of the second press, and its release.
+void doubleClick( QWidget* widget )
+{
+    const QPointF pos = widget->rect().center();
+    const QPointF global = widget->mapToGlobal( pos );
+    click( widget );
+    QMouseEvent press( QEvent::MouseButtonDblClick, pos, global, Qt::LeftButton, Qt::LeftButton,
+                       Qt::NoModifier );
+    QApplication::sendEvent( widget, &press );
+    QMouseEvent release( QEvent::MouseButtonRelease, pos, global, Qt::LeftButton, Qt::NoButton,
+                         Qt::NoModifier );
+    QApplication::sendEvent( widget, &release );
+}
+
+} // namespace
+
+SCENARIO( "A footer value offers to go to its Log Line", "[footerdisplaywidget][gotoline]" )
+{
+    FooterDisplayWidget widget;
+    QList<FooterValue> requested;
+    QObject::connect( &widget, &FooterDisplayWidget::goToLineRequested,
+                      [ &requested ]( const FooterValue& value ) { requested.append( value ); } );
+    const FooterValue vin{ "VIN", "ABC123", "ABC123", 0, 42 };
+    const FooterValue mode{ "Mode", "Production", "0x04", 1, 7 };
+    widget.updateValues( { vin, mode } );
+    widget.show();
+    QApplication::clipboard()->setText( "before" );
+
+    GIVEN( "values that offer it" )
+    {
+        widget.setGoToLineOffered( true );
+        const auto shown = items( widget );
+        REQUIRE( shown.size() == 2 );
+
+        WHEN( "a value is double-clicked" )
+        {
+            int clicks = 0;
+            int copies = 0;
+            QObject::connect( shown[ 1 ], &QToolButton::clicked, [ &clicks ] { ++clicks; } );
+            const auto copied = QObject::connect(
+                QApplication::clipboard(), &QClipboard::dataChanged, [ &copies ] { ++copies; } );
+            doubleClick( shown[ 1 ] );
+            QObject::disconnect( copied );
+
+            THEN( "going to its Log Line is asked for, once, with the value and its line" )
+            {
+                REQUIRE( requested.size() == 1 );
+                REQUIRE( requested[ 0 ] == mode );
+                REQUIRE( requested[ 0 ].lineNumber == 7 );
+            }
+
+            THEN( "its first click copied the value, as a click does, and only that click" )
+            {
+                REQUIRE( clipboardText() == "Production" );
+                REQUIRE( clicks == 1 );
+                REQUIRE( copies == 1 );
+            }
+        }
+
+        WHEN( "a value is clicked once" )
+        {
+            click( shown[ 0 ] );
+
+            THEN( "it is copied, and nothing else happens" )
+            {
+                REQUIRE( clipboardText() == "ABC123" );
+                REQUIRE( requested.isEmpty() );
+            }
+        }
+
+        WHEN( "its context menu's \"Go to Log Line\" is chosen" )
+        {
+            auto* goTo = action( shown[ 0 ]->contextMenu(), "goToLogLine" );
+            REQUIRE( goTo != nullptr );
+            REQUIRE( goTo->isVisible() );
+            goTo->trigger();
+
+            THEN( "going to its Log Line is asked for" )
+            {
+                REQUIRE( requested.size() == 1 );
+                REQUIRE( requested[ 0 ] == vin );
+            }
+        }
+
+        THEN( "its tooltip and accessible description name the Log Line and how to go there" )
+        {
+            REQUIRE( shown[ 0 ]->toolTip().contains( "Log Line 42" ) );
+            REQUIRE( shown[ 0 ]->toolTip().contains( "Double-click" ) );
+            REQUIRE( shown[ 0 ]->accessibleDescription().contains( "Log Line 42" ) );
+            REQUIRE( shown[ 0 ]->accessibleDescription().contains( "context menu" ) );
+        }
+
+        WHEN( "a value appears later" )
+        {
+            widget.updateValues( { vin, mode, { "ID", "7", "7", 2, 3 } } );
+            doubleClick( items( widget ).value( 2 ) );
+
+            THEN( "it offers it too" )
+            {
+                REQUIRE( requested.size() == 1 );
+                REQUIRE( requested[ 0 ].lineNumber == 3 );
+            }
+        }
+
+        WHEN( "a value moves to another line, with the same text" )
+        {
+            auto moved = vin;
+            moved.lineNumber = 1;
+            widget.updateValues( { moved, mode } );
+            doubleClick( shown[ 0 ] );
+
+            THEN( "the new line is asked for" )
+            {
+                REQUIRE( requested.size() == 1 );
+                REQUIRE( requested[ 0 ].lineNumber == 1 );
+            }
+        }
+
+        WHEN( "a value without a known line is shown" )
+        {
+            widget.updateValues( { { "VIN", "ABC123", "ABC123", 0, 0 } } );
+            auto* item = items( widget ).value( 0 );
+            doubleClick( item );
+
+            THEN( "it does not offer it" )
+            {
+                REQUIRE( requested.isEmpty() );
+                REQUIRE_FALSE( action( item->contextMenu(), "goToLogLine" )->isVisible() );
+                REQUIRE_FALSE( item->toolTip().contains( "Double-click" ) );
+            }
+        }
+
+        WHEN( "a notice is shown at a value" )
+        {
+            widget.notify( "Mode", "Could not go there" );
+
+            THEN( "it shows briefly, without a dialog" )
+            {
+                REQUIRE( QToolTip::isVisible() );
+                REQUIRE( QToolTip::text() == "Could not go there" );
+                REQUIRE( QApplication::activeModalWidget() == nullptr );
+            }
+        }
+    }
+
+    GIVEN( "values that do not offer it, as on a host without the function" )
+    {
+        const auto shown = items( widget );
+
+        WHEN( "a value is double-clicked" )
+        {
+            doubleClick( shown[ 0 ] );
+
+            THEN( "nothing is asked for, and the value is copied as before" )
+            {
+                REQUIRE( requested.isEmpty() );
+                REQUIRE( clipboardText() == "ABC123" );
+            }
+        }
+
+        THEN( "the context menu has no \"Go to Log Line\"" )
+        {
+            const auto* goTo = action( shown[ 0 ]->contextMenu(), "goToLogLine" );
+            REQUIRE( ( goTo == nullptr || !goTo->isVisible() ) );
+        }
+
+        THEN( "the tooltip does not suggest it, but still names the line" )
+        {
+            REQUIRE( shown[ 0 ]->toolTip().contains( "Log Line 42" ) );
+            REQUIRE_FALSE( shown[ 0 ]->toolTip().contains( "Double-click" ) );
+            REQUIRE_FALSE( shown[ 0 ]->accessibleDescription().contains( "context menu" ) );
+        }
+
+        WHEN( "it is offered and then withdrawn" )
+        {
+            widget.setGoToLineOffered( true );
+            widget.setGoToLineOffered( false );
+            doubleClick( shown[ 0 ] );
+
+            THEN( "nothing is asked for" )
+            {
+                REQUIRE( requested.isEmpty() );
+                const auto* goTo = action( shown[ 0 ]->contextMenu(), "goToLogLine" );
+                REQUIRE( ( goTo == nullptr || !goTo->isVisible() ) );
+            }
+        }
+    }
+}

@@ -210,6 +210,15 @@ so: the new rule becomes an alternative for that key.
   With the keyboard, Tab to a value and press Space, Return or the copy
   shortcut. The context menu of a value offers "Copy Value", "Copy Key and
   Value", and "Copy All" for every key and value shown, one per line.
+- **Go to the Log Line of a value** (LogSquirl 26.11 or later) by
+  double-clicking it, or with "Go to Log Line" in its context menu (with
+  the keyboard: Tab to the value and press the context menu key). LogSquirl
+  selects the line the value was found in and scrolls to it in the tab in
+  front; the tooltip of a value names that line. For a key that several
+  rules share, it is the line that supplied the shown value. If the line is
+  no longer in the file, a short tooltip says so. A double-click copies
+  the value too, as its first click does. On LogSquirl 26.10 the values
+  only copy.
 - A scan stops after `scan/maxLines` lines (default 100000, `0` for no
   limit) and never reads more than 64 MiB; lines longer than 64 KiB are
   matched against their start.

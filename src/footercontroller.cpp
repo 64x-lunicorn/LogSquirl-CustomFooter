@@ -100,7 +100,11 @@ void FooterController::restartScan()
                                           previous ? previous->progress : FooterScanner::Progress{},
                                           maxLines, &cancelled );
             } catch ( ... ) {
-                // E.g. out of memory: better no values than a dead host.
+                // E.g. out of memory. Caught here rather than by the
+                // follower, which would deliver nothing and leave the last
+                // values shown: an empty scan clears them instead of letting
+                // stale values pass for the file's, and the next scan then
+                // starts from the start of the file.
                 return Scan{};
             }
         },

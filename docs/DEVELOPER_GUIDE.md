@@ -115,16 +115,20 @@ and showing values. The scan progress is the follower's previous result:
 the job continues `FooterScanner::scanFrom()` from the last scan shown,
 which reads only what was appended to a file that only grew and scans a
 truncated or replaced one from its start; `follow()` forgets it, so
-another file or reloaded rules scan from the start. Kept there rather
-than in the controller, the progress can never come from an outdated,
-cancelled or failed scan. Where `scanFrom()` stays the one place that
-tracks progress, later per-value details of a match (e.g. its line
-number) can travel with it through incremental rescans. The follower's skip
-predicate is `FooterScanner::fileUnchangedFor()` for the last scan: a
-change is not scanned when the part of the file scanned is unchanged and
-either every key has a value or a limit was reached (so appended lines
-are not read, as in 0.4.0), or the file has the size it had when the scan
-opened it.
+another file or reloaded rules scan from the start. Kept there rather than
+in the controller, the progress can never come from an outdated or
+cancelled scan. A scan that throws is caught by the controller's job
+itself and yields an empty scan: the footer is cleared rather than left
+with stale values, and the next scan starts from the start of the file.
+Where `scanFrom()` stays the one place that tracks progress, later
+per-value details of a match (e.g. its line number) can travel with it
+through incremental rescans. The follower's skip predicate is
+`FooterScanner::fileUnchangedFor()` for the last scan: a change is not
+scanned when the part of the file scanned is unchanged and either every
+key has a value or a limit was reached (so appended lines are not read, as
+in 0.4.0), or the file has the size it had when the scan opened it and
+ends with the last complete line scanned (a last line without a line break
+may have been rewritten in place).
 
 Both workers are a `LatestJob` (`latestjob.h`): one worker thread, a
 generation counter, a cancel flag, and results handed to the GUI thread
@@ -337,10 +341,10 @@ session's shape.
 
 `FileFollower<Result>` (`filefollower.h`) follows the active file for an
 owner that needs the latest result of reading it: the editor's preview
-(`RulePreviewer`) and the footer (`FooterController`). The owner gives it a sink for results, and per
-set of inputs a job (file, previous result, cancel flag → result) and
-optionally a predicate saying whether a change can matter to the last
-result. It has three commands and a query:
+(`RulePreviewer`) and the footer (`FooterController`). The owner gives it
+a sink for results, and per set of inputs a job (file, previous result,
+cancel flag → result) and optionally a predicate saying whether a change
+can matter to the last result. It has three commands and a query:
 
 - `follow( file, job, matters )`: the inputs changed. Every earlier run
   becomes outdated and its cancel flag is set, a pending rerun or wake-up
@@ -389,12 +393,12 @@ controller runs on a real file with the production parts.
 `FileChangeSource` is tested with real files
 (`tests/filechangesource_test.cpp`).
 
-**Shutdown.** After `stop()` or the destructor no job code runs, the
-sink is not called, no wake-up is pending, and the change source follows
+**Shutdown.** After `stop()` or the destructor no job code runs, the sink
+is not called, no wake-up is pending, and the change source follows
 nothing. An owner declares the follower after what the sink touches, or
 calls `stop()` in its destructor, as `RulePreviewer` and
-`FooterController` do (the controller declares it last as well). `follow()`
-starts afresh after `stop()`.
+`FooterController` do (the controller declares it last as well).
+`follow()` starts afresh after `stop()`.
 
 **Why this design.** Three designs were compared: three commands
 (follow, nudge, stop), a ports-and-adapters design with four ports
@@ -464,15 +468,15 @@ hidden global test state.
    index of the rule that supplied it. `FooterScanner::footerValues()`
    hands them to the widget in rule order, for display and tooltips.
 6. Stop early once every key has a value.
-7. **Incremental rescans**: `scanFrom()` returns the scan's progress (offset
-   and count of the complete lines scanned, the values found, and bytes
-   identifying the file). When the followed file changes, the next scan
-   continues from there if the file only grew, and does not run at all once
-   every key has a value or a limit was reached
-   (`fileUnchangedFor( path, scan )`, the follower's skip predicate). A file that shrank, whose start
-   or scanned end differs, or with another birth time, is scanned from its
-   start. A last line without a line break is matched but not remembered,
-   as it may still be being written.
+7. **Incremental rescans**: `scanFrom()` returns the scan's progress
+   (offset and count of the complete lines scanned, the values found, and
+   bytes identifying the file). When the followed file changes, the next
+   scan continues from there if the file only grew, and does not run at
+   all once every key has a value or a limit was reached
+   (`fileUnchangedFor( path, scan )`, the follower's skip predicate). A
+   file that shrank, whose start or scanned end differs, or with another
+   birth time, is scanned from its start. A last line without a line break
+   is matched but not remembered, as it may still be being written.
 
 ## Rule Editor
 

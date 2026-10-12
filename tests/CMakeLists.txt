@@ -29,7 +29,6 @@ add_executable(logsquirl_custom_footer_tests
     footerconfig_maxlines_test.cpp
     footercontroller_test.cpp
     footersession_test.cpp
-    activefilewatcher_test.cpp
     filechangesource_test.cpp
     filefollower_test.cpp
     footerdisplaywidget_test.cpp

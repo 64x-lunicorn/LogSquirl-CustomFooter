@@ -38,6 +38,7 @@ add_executable(logsquirl_custom_footer_tests
     simplerule_test.cpp
     simplemode_test.cpp
     ruletemplate_test.cpp
+    latestjob_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES

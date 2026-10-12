@@ -102,12 +102,16 @@ public:
         }
     }
 
-    /// drop(), wait for the worker, and drop results not yet handed over.
+    /// drop(), wait for the worker, and drop results not yet handed over;
+    /// their jobs count as finished.
     void stop()
     {
         drop();
         pool_.waitForDone();
+        // The finished handler removes a watcher before it counts the job,
+        // so every watcher left belongs to a job not yet counted.
         const auto watchers = std::exchange( watchers_, {} );
+        finished_ += static_cast<int>( watchers.size() );
         for ( const auto& watcher : watchers ) {
             delete watcher.data();
         }

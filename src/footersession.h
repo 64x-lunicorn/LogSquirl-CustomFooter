@@ -133,13 +133,14 @@ private:
     /// handler of the footer's signal.
     void goToLine( const FooterValue& value ) noexcept;
 
-    /// Add a rule made from the selected Log Line to @p editor, or show
-    /// over it that none is selected. Returns whether a rule was added.
-    bool addRuleFromSelectedLine( FooterEditor& editor );
+    /// The Log Lines selected in the host, read now; nothing, after the
+    /// message why over @p messageOver, without a selected Log Line.
+    std::optional<SelectedLogLines> selectedLinesOrSayWhy( QWidget* messageOver );
 
-    /// Say, over @p over, how to make a rule from a selected line; over
-    /// the editor, that it is to be closed first, as it blocks the window
-    /// that takes the selection.
+    /// Say, over @p over, how to make a rule from a selected line: to open
+    /// a Log File first without an active file; over the editor, to keep
+    /// the rules with OK or Apply and close it first, as it blocks the
+    /// window that takes the selection.
     void showNoSelectedLine( QWidget* over );
 
     const QString configDir_;

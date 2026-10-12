@@ -622,9 +622,10 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
         }
     }
 
-    GIVEN( "a host with no Log Line selected" )
+    GIVEN( "a host with a Log File open, but no Log Line selected" )
     {
         FooterSession session( configDir.path(), &footer, selection.host() );
+        session.setActiveFile( log );
 
         WHEN( "a rule is made from the selected line" )
         {
@@ -637,8 +638,8 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
                 auto* hint = noSelectionHint();
                 REQUIRE( hint );
                 REQUIRE( hint->parentWidget() == &window );
-                REQUIRE( hint->text().contains( "Select" ) );
-                REQUIRE( hint->text().contains( "Log Line" ) );
+                REQUIRE( hint->text().contains( "No Log Line is selected" ) );
+                REQUIRE( hint->text().contains( "Rule from Selected Line…" ) );
             }
 
             AND_WHEN( "it is tried again while the message is open" )
@@ -665,12 +666,48 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
             QPointer<FooterEditor> editor = session.openEditor( &window );
             child<QToolButton>( *editor, "ruleFromLineButton" )->click();
 
-            THEN( "the message is shown over the editor, and no rule is added" )
+            THEN( "the message is shown over the editor, and says to keep the rules with OK or "
+                  "Apply before closing it, as the selection cannot change meanwhile; no rule is "
+                  "added" )
             {
                 auto* hint = noSelectionHint();
                 REQUIRE( hint );
                 REQUIRE( hint->parentWidget() == editor );
+                REQUIRE( hint->text().contains( "cannot change while the rule editor is open" ) );
+                REQUIRE( hint->text().contains( "OK or Apply" ) );
                 REQUIRE( editor->entries().size() == 1 );
+            }
+        }
+    }
+
+    GIVEN( "a host with no Log File open" )
+    {
+        FooterSession session( configDir.path(), &footer, selection.host() );
+
+        WHEN( "a rule is made from the selected line" )
+        {
+            session.ruleFromSelectedLine( &window );
+
+            THEN( "the message says to open a Log File first" )
+            {
+                auto* hint = noSelectionHint();
+                REQUIRE( hint );
+                REQUIRE( hint->text().contains( "No Log File is open" ) );
+                REQUIRE( hint->text().contains( "Open one" ) );
+            }
+        }
+
+        WHEN( "the editor's button is clicked" )
+        {
+            QPointer<FooterEditor> editor = session.openEditor( &window );
+            child<QToolButton>( *editor, "ruleFromLineButton" )->click();
+
+            THEN( "the message over the editor says so too" )
+            {
+                auto* hint = noSelectionHint();
+                REQUIRE( hint );
+                REQUIRE( hint->text().contains( "No Log File is open" ) );
+                REQUIRE( hint->text().contains( "OK or Apply" ) );
             }
         }
     }

@@ -25,6 +25,7 @@
 #include <catch2/catch.hpp>
 
 #include "footereditor.h"
+#include "footerscanner.h"
 #include "rulelistmodel.h"
 
 #include <QApplication>
@@ -710,8 +711,10 @@ SCENARIO( "FooterEditor keeps the detail panel live after an import", "[footered
     }
 }
 
-SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]" )
+SCENARIO( "FooterEditor shows the rules' problems and blocks OK and Apply", "[footereditor]" )
 {
+    // What is a problem, in which words, and that only an edited rule is
+    // checked again: tests/rulecheck_test.cpp.
     GIVEN( "an editor with two valid rules and the first one selected" )
     {
         FooterEditor editor( { entryWithMapping( "A" ), entryWithMapping( "B" ) } );
@@ -725,36 +728,30 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
         {
             ui.linePattern->setText( "[unclosed" );
 
-            THEN( "the field and the list row show why, and the rules cannot be saved" )
+            THEN( "the field, the list row and the listing show why, and OK and Apply are blocked" )
             {
                 REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
-                REQUIRE( ui.linePatternProblem->text().contains( "invalid line pattern" ) );
+                REQUIRE( ui.linePatternProblem->text() == ui.model->problems( 0 ).linePattern );
                 REQUIRE( EditorUi::unmarked( ui.key, ui.keyProblem ) );
                 REQUIRE( EditorUi::unmarked( ui.valuePattern, ui.valuePatternProblem ) );
                 REQUIRE( ui.listMarked( 0 ) );
                 REQUIRE_FALSE( ui.listMarked( 1 ) );
-                REQUIRE( ui.problems->text().startsWith( "Rule 1: invalid line pattern" ) );
+                REQUIRE( ui.problems->text()
+                         == "Rule 1: invalid line pattern: "
+                                + FooterScanner::patternError( "[unclosed" ) );
                 REQUIRE_FALSE( ui.canAccept() );
             }
 
-            AND_WHEN( "the other rule is selected" )
+            AND_WHEN( "the other rule is selected, and then the invalid one again" )
             {
                 ui.select( 1 );
+                REQUIRE( EditorUi::unmarked( ui.linePattern, ui.linePatternProblem ) );
+                REQUIRE_FALSE( ui.canAccept() );
+                ui.select( 0 );
 
-                THEN( "the panel shows that rule unmarked, and the rules still cannot be saved" )
+                THEN( "its field is marked again" )
                 {
-                    REQUIRE( EditorUi::unmarked( ui.linePattern, ui.linePatternProblem ) );
-                    REQUIRE_FALSE( ui.canAccept() );
-
-                    AND_WHEN( "the invalid rule is selected again" )
-                    {
-                        ui.select( 0 );
-
-                        THEN( "its field is marked again" )
-                        {
-                            REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
-                        }
-                    }
+                    REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
                 }
             }
 
@@ -762,7 +759,7 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
             {
                 ui.linePattern->setText( "[closed]" );
 
-                THEN( "the rules can be saved" )
+                THEN( "nothing is marked, and the rules can be saved" )
                 {
                     REQUIRE( EditorUi::unmarked( ui.linePattern, ui.linePatternProblem ) );
                     REQUIRE_FALSE( ui.listMarked( 0 ) );
@@ -770,32 +767,18 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
                     REQUIRE( ui.canAccept() );
                 }
             }
-        }
 
-        WHEN( "a value pattern becomes invalid" )
-        {
-            ui.select( 1 );
-            ui.valuePattern->setText( "(" );
-
-            THEN( "the field is marked and the rules cannot be saved" )
+            AND_WHEN( "the invalid rule is removed" )
             {
-                REQUIRE( EditorUi::marked( ui.valuePattern, ui.valuePatternProblem ) );
-                REQUIRE( ui.listMarked( 1 ) );
-                REQUIRE_FALSE( ui.canAccept() );
-            }
-        }
+                ui.removeRule->click();
 
-        WHEN( "the second rule takes the key of the first" )
-        {
-            ui.select( 1 );
-            ui.key->setText( "A" );
-
-            THEN( "the rules are alternatives for the key and can be saved" )
-            {
-                REQUIRE( EditorUi::unmarked( ui.key, ui.keyProblem ) );
-                REQUIRE_FALSE( ui.listMarked( 0 ) );
-                REQUIRE_FALSE( ui.listMarked( 1 ) );
-                REQUIRE( ui.canAccept() );
+                THEN( "the rules can be saved, and the remaining rule is not marked" )
+                {
+                    REQUIRE( ui.canAccept() );
+                    REQUIRE( ui.problems->isHidden() );
+                    REQUIRE( EditorUi::unmarked( ui.linePattern, ui.linePatternProblem ) );
+                    REQUIRE_FALSE( ui.listMarked( 0 ) );
+                }
             }
         }
 
@@ -804,23 +787,11 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
             ui.select( 1 );
             ui.key->setText( " " );
 
-            THEN( "the key is marked and the rules cannot be saved" )
+            THEN( "the key is marked and OK and Apply are blocked" )
             {
                 REQUIRE( EditorUi::marked( ui.key, ui.keyProblem ) );
-                REQUIRE( ui.keyProblem->text().contains( "needs a key" ) );
                 REQUIRE( ui.listMarked( 1 ) );
                 REQUIRE_FALSE( ui.canAccept() );
-            }
-
-            AND_WHEN( "the rule is disabled in the panel" )
-            {
-                ui.enabled->setChecked( false );
-
-                THEN( "the rules can be saved" )
-                {
-                    REQUIRE( EditorUi::unmarked( ui.key, ui.keyProblem ) );
-                    REQUIRE( ui.canAccept() );
-                }
             }
 
             AND_WHEN( "the rule is disabled in the list" )
@@ -835,167 +806,47 @@ SCENARIO( "FooterEditor validates rules while they are edited", "[footereditor]"
                 }
             }
         }
-
-        WHEN( "a rule has neither key nor line pattern yet" )
-        {
-            ui.select( 1 );
-            ui.key->setText( "" );
-            ui.linePattern->setText( "" );
-
-            THEN( "the rules can still be saved" )
-            {
-                REQUIRE( ui.canAccept() );
-            }
-        }
-
-        WHEN( "the invalid rule is removed" )
-        {
-            ui.linePattern->setText( "(" );
-            REQUIRE_FALSE( ui.canAccept() );
-            ui.removeRule->click();
-
-            THEN( "the rules can be saved, and the remaining rule is not marked" )
-            {
-                REQUIRE( ui.canAccept() );
-                REQUIRE( EditorUi::unmarked( ui.linePattern, ui.linePatternProblem ) );
-                REQUIRE_FALSE( ui.listMarked( 0 ) );
-            }
-        }
     }
 
-    GIVEN( "rules loaded with an invalid pattern" )
+    GIVEN( "rules loaded with an invalid pattern, among valid ones" )
     {
-        FooterEditor editor( { entryWithMapping( "A" ), { "Bad", "(", "", true, {} } } );
+        FooterEditor editor( { entryWithMapping( "A" ),
+                               { "Bad", "(", "", true, {} },
+                               entryWithMapping( "B" ),
+                               { "Worse", "[", "", true, {} } } );
         EditorUi ui( editor );
 
-        THEN( "they cannot be saved until fixed, and the rule is marked in the list" )
+        THEN( "they are marked and listed, and cannot be saved" )
         {
             REQUIRE_FALSE( ui.canAccept() );
             REQUIRE( ui.listMarked( 1 ) );
+            REQUIRE( ui.listMarked( 3 ) );
+            REQUIRE( ui.problems->text().split( '\n' ).size() == 2 );
             REQUIRE( ui.problems->text().startsWith( "Rule 2:" ) );
         }
 
-        WHEN( "the rule is selected" )
-        {
-            ui.select( 1 );
-
-            THEN( "its field is marked" )
-            {
-                REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
-            }
-        }
-
-        WHEN( "the rule is moved up" )
+        WHEN( "rules are moved, removed and added" )
         {
             ui.select( 1 );
             ui.moveUp->click();
+            ui.select( 2 );
+            ui.removeRule->click();
+            ui.addRule->click();
+            ui.key->setText( "" );
+            ui.linePattern->setText( "new" );
 
-            THEN( "its mark and the rule number in the problems follow it" )
+            THEN( "the marks follow their rules, and the listing is renumbered" )
             {
                 REQUIRE( ui.listMarked( 0 ) );
                 REQUIRE_FALSE( ui.listMarked( 1 ) );
-                REQUIRE( ui.problems->text().startsWith( "Rule 1:" ) );
-                REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
-            }
-        }
-    }
-}
-
-SCENARIO( "FooterEditor compiles each pattern only once", "[footereditor]" )
-{
-    // 400 distinct patterns: validating all rules on every change would
-    // compile them hundreds of thousands of times.
-    QList<FooterEntry> entries;
-    for ( int i = 0; i < 200; ++i ) {
-        const auto key = QString( "Key%1" ).arg( i );
-        entries.append(
-            { key,
-              QString( "^(?:\\d{4}-\\d{2}-\\d{2}|\\w+){1,3}\\s+%1:\\s+(\\S+)" ).arg( key ),
-              QString( "(?<=%1:)\\s*([A-Z0-9]{3,}|[a-z]+-\\d+)" ).arg( key ),
-              true,
-              { ValueMapping{ "0", "zero" } } } );
-    }
-
-    GIVEN( "an editor with 200 rules" )
-    {
-        FooterEditor editor( entries );
-        EditorUi ui( editor );
-
-        THEN( "each pattern has been compiled once" )
-        {
-            REQUIRE( editor.patternCompilations() == 400 );
-        }
-
-        WHEN( "every rule is selected in turn" )
-        {
-            for ( int row = 0; row < 200; ++row ) {
-                ui.select( row );
-            }
-
-            THEN( "no pattern is compiled again" )
-            {
-                REQUIRE( editor.patternCompilations() == 400 );
-            }
-        }
-
-        WHEN( "a rule is moved up many times" )
-        {
-            ui.select( 199 );
-            for ( int i = 0; i < 20; ++i ) {
-                ui.moveUp->click();
-            }
-
-            THEN( "no pattern is compiled again and the rules are unchanged but for the order" )
-            {
-                REQUIRE( editor.patternCompilations() == 400 );
-                REQUIRE( ui.listKey( 179 ) == "Key199" );
-                REQUIRE( ui.key->text() == "Key199" );
-                REQUIRE( editor.entries().size() == 200 );
-                REQUIRE( ui.canAccept() );
-            }
-
-            AND_WHEN( "a pattern of the moved rule becomes invalid" )
-            {
-                ui.valuePattern->setText( "(" );
-
-                THEN( "only that pattern is compiled, and only that rule is marked" )
-                {
-                    REQUIRE( editor.patternCompilations() == 401 );
-                    REQUIRE( ui.model->problems( 179 ).valuePattern.contains( "invalid" ) );
-                    REQUIRE( ui.model->problems( 178 ).isEmpty() );
-                    REQUIRE( ui.model->problems( 180 ).isEmpty() );
-                    REQUIRE( EditorUi::marked( ui.valuePattern, ui.valuePatternProblem ) );
-                    REQUIRE_FALSE( ui.canAccept() );
-
-                    AND_WHEN( "the rule is moved again" )
-                    {
-                        ui.moveUp->click();
-
-                        THEN( "the mark moves with it, without compiling again" )
-                        {
-                            REQUIRE( editor.patternCompilations() == 401 );
-                            REQUIRE_FALSE( ui.model->problems( 178 ).isEmpty() );
-                            REQUIRE( ui.model->problems( 179 ).isEmpty() );
-                            REQUIRE( EditorUi::marked( ui.valuePattern, ui.valuePatternProblem ) );
-                            REQUIRE_FALSE( ui.canAccept() );
-                        }
-                    }
-                }
-            }
-        }
-
-        WHEN( "a key is typed into a rule one character at a time" )
-        {
-            ui.select( 100 );
-            ui.key->setText( "" );
-            for ( const auto& prefix : { "N", "Ne", "New" } ) {
-                ui.key->setText( prefix );
-            }
-
-            THEN( "no pattern is compiled again" )
-            {
-                REQUIRE( editor.patternCompilations() == 400 );
-                REQUIRE( ui.listKey( 100 ) == "New" );
+                REQUIRE( ui.listMarked( 2 ) );
+                REQUIRE( ui.listMarked( 3 ) );
+                const auto lines = ui.problems->text().split( '\n' );
+                REQUIRE( lines.size() == 3 );
+                REQUIRE( lines[ 0 ].startsWith( "Rule 1: invalid line pattern" ) );
+                REQUIRE( lines[ 1 ].startsWith( "Rule 3: invalid line pattern" ) );
+                REQUIRE( lines[ 2 ] == "Rule 4: a rule with a line pattern needs a key" );
+                REQUIRE_FALSE( ui.canAccept() );
             }
         }
     }
@@ -1222,106 +1073,6 @@ SCENARIO( "FooterEditor keeps a moved rule in view", "[footereditor]" )
             {
                 REQUIRE( ui.listKey( 139 ) == "R199" );
                 REQUIRE( inView( 139 ) );
-            }
-        }
-    }
-}
-
-SCENARIO( "FooterEditor validates only the rule being edited", "[footereditor]" )
-{
-    GIVEN( "an editor with 200 rules" )
-    {
-        FooterEditor editor( manyRules( 200 ) );
-        EditorUi ui( editor );
-        REQUIRE( editor.ruleValidations() == 200 );
-
-        WHEN( "typing into one rule, and moving it" )
-        {
-            ui.select( 100 );
-            for ( const auto& prefix : { "N", "Ne", "New" } ) {
-                ui.key->setText( prefix );
-            }
-            ui.moveUp->click();
-            ui.moveDown->click();
-
-            THEN( "only that rule was validated again, once per change" )
-            {
-                REQUIRE( editor.ruleValidations() == 203 );
-            }
-        }
-
-        WHEN( "rules are added, removed and imported" )
-        {
-            ui.addRule->click();
-            ui.removeRule->click();
-            editor.appendEntries( manyRules( 2 ) );
-
-            THEN( "only the new rules are validated" )
-            {
-                REQUIRE( editor.ruleValidations() == 203 );
-            }
-        }
-    }
-
-    GIVEN( "two invalid rules among valid ones" )
-    {
-        FooterEditor editor( { entryWithMapping( "A" ),
-                               { "Bad1", "(", "", true, {} },
-                               entryWithMapping( "B" ),
-                               { "Bad2", "[", "", true, {} } } );
-        EditorUi ui( editor );
-        REQUIRE_FALSE( ui.canAccept() );
-        REQUIRE( ui.problems->text().split( '\n' ).size() == 2 );
-
-        WHEN( "one of them is fixed" )
-        {
-            ui.select( 1 );
-            ui.linePattern->setText( "fixed" );
-
-            THEN( "only the other is listed, and the rules still cannot be saved" )
-            {
-                REQUIRE( ui.problems->text().startsWith( "Rule 4:" ) );
-                REQUIRE( ui.problems->text().split( '\n' ).size() == 1 );
-                REQUIRE_FALSE( ui.canAccept() );
-            }
-
-            AND_WHEN( "the other is fixed too" )
-            {
-                ui.select( 3 );
-                ui.linePattern->setText( "fixed" );
-
-                THEN( "the rules can be saved" )
-                {
-                    REQUIRE( ui.problems->isHidden() );
-                    REQUIRE( ui.canAccept() );
-                }
-            }
-        }
-
-        WHEN( "a valid rule above them is removed" )
-        {
-            ui.select( 0 );
-            ui.removeRule->click();
-
-            THEN( "the problems are renumbered" )
-            {
-                REQUIRE( ui.problems->text().startsWith( "Rule 1:" ) );
-                REQUIRE( ui.problems->text().contains( "Rule 3:" ) );
-                REQUIRE_FALSE( ui.canAccept() );
-            }
-        }
-
-        WHEN( "an invalid rule is removed" )
-        {
-            ui.select( 1 );
-            ui.removeRule->click();
-            ui.select( 2 );
-            ui.removeRule->click();
-
-            THEN( "the rules can be saved" )
-            {
-                REQUIRE( ui.problems->isHidden() );
-                REQUIRE( ui.canAccept() );
             }
         }
     }

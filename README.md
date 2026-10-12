@@ -144,7 +144,9 @@ changes nothing.
 - Rules have no "match case" setting of their own: they match case unless
   the pattern starts with `(?i)`. The Lab opens with **Match case** on, or
   off for a pattern starting with `(?i)` (shown without it). If you apply
-  with Match case off, the rule's pattern gets `(?i)` in front.
+  with Match case off, the rule's pattern gets `(?i)` in front (after
+  start-of-pattern items such as `(*CRLF)`, which must come first).
+- Applying the pattern exactly as the Lab opened with it changes nothing.
 - In simple mode, Test… of the line pattern opens the generated pattern.
   Applying it unchanged keeps the rule simple; applying a changed pattern
   switches the rule to Advanced with that pattern, as editing it by hand

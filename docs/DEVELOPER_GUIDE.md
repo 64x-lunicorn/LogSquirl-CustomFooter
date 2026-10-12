@@ -665,9 +665,11 @@ nothing else. Decisions:
   the model with `setEntry()` (no longer an unfinished simple rule), then
   shows the problems and schedules a preview, as an edit does. An answer
   for a removed rule, a Cancel, or one after `done()` (`closing_`: the
-  rules are saved or dropped already) changes nothing. Edits to the
-  pattern while the Lab is open are overwritten by an Apply, the user's
-  last word.
+  rules are saved or dropped already) changes nothing, and so does an
+  Apply of exactly the pattern and Match case the Lab was opened with, so
+  edits made meanwhile (e.g. to a simple rule's fields) are kept. Edits to
+  the pattern while the Lab is open are overwritten by an Apply of a
+  changed pattern, the user's last word.
 - **One Lab at a time.** From opening until the answer (or until
   `openRegexLab` returns false) both buttons are disabled with "The Regex
   Lab is open: apply or cancel it there first". The host always answers
@@ -675,10 +677,17 @@ nothing else. Decisions:
   second Lab with a second pending target is never needed.
 - **Match case.** `FooterEntry` has no case flag, and the scanner compiles
   patterns as they are (case-sensitive). So the Lab gets `matchesCase =
-  true`, except for a pattern starting with `(?i)`, which the Lab gets
-  without the prefix and with `matchesCase = false`. An applied pattern
-  with Match case off gets `(?i)` in front, unless it already starts with
-  it or is empty. The round trip is lossless, and configs need no new
+  true`, except for a pattern starting with `(?i)` followed by more,
+  which the Lab gets without the `(?i)` and with `matchesCase = false`.
+  An applied pattern with Match case off gets `(?i)` at its start, unless
+  it already has it there or nothing would follow it. "Start" means after
+  any leading start-of-pattern items such as `(*CRLF)` or `(*UTF)`, which
+  PCRE accepts only before everything else (`(?i)(*CRLF)x` is invalid).
+  Only that exact leading `(?i)` maps to Match case: `(?is)`, `(?i:…)` or a
+  `(?i)` further in stay in the pattern, with Match case on, and still
+  ignore case there. A pattern that is just `(?i)` is passed on as it is.
+  The mapping round-trips every pattern a user is likely to write, except
+  that a doubled leading `(?i)(?i)` comes back as one; configs need no new
   field.
 - **Simple mode.** Test… of the line pattern is enabled and opens the
   generated pattern: the Lab is a good way to see what a simple rule

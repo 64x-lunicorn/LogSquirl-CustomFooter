@@ -30,10 +30,12 @@ sequenceDiagram
 
     Host->>Plugin: logsquirl_plugin_init(api, handle)
     Plugin->>Plugin: Keep api + handle, build HostFunctions from api
-    Plugin->>Plugin: Create the FooterDisplayWidget and a FooterSession on it
-    Note right of Plugin: The session loads the rules from the config dir<br/>and starts its FooterController
+    Plugin->>Host: api->get_config_dir() (a warning if there is none)
     Plugin->>Host: api->register_menu_action("Plugins", "Custom Footer…", callback)
+    Plugin->>Plugin: Create the FooterDisplayWidget
     Plugin->>Host: api->register_footer_widget(footerWidget)
+    Plugin->>Plugin: Create a FooterSession on it
+    Note right of Plugin: The session's FooterController loads the rules<br/>and logs their problems as warnings
     Plugin->>Host: api->register_active_file_callback(onActiveFileChanged)
     Plugin->>Host: api->get_active_file_path() (on the UI thread)
     Plugin->>Plugin: FooterSession::setActiveFile(current file)
@@ -150,7 +152,8 @@ handlers the session connects to the editor's signals do the same.
 plugin needs:
 
 - the rules and the line limit, read from and written to the config dir
-  with `FooterConfig`; nothing else reads or writes them;
+  with `FooterConfig` by the session and its controller only; the editor
+  gets them from the session and hands them back through its signals;
 - the active file, the one the footer and the editor both see;
 - the `FooterController`, which fills the footer widget;
 - the rule editor, from when it opens until it is deleted: placing it over
@@ -167,8 +170,8 @@ FooterEditor* openEditor( QWidget* over );
 ```
 
 The constructor loads the rules and starts the controller on the footer,
-which it does not own. Without a config dir it uses the defaults, saves
-nothing, and logs that once. `setActiveFile()` hands the file to the
+which it does not own. Without a config dir it uses the defaults and
+saves nothing; the C entry points warn about that, as they know why. `setActiveFile()` hands the file to the
 controller and to an open editor, and remembers it for an editor opened
 later. `openEditor()` opens the editor with the rules, the line limit and
 the active file, or moves the open one over the given window and raises
@@ -192,17 +195,20 @@ destroys the controller, which cancels a running scan and waits for it.
 When the destructor returns, no plugin code runs: no thread, timer, queued
 event or callback reaches the session, the editor or the controller.
 `tests/footersession_test.cpp` checks this with the editor open while its
-preview and the footer's scan run, with its import or template dialog
+preview and the footer's scan run, with a scan whose result would change
+the footer running at destruction, with its import or template dialog
 open, with a closed editor waiting to be deleted, and with the editor over
 an application-modal window.
 
 **What stays in the C ABI adapter.** `plugin.cpp` keeps file-local state
 only: the host's table and handle, the `HostFunctions` built from it, the
 footer widget (owned there, as the host must unregister it after the
-session is gone) and the session. `init()` creates the footer widget and
-the session, registers the menu action, the footer widget and the
-active-file callback, and pushes `get_active_file_path()` into the
-session. The active file is read only there and in the host's active-file
+session is gone) and the session. `init()` calls the host in the same
+order as 0.4.0 did: it reads the config dir (warning if there is none),
+registers the menu action, creates and registers the footer widget,
+creates the session on it (which logs the rules' problems), registers
+the active-file callback, and pushes `get_active_file_path()` into the
+session. If any step throws, `init()` logs it, shuts down and fails. The active file is read only there and in the host's active-file
 callback, both on the UI thread, which LogSquirl 26.11 requires; the
 session never asks the host. `shutdown()` destroys the session, then
 unregisters and deletes the footer widget. The FakeHost tests in

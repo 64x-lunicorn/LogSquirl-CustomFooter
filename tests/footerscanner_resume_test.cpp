@@ -338,6 +338,25 @@ SCENARIO( "FooterScanner tells whether a change of a file can alter a scan of it
         }
     }
 
+    GIVEN( "a scan of a file whose last line has no line break yet" )
+    {
+        writeBytes( path, "VIN: A\nid=1" );
+        const auto scan = scanner.scanFrom( path, {} );
+        REQUIRE( scan.values[ "ID" ].value == "1" );
+        REQUIRE_FALSE( scan.progress.done );
+
+        WHEN( "that line is rewritten in place, at the same size" )
+        {
+            overwriteAt( path, 7, "id=2" );
+
+            THEN( "it can alter it, as the line was not remembered" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, scan ) );
+                REQUIRE( scanner.scanFrom( path, scan.progress ).values[ "ID" ].value == "2" );
+            }
+        }
+    }
+
     GIVEN( "a scan of a file of which no complete line could be scanned" )
     {
         writeBytes( path, "VIN: PART" );

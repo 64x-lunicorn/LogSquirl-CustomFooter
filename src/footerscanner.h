@@ -206,7 +206,9 @@ public:
      * Whether a change of @p filePath since @p preview was made cannot alter
      * it: the part of the file read is unchanged, and either the preview
      * stopped at a limit, so appended lines are beyond it, or the file has
-     * its size still. A truncated or replaced file is changed.
+     * its size still and ends with the last complete line read. A truncated
+     * or replaced file is changed, and so is one ending in a line without a
+     * line break, which may have been rewritten in place.
      */
     static bool fileUnchangedFor( const QString& filePath, const Preview& preview );
 
@@ -214,9 +216,11 @@ public:
      * Whether a change of @p filePath since @p scan of it cannot alter it:
      * the part of the file scanned is unchanged, and either the scan is
      * done (every key has a value, or a limit was reached), so appended
-     * lines are not scanned, or the file has its size still. A truncated or
-     * replaced file is changed, and so is one of which no complete line was
-     * scanned, as there is nothing to compare.
+     * lines are not scanned, or the file has its size still and ends with
+     * the last complete line scanned. A truncated or replaced file is
+     * changed, and so is one ending in a line without a line break, which
+     * may have been rewritten in place, or one of which no complete line
+     * was scanned, as there is nothing to compare.
      */
     static bool fileUnchangedFor( const QString& filePath, const Scan& scan );
 
@@ -276,7 +280,9 @@ private:
 
     /// Whether the file still holds what @p read covers, and, unless
     /// appended lines are beyond what was read (@p beyondRead), has
-    /// @p size still.
+    /// @p size still and nothing after what was read: bytes that were not
+    /// remembered, such as a last line without a line break, may have
+    /// changed in place.
     static bool unchangedSince( const QString& filePath, const Progress& read, bool beyondRead,
                                 qint64 size );
 

@@ -514,7 +514,10 @@ bool FooterScanner::unchangedSince( const QString& filePath, const Progress& rea
     if ( !file.open( QIODevice::ReadOnly ) || !continues( file, read ) ) {
         return false;
     }
-    return beyondRead || file.size() == size;
+    // Bytes after what was read, such as a last line without a line break,
+    // are not remembered: rewritten in place they keep the size, so only a
+    // file read to its end counts as unchanged by its size.
+    return beyondRead || ( file.size() == size && size == read.offset );
 }
 
 QList<FooterValue> FooterScanner::footerValues( const Values& values ) const

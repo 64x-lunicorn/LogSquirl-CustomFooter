@@ -138,8 +138,8 @@ private:
     std::optional<SelectedLogLines> selectedLinesOrSayWhy( QWidget* messageOver );
 
     /// Say, over @p over, how to make a rule from a selected line: to open
-    /// a Log File first without an active file; over the editor, to keep
-    /// the rules with OK or Apply and close it first, as it blocks the
+    /// a Log File first without an active file; over the editor, to click
+    /// OK first, which keeps the rules and closes it, as it blocks the
     /// window that takes the selection.
     void showNoSelectedLine( QWidget* over );
 

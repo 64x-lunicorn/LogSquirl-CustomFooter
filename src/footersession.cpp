@@ -311,15 +311,15 @@ void FooterSession::showNoSelectedLine( QWidget* over )
         // The window-modal editor blocks LogSquirl's window, and Cancel
         // would drop the user's edits.
         text = noFile ? QObject::tr( "No Log File is open in LogSquirl, and nothing can change "
-                                     "there while the rule editor is open. Click OK or Apply to "
-                                     "keep your rules (Cancel discards them) and close the "
-                                     "editor. Then open a Log File, select the Log Line with the "
+                                     "there while the rule editor is open. Click OK to keep your "
+                                     "rules and close the editor (Cancel discards them). Then "
+                                     "open a Log File, select the Log Line with the "
                                      "value the rule should find, and choose Plugins → Custom "
                                      "Footer → Rule from Selected Line…" )
                       : QObject::tr( "No Log Line is selected in LogSquirl, and the selection "
-                                     "cannot change while the rule editor is open. Click OK or "
-                                     "Apply to keep your rules (Cancel discards them) and close "
-                                     "the editor. Then select the Log Line with the value the "
+                                     "cannot change while the rule editor is open. Click OK to "
+                                     "keep your rules and close the editor (Cancel discards "
+                                     "them). Then select the Log Line with the value the "
                                      "rule should find, and choose Plugins → Custom Footer → "
                                      "Rule from Selected Line…" );
     }

@@ -757,7 +757,8 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
                 REQUIRE( hint );
                 REQUIRE( hint->parentWidget() == editor );
                 REQUIRE( hint->text().contains( "cannot change while the rule editor is open" ) );
-                REQUIRE( hint->text().contains( "OK or Apply" ) );
+                REQUIRE( hint->text().contains(
+                    "Click OK to keep your rules and close the editor (Cancel discards them)" ) );
                 REQUIRE( editor->entries().size() == 1 );
             }
         }
@@ -790,7 +791,8 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
                 auto* hint = noSelectionHint();
                 REQUIRE( hint );
                 REQUIRE( hint->text().contains( "No Log File is open" ) );
-                REQUIRE( hint->text().contains( "OK or Apply" ) );
+                REQUIRE( hint->text().contains(
+                    "Click OK to keep your rules and close the editor (Cancel discards them)" ) );
             }
         }
     }

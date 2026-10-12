@@ -25,8 +25,10 @@
 #include "footereditor.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QEvent>
 
+#include <cstdint>
 #include <utility>
 
 namespace custom_footer {
@@ -149,12 +151,20 @@ FooterSession::FooterSession( const QString& configDir, FooterDisplayWidget* foo
                               HostFunctions host )
     : configDir_( configDir )
     , host_( std::move( host ) )
+    , footer_( footer )
 {
     controller_ = std::make_unique<FooterController>(
         footer, configDir_, [ host = host_ ]( const QString& warning ) {
             host.logMessage( LOGSQUIRL_LOG_WARNING,
                              QStringLiteral( "Custom Footer: %1" ).arg( warning ) );
         } );
+
+    footer->setGoToLineOffered( has( HostFeature::GoToLogLine ) );
+    if ( has( HostFeature::GoToLogLine ) ) {
+        goToLineConnection_
+            = QObject::connect( footer, &FooterDisplayWidget::goToLineRequested, footer,
+                                [ this ]( const FooterValue& value ) { goToLine( value ); } );
+    }
 }
 
 FooterSession::~FooterSession()
@@ -171,6 +181,13 @@ FooterSession::~FooterSession()
     // Then the controller: it cancels a running scan and waits for it, and
     // drops results not yet shown.
     controller_.reset();
+    // Last, the footer: its values no longer offer what no one handles.
+    QObject::disconnect( goToLineConnection_ );
+    guarded( host_, "withdrawing Go to Log Line", [ this ] {
+        if ( footer_ ) {
+            footer_->setGoToLineOffered( false );
+        }
+    } );
 }
 
 void FooterSession::setActiveFile( const QString& filePath )
@@ -247,6 +264,22 @@ bool FooterSession::has( HostFeature feature ) const noexcept
         return static_cast<bool>( host_.selectedLogLines );
     }
     return false;
+}
+
+void FooterSession::goToLine( const FooterValue& value ) noexcept
+{
+    guarded( host_, "going to a Log Line", [ this, &value ] {
+        // On the UI thread, as the footer's signals are. The host checks the
+        // line, which may be gone since the scan, e.g. after a truncation.
+        if ( host_.goToLogLine( static_cast<std::uint64_t>( value.lineNumber ) ) ) {
+            return;
+        }
+        if ( footer_ ) {
+            footer_->notify( value.key, QCoreApplication::translate( "custom_footer::FooterSession",
+                                                                     "Could not go to Log Line %1" )
+                                            .arg( value.lineNumber ) );
+        }
+    } );
 }
 
 void FooterSession::saveFrom( const FooterEditor& editor ) noexcept

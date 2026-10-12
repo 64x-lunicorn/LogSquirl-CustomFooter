@@ -19,8 +19,10 @@
 
 #pragma once
 
+#include "footervalue.h"
 #include "hostfunctions.h"
 
+#include <QMetaObject>
 #include <QPointer>
 #include <QString>
 
@@ -44,20 +46,27 @@ class FooterEditor;
  * signals, and the C entry points never touch them. The footer and the editor
  * always see the same active file, which is pushed in with setActiveFile()
  * and never asked of the host. All members run on the UI thread only.
+ *
+ * Where the host can go to a Log Line, the footer's values offer it, and the
+ * session asks the host to go to the line a value was found in; when the
+ * host cannot, e.g. as the line is no longer in the open file, a short notice
+ * says so at the value. On an older host the values do not offer it.
  */
 class FooterSession {
 public:
     /// Loads the rules and the line limit from @p configDir and starts the
     /// controller on @p footer. Without a config dir the defaults are used
     /// and nothing is saved. @p footer is not owned and must outlive the
-    /// session.
+    /// session. The footer's values offer going to their Log Line where
+    /// @p host can.
     FooterSession( const QString& configDir, FooterDisplayWidget* footer, HostFunctions host = {} );
 
     /// Shuts down, in this order: deletes the editor at once, open or closed
     /// but not yet deleted, with its dialogs, its preview (stopped and
     /// waited for), its timers and its pending events; then stops the
     /// controller, which cancels a running scan and waits for it, so that
-    /// the footer is no longer updated.
+    /// the footer is no longer updated; then disconnects from the footer,
+    /// whose values no longer offer going to their Log Line.
     ///
     /// When it returns, no plugin code runs: no thread, timer, queued event
     /// or callback reaches the session or anything it made. The host may
@@ -98,9 +107,17 @@ private:
     /// of throwing, as it runs in a handler of the editor's signals.
     void saveFrom( const FooterEditor& editor ) noexcept;
 
+    /// Ask the host to go to the Log Line of @p value, and tell the user at
+    /// the value when it cannot. Logs instead of throwing, as it runs in a
+    /// handler of the footer's signal.
+    void goToLine( const FooterValue& value ) noexcept;
+
     const QString configDir_;
     const HostFunctions host_;
     QString activeFile_;
+    QPointer<FooterDisplayWidget> footer_;
+    /// The footer's requests to go to a Log Line, to goToLine().
+    QMetaObject::Connection goToLineConnection_;
     std::unique_ptr<FooterController> controller_;
     /// The editor from when it is opened until it is deleted.
     QPointer<FooterEditor> editor_;

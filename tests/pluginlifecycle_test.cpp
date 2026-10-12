@@ -32,12 +32,14 @@
 #include "logsquirl_plugin_api.h"
 #include "plugin.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -75,6 +77,8 @@ struct FakeHost {
     int regexLabFlags = 0;
     LogSquirlRegexLabCallbackFn regexLabCallback = nullptr;
     void* regexLabUserData = nullptr;
+    /// The lines go_to_log_line() was asked for, in order.
+    QList<uint64_t> wentTo;
 };
 
 FakeHost& host()
@@ -150,8 +154,9 @@ LogSquirlHostApi fakeApi()
         host().regexLabUserData = userData;
         return 0;
     };
-    api.go_to_log_line = []( void*, uint64_t ) {
+    api.go_to_log_line = []( void*, uint64_t lineNumber ) {
         host().calls.append( "go_to_log_line" );
+        host().wentTo.append( lineNumber );
         return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
     };
     api.get_selected_log_lines = []( void*, const char** text, size_t*, size_t* ) {
@@ -884,6 +889,77 @@ SCENARIO( "The plugin tests a rule's pattern in the host's Regex Lab", "[plugin]
         {
             REQUIRE_FALSE( test->isEnabled() );
             REQUIRE( test->toolTip() == "Needs LogSquirl 26.11 or later" );
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+namespace {
+
+/// The "Go to Log Line" entry of the context menu of the footer's value of
+/// @p key, if it is offered; null otherwise.
+QAction* offeredGoToLine( const QString& key )
+{
+    auto* footer = qobject_cast<FooterDisplayWidget*>( host().footerWidget );
+    if ( !footer ) {
+        return nullptr;
+    }
+    for ( const auto* item : footer->findChildren<FooterValueItem*>() ) {
+        if ( item->value().key != key ) {
+            continue;
+        }
+        for ( auto* action : item->contextMenu()->actions() ) {
+            if ( action->objectName() == QLatin1String( "goToLogLine" ) && action->isVisible() ) {
+                return action;
+            }
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+SCENARIO( "The plugin takes the user to the Log Line a footer value came from", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    writeFile( logDir.path() + "/vin.log", "starting\nnoise\nVIN: JUMP\n" );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = ( logDir.path() + "/vin.log" ).toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    WHEN( "LogSquirl 26.11 loads it, and the user goes to the Log Line of a value" )
+    {
+        REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+        REQUIRE( waitForText( "JUMP" ) );
+        auto* goTo = offeredGoToLine( "VIN" );
+        REQUIRE( goTo );
+        goTo->trigger();
+
+        THEN( "the host is asked to go to the line it was found in, counting from 1" )
+        {
+            REQUIRE( host().wentTo == QList<uint64_t>{ 3 } );
+        }
+    }
+
+    WHEN( "LogSquirl 26.10 loads it, with the base table" )
+    {
+        BaseHostTable base( api );
+        REQUIRE( logsquirl_plugin_init( base.api(), &handle ) == 0 );
+        REQUIRE( waitForText( "JUMP" ) );
+
+        THEN( "the values do not offer it" )
+        {
+            REQUIRE( offeredGoToLine( "VIN" ) == nullptr );
         }
 
         logsquirl_plugin_shutdown();

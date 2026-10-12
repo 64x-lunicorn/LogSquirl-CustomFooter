@@ -26,43 +26,44 @@
 namespace custom_footer {
 
 FooterController::FooterController( FooterDisplayWidget* widget, const QString& configDir,
-                                    Warn warn, QObject* parent )
+                                    Warn warn, QObject* parent, FollowerParts parts )
     : QObject( parent )
     , widget_( widget )
     , configDir_( configDir )
     , warn_( std::move( warn ) )
+    , follower_(
+          this,
+          [ this ]( const FooterScanner::Scan& scan ) {
+              // Scanned with the current rules: newer rules made it outdated.
+              show( scanner_->footerValues( scan.values ) );
+          },
+          std::move( parts ) )
 {
-    // Collect the changes of a busy log, without postponing the scan for as
-    // long as it keeps changing.
-    connect( fileWatcher_, &ActiveFileWatcher::changed, this, &FooterController::requestScan );
-
     loadConfig();
 }
 
 FooterController::~FooterController()
 {
-    scans_.stop();
+    follower_.stop();
 }
 
 void FooterController::setActiveFile( const QString& filePath )
 {
-    if ( filePath != activeFile_ ) {
-        activeFile_ = filePath;
-        fileWatcher_->setFile( filePath );
-        progress_ = {};
-
-        // The previous file's values must not pass for this file's while it is scanned.
-        show( {} );
-        restartScan();
+    if ( filePath == activeFile_ ) {
+        // A change of the file, as one on disk.
+        follower_.nudge();
         return;
     }
-    requestScan();
+
+    activeFile_ = filePath;
+    // The previous file's values must not pass for this file's while it is scanned.
+    show( {} );
+    restartScan();
 }
 
 void FooterController::reloadConfig()
 {
     loadConfig();
-    progress_ = {};
     restartScan();
 }
 
@@ -78,58 +79,35 @@ void FooterController::loadConfig()
     }
 }
 
-void FooterController::requestScan()
-{
-    if ( !scans_.isRunning() ) {
-        startScan();
-        return;
-    }
-
-    // Let the running scan of this file finish, or on a busy log no scan
-    // would ever finish; then scan on from where it stopped.
-    fileWatcher_->cancelPending();
-    rescanPending_ = true;
-    fileWatcher_->watch();
-}
-
 void FooterController::restartScan()
 {
-    // Whatever runs now is outdated; it is not shown.
-    scans_.drop();
-    rescanPending_ = false;
-
-    startScan();
-}
-
-void FooterController::startScan()
-{
-    fileWatcher_->cancelPending();
-    rescanPending_ = false;
-
     if ( activeFile_.isEmpty() ) {
-        scans_.drop();
+        // Without a job the follower is idle: nothing runs or is followed.
+        follower_.follow( QString(), nullptr );
         show( {} );
         return;
     }
-    fileWatcher_->watch();
 
     using Scan = FooterScanner::Scan;
-    scans_.run(
-        [ scanner = scanner_, filePath = activeFile_, progress = progress_,
-          maxLines = maxLines_ ]( const std::atomic_bool* cancelled ) -> Scan {
+    // Following anew forgets the previous scan: the file is scanned from its start.
+    follower_.follow(
+        activeFile_,
+        [ scanner = scanner_, maxLines = maxLines_ ]( const QString& filePath, const Scan* previous,
+                                                      const std::atomic_bool& cancelled ) {
             try {
-                return scanner->scanFrom( filePath, progress, maxLines, cancelled );
+                // On from where the previous scan stopped, if the file only grew.
+                return scanner->scanFrom( filePath,
+                                          previous ? previous->progress : FooterScanner::Progress{},
+                                          maxLines, &cancelled );
             } catch ( ... ) {
                 // E.g. out of memory: better no values than a dead host.
-                return {};
+                return Scan{};
             }
         },
-        [ this ]( const Scan& scan ) {
-            progress_ = scan.progress;
-            show( scanner_->footerValues( scan.values ) );
-            if ( rescanPending_ ) {
-                startScan();
-            }
+        // Lines appended once every key has a value or beyond the limits, or
+        // a change that left the file as it was, cannot alter the values.
+        []( const QString& filePath, const Scan& last ) {
+            return !FooterScanner::fileUnchangedFor( filePath, last );
         } );
 }
 

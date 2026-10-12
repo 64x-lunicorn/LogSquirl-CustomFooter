@@ -24,6 +24,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "basehosttable.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
@@ -44,8 +45,7 @@
 #include <QToolButton>
 #include <QWidget>
 
-#include <cstdlib>
-#include <cstring>
+#include <cstddef>
 #include <stdexcept>
 
 using namespace custom_footer;
@@ -151,33 +151,6 @@ LogSquirlHostApi fakeApi()
     };
     return api;
 }
-
-/**
- * The base part of @p api, as LogSquirl 26.10 passes it: in a heap block of
- * exactly LOGSQUIRL_HOST_API_BASE_SIZE bytes, so that any read past the
- * table is a read past the block, which AddressSanitizer reports.
- */
-struct BaseTable {
-    explicit BaseTable( const LogSquirlHostApi& api )
-        : block( static_cast<unsigned char*>( std::malloc( LOGSQUIRL_HOST_API_BASE_SIZE ) ) )
-    {
-        REQUIRE( block );
-        std::memcpy( block, &api, LOGSQUIRL_HOST_API_BASE_SIZE );
-    }
-    ~BaseTable()
-    {
-        std::free( block );
-    }
-    BaseTable( const BaseTable& ) = delete;
-    BaseTable& operator=( const BaseTable& ) = delete;
-
-    const LogSquirlHostApi* api() const
-    {
-        return reinterpret_cast<const LogSquirlHostApi*>( block );
-    }
-
-    unsigned char* block;
-};
 
 template <typename Predicate>
 bool processUntil( Predicate done, int boundMs = 10000 )
@@ -756,7 +729,7 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
 
     WHEN( "LogSquirl 26.10 loads it through init(), with the base table" )
     {
-        BaseTable base( api );
+        BaseHostTable base( api );
         REQUIRE( logsquirl_plugin_init( base.api(), &handle ) == 0 );
 
         THEN( "the session reports none, nothing reads past the table, and the footer works" )
@@ -771,7 +744,7 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
 
     WHEN( "a host passes init_ex() the base table" )
     {
-        BaseTable base( api );
+        BaseHostTable base( api );
         REQUIRE( logsquirl_plugin_init_ex( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE )
                  == 0 );
 
@@ -786,7 +759,7 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
 
     WHEN( "a host passes init_ex() a table smaller than the base table" )
     {
-        BaseTable base( api );
+        BaseHostTable base( api );
         const int result
             = logsquirl_plugin_init_ex( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE - 1 );
 

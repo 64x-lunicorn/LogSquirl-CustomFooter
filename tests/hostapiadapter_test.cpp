@@ -26,6 +26,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "basehosttable.h"
 #include "hostapiadapter.h"
 #include "hostfunctions.h"
 #include "logsquirl_plugin_api.h"
@@ -34,8 +35,7 @@
 #include <QObject>
 #include <QStringList>
 
-#include <cstdlib>
-#include <cstring>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -186,26 +186,26 @@ SCENARIO( "The host API adapter offers what the table's size reports", "[hostapi
 
     WHEN( "the host passes the base table, in a block of exactly its size" )
     {
-        // Any read past the base table is a read past the block, which
-        // AddressSanitizer reports.
-        auto* block = static_cast<unsigned char*>( std::malloc( LOGSQUIRL_HOST_API_BASE_SIZE ) );
-        REQUIRE( block );
-        std::memcpy( block, &api, LOGSQUIRL_HOST_API_BASE_SIZE );
-        const auto* base = reinterpret_cast<const LogSquirlHostApi*>( block );
-        {
-            HostApiAdapter adapter( base, &handle, LOGSQUIRL_HOST_API_BASE_SIZE );
-            const auto& host = adapter.functions();
+        const BaseHostTable base( api );
+        HostApiAdapter adapter( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE );
+        const auto& host = adapter.functions();
 
-            THEN( "none of the three is set, and logging still works" )
+        THEN( "none of the three is set" )
+        {
+            REQUIRE_FALSE( host.openRegexLab );
+            REQUIRE_FALSE( host.goToLogLine );
+            REQUIRE_FALSE( host.selectedLogLines );
+        }
+
+        AND_WHEN( "a message is logged" )
+        {
+            host.logMessage( LOGSQUIRL_LOG_INFO, "hello" );
+
+            THEN( "it reaches the host" )
             {
-                REQUIRE_FALSE( host.openRegexLab );
-                REQUIRE_FALSE( host.goToLogLine );
-                REQUIRE_FALSE( host.selectedLogLines );
-                host.logMessage( LOGSQUIRL_LOG_INFO, "hello" );
                 REQUIRE( table().calls == QStringList{ "log_message" } );
             }
         }
-        std::free( block );
     }
 }
 

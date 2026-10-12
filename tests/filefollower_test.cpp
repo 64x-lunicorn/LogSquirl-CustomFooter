@@ -37,6 +37,7 @@
 #include <QThread>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -100,8 +101,27 @@ struct Jobs {
             if ( throwOnce.exchange( false ) ) {
                 throw std::runtime_error( "unreadable" );
             }
-            return next++;
+            const int result = next++;
+            ++returned;
+            return result;
         };
+    }
+
+    /// Wait, without handling events, until @p runs jobs have returned, so
+    /// that their results are on their way to the context's thread.
+    bool waitReturned( int runs )
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while ( returned < runs ) {
+            if ( timer.elapsed() > 10000 ) {
+                return false;
+            }
+            QThread::msleep( 1 );
+        }
+        // The worker hands the result over just after the job returned.
+        QThread::msleep( 20 );
+        return true;
     }
 
     /// What the runs got as the previous result, in order.
@@ -115,6 +135,7 @@ struct Jobs {
     std::atomic_bool throwOnce{ false };
     std::atomic_bool sawCancel{ false };
     std::atomic_int next;
+    std::atomic_int returned{ 0 };
     QSemaphore started;
     QSemaphore release;
     QMutex mutex;
@@ -131,7 +152,13 @@ struct Rig {
         clock = manualClock.get();
         changes = fakeChanges.get();
         follower = std::make_unique<Follower>(
-            &context, [ this ]( const int& result ) { delivered.push_back( result ); },
+            &context,
+            [ this ]( const int& result ) {
+                delivered.push_back( result );
+                if ( onDelivered ) {
+                    onDelivered( result );
+                }
+            },
             FollowerParts{ std::move( manualClock ), std::move( fakeChanges ) } );
     }
 
@@ -154,6 +181,8 @@ struct Rig {
 
     QObject context;
     std::vector<int> delivered;
+    /// Called by the sink after recording a result, e.g. to follow anew.
+    std::function<void( int )> onDelivered;
     ManualClock* clock = nullptr;
     FakeChangeSource* changes = nullptr;
     std::unique_ptr<Follower> follower;
@@ -483,6 +512,112 @@ SCENARIO( "FileFollower delivers nothing once stopped", "[filefollower]" )
                 REQUIRE( jobs.sawCancel );
                 QCoreApplication::processEvents();
                 REQUIRE( rig.delivered.empty() );
+            }
+        }
+    }
+}
+
+SCENARIO( "FileFollower drops a result already on its way when it is told otherwise",
+          "[filefollower]" )
+{
+    GIVEN( "a run whose result is on its way to the context's thread" )
+    {
+        Jobs jobs;
+        Jobs newJobs( 100 );
+        Rig rig;
+        rig.follower->follow( "/logs/a.log", jobs.job() );
+        REQUIRE( jobs.waitReturned( 1 ) );
+
+        WHEN( "the inputs change before it arrives" )
+        {
+            rig.follower->follow( "/logs/a.log", newJobs.job() );
+            rig.settle();
+
+            THEN( "it is not delivered, and never becomes the previous result" )
+            {
+                REQUIRE( rig.delivered == std::vector<int>{ 100 } );
+                rig.changes->fire();
+                rig.clock->advance( kGap );
+                rig.settle();
+                REQUIRE( newJobs.previous()
+                         == std::vector<std::optional<int>>{ std::nullopt, 100 } );
+                REQUIRE( rig.delivered == std::vector<int>{ 100, 101 } );
+            }
+        }
+
+        WHEN( "the follower is stopped before it arrives" )
+        {
+            rig.follower->stop();
+            QCoreApplication::processEvents();
+
+            THEN( "it is not delivered" )
+            {
+                REQUIRE( rig.delivered.empty() );
+            }
+        }
+    }
+}
+
+SCENARIO( "FileFollower lets its sink follow anew while a rerun is flagged", "[filefollower]" )
+{
+    GIVEN( "a run during which the file changed, whose result makes the sink follow anew" )
+    {
+        Jobs jobs;
+        Jobs newJobs( 100 );
+        Rig rig;
+        rig.onDelivered = [ & ]( int result ) {
+            if ( result == 1 ) {
+                rig.follower->follow( "/logs/b.log", newJobs.job() );
+            }
+        };
+        jobs.hold = Jobs::Hold::UntilReleased;
+        rig.follower->follow( "/logs/a.log", jobs.job() );
+        REQUIRE( jobs.started.tryAcquire( 1, 10000 ) );
+        rig.changes->fire();
+
+        WHEN( "the run finishes" )
+        {
+            jobs.release.release();
+            rig.settle();
+
+            THEN( "the new job ran without the old rerun or the old result" )
+            {
+                REQUIRE( rig.delivered == std::vector<int>{ 1, 100 } );
+                REQUIRE( newJobs.previous() == std::vector<std::optional<int>>{ std::nullopt } );
+                REQUIRE( rig.changes->file == "/logs/b.log" );
+                REQUIRE_FALSE( rig.clock->wakeTime() );
+                rig.clock->advance( 10 * kGap );
+                REQUIRE( rig.started() == 2 );
+            }
+        }
+    }
+}
+
+SCENARIO( "FileFollower follows again after it was stopped", "[filefollower]" )
+{
+    GIVEN( "a follower that read a file and was stopped" )
+    {
+        Jobs jobs;
+        Rig rig;
+        rig.follower->follow( "/logs/a.log", jobs.job() );
+        rig.settle();
+        rig.follower->stop();
+
+        WHEN( "it is told to follow the file again" )
+        {
+            rig.follower->follow( "/logs/a.log", jobs.job() );
+            rig.settle();
+
+            THEN( "it reads and follows it afresh" )
+            {
+                REQUIRE( rig.delivered == std::vector<int>{ 1, 2 } );
+                REQUIRE( jobs.previous()
+                         == std::vector<std::optional<int>>{ std::nullopt, std::nullopt } );
+                REQUIRE( rig.changes->file == "/logs/a.log" );
+                rig.changes->fire();
+                rig.clock->advance( kGap );
+                rig.settle();
+                REQUIRE( rig.delivered == std::vector<int>{ 1, 2, 3 } );
             }
         }
     }

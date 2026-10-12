@@ -715,7 +715,8 @@ void FooterEditor::showLineRulePreview( const FooterScanner::Preview& preview )
     if ( shown.endsWith( QLatin1Char( '\r' ) ) ) {
         shown.chop( 1 );
     }
-    if ( !matched.isEmpty() && shown.startsWith( matched ) ) {
+    // Both may be only the start of a long line.
+    if ( !matched.isEmpty() && ( shown.startsWith( matched ) || matched.startsWith( shown ) ) ) {
         return;
     }
     linePicker_->showEarlierMatch( preview.lineNumber, preview.value->value );

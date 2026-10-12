@@ -51,6 +51,14 @@ SelectedLinePicker::SelectedLinePicker( QWidget* parent )
     line_->setToolTip( tr( "Click where the value starts, or mark the value" ) );
     layout->addWidget( line_ );
 
+    cutNote_ = new QLabel(
+        tr( "Only the first 64 KiB of this Log Line are shown: the footer reads no further." ),
+        this );
+    cutNote_->setObjectName( "selectedLineCutNote" );
+    cutNote_->setWordWrap( true );
+    cutNote_->hide();
+    layout->addWidget( cutNote_ );
+
     // A click moves the cursor; a mark changes the selection, and the
     // cursor with it. Either way the mark is read as it is then.
     connect( line_, &QLineEdit::cursorPositionChanged, this, &SelectedLinePicker::markChanged );
@@ -61,8 +69,10 @@ void SelectedLinePicker::showLine( const QString& line, int selectedLines )
 {
     {
         const QSignalBlocker blocker( line_ );
-        line_->setText( line );
+        const auto shown = footerReadLength( line );
+        line_->setText( line.left( shown ) );
         line_->setCursorPosition( 0 );
+        cutNote_->setVisible( shown < line.size() );
     }
     markStart_ = -1;
     markLength_ = -1;

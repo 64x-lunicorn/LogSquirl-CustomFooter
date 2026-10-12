@@ -416,6 +416,51 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
     }
 }
 
+SCENARIO( "The rule editor shows only the part of a long Log Line the footer reads",
+          "[rulefromline][footereditor]" )
+{
+    FooterEditor editor( {} );
+    FromLineUi ui( editor );
+    auto* cut = child<QLabel>( editor, "selectedLineCutNote" );
+
+    WHEN( "a rule is made from a short line" )
+    {
+        editor.addRuleFromLine( kVinLine );
+
+        THEN( "all of it is shown, without a note" )
+        {
+            REQUIRE( ui.line->text() == kVinLine );
+            REQUIRE_FALSE( cut->isVisibleTo( &editor ) );
+        }
+    }
+
+    WHEN( "a rule is made from a line of 1 MiB" )
+    {
+        // Two bytes per "ä" in UTF-8: the footer reads 32768 of them.
+        const QString line = "VIN: WDB1 " + QString( 1024 * 1024, QChar( 0xE4 ) );
+        editor.addRuleFromLine( line );
+
+        THEN( "its first 64 KiB are shown, cut at a character, with a note that the rest is cut "
+              "off" )
+        {
+            REQUIRE( ui.line->text() == line.left( 10 + 32763 ) );
+            REQUIRE( ui.line->text().toUtf8().size() <= 64 * 1024 );
+            REQUIRE( cut->isVisibleTo( &editor ) );
+            REQUIRE( cut->text().contains( "64 KiB" ) );
+        }
+
+        AND_WHEN( "the value is marked" )
+        {
+            ui.mark( "WDB1" );
+
+            THEN( "the rule is made" )
+            {
+                REQUIRE( ui.textBefore->text() == "VIN:" );
+            }
+        }
+    }
+}
+
 SCENARIO( "The rule editor says when an earlier Log Line supplies the rule's value",
           "[rulefromline][footereditor]" )
 {

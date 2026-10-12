@@ -43,10 +43,14 @@ public:
     explicit SelectedLinePicker( QWidget* parent = nullptr );
 
     /// Show @p line, nothing marked yet. @p selectedLines is how many Log
-    /// Lines were selected, of which this is the first.
+    /// Lines were selected, of which this is the first. Of a long line only
+    /// the part the footer reads is shown (footerReadLength()), with a note
+    /// that the rest is cut off: the rest can make no rule, and a QLineEdit
+    /// lays out and paints its whole text on every click.
     void showLine( const QString& line, int selectedLines = 1 );
 
-    /// The line shown.
+    /// The line as shown: the start of the given line, at the same
+    /// positions, so marks in it are marks in that line.
     QString line() const;
 
     /// Show what the last mark made: the value and the text before it, or
@@ -78,6 +82,8 @@ private:
 
     QLabel* hint_ = nullptr;
     QLineEdit* line_ = nullptr;
+    /// Says that only the start of a long line is shown.
+    QLabel* cutNote_ = nullptr;
     /// The hint without a note of an earlier match.
     QString hintText_;
     /// The last mark emitted, to emit each once.

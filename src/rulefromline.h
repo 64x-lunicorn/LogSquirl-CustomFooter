@@ -84,6 +84,11 @@ struct RuleFromLine {
  */
 RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length );
 
+/// How much of @p line the footer reads, in UTF-16 units: its first
+/// FooterScanner::kMaxLineBytes bytes in UTF-8, cut at a character
+/// boundary; all of a shorter line.
+qsizetype footerReadLength( const QString& line );
+
 /**
  * A key for the value after @p textBefore: its longest word, the last of
  * equally long ones, where a word is letters, digits and `_`, with `.` and

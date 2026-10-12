@@ -82,22 +82,6 @@ qsizetype wordStartBefore( const QString& line, qsizetype end )
     return at;
 }
 
-/// The part of @p line the footer reads: its first kMaxLineBytes in UTF-8,
-/// in UTF-16 units.
-qsizetype readLength( const QString& line )
-{
-    qint64 bytes = 0;
-    for ( qsizetype at = 0; at < line.size(); ++at ) {
-        const auto c = line.at( at ).unicode();
-        // A surrogate pair is four bytes, two for each half.
-        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : ( c >= 0xD800 && c < 0xE000 ) ? 2 : 3;
-        if ( bytes > FooterScanner::kMaxLineBytes ) {
-            return at;
-        }
-    }
-    return line.size();
-}
-
 /// The ways the value may end, the most likely first: at whitespace, at the
 /// character after the value, at the end of the line.
 QList<SimpleRule> valueEnds( const QString& line, qsizetype valueEnd )
@@ -177,7 +161,7 @@ RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype lengt
     }
 
     // The footer matches a long line's start only.
-    const auto read = readLength( line );
+    const auto read = footerReadLength( line );
     if ( valueEnd > read ) {
         made.problem = MarkProblem::BeyondLineLimit;
         return made;
@@ -229,6 +213,21 @@ RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype lengt
     }
     made.problem = earlier ? MarkProblem::TextBeforeEarlier : MarkProblem::NoSimpleRule;
     return made;
+}
+
+qsizetype footerReadLength( const QString& line )
+{
+    qint64 bytes = 0;
+    for ( qsizetype at = 0; at < line.size(); ++at ) {
+        const auto c = line.at( at ).unicode();
+        // A surrogate pair is four bytes, two for each half.
+        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : ( c >= 0xD800 && c < 0xE000 ) ? 2 : 3;
+        if ( bytes > FooterScanner::kMaxLineBytes ) {
+            // Not between the halves of a surrogate pair.
+            return line.at( at ).isLowSurrogate() ? at - 1 : at;
+        }
+    }
+    return line.size();
 }
 
 QString suggestedKey( const QString& textBefore )

@@ -518,6 +518,33 @@ SCENARIO( "A rule is made from a mark in a very long line in bounded time", "[ru
     }
 }
 
+SCENARIO( "The part of a long line the footer reads ends at a character", "[rulefromline]" )
+{
+    GIVEN( "lines around the footer's 64 KiB line limit" )
+    {
+        const QString shortLine = "VIN: WDB1";
+        const QString exact( 64 * 1024, QLatin1Char( 'x' ) );
+        // An emoji of four UTF-8 bytes across the limit.
+        const QString emojiAcross = QString( 64 * 1024 - 2, QLatin1Char( 'x' ) )
+                                    + QString::fromUtf8( "\xF0\x9F\x98\x80" );
+
+        WHEN( "the part the footer reads is measured" )
+        {
+            const auto ofShort = footerReadLength( shortLine );
+            const auto ofExact = footerReadLength( exact + "y" );
+            const auto ofEmoji = footerReadLength( emojiAcross );
+
+            THEN( "a short line is read whole, a long one up to the limit, never half a "
+                  "character" )
+            {
+                REQUIRE( ofShort == shortLine.size() );
+                REQUIRE( ofExact == exact.size() );
+                REQUIRE( ofEmoji == 64 * 1024 - 2 );
+            }
+        }
+    }
+}
+
 SCENARIO( "A key is suggested from the text before the value", "[rulefromline]" )
 {
     GIVEN( "texts before values" )

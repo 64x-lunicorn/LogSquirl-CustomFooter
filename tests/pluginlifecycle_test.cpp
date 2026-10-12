@@ -44,6 +44,8 @@
 #include <QToolButton>
 #include <QWidget>
 
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 
 using namespace custom_footer;
@@ -61,6 +63,7 @@ struct FakeHost {
     void ( *menuAction )( void* ) = nullptr;
     void* menuActionUserData = nullptr;
     QStringList warnings; ///< The messages logged as warnings.
+    QStringList infos;    ///< The messages logged as information.
     /// Every call of the plugin, in order: the function's name, and for a
     /// log message its level ("log info", "log warning", "log error").
     QStringList calls;
@@ -96,6 +99,9 @@ LogSquirlHostApi fakeApi()
         if ( level == LOGSQUIRL_LOG_WARNING ) {
             host().warnings.append( QString::fromUtf8( message ) );
         }
+        else if ( level == LOGSQUIRL_LOG_INFO ) {
+            host().infos.append( QString::fromUtf8( message ) );
+        }
     };
     api.get_config_dir = []( void* ) {
         host().calls.append( "get_config_dir" );
@@ -128,8 +134,50 @@ LogSquirlHostApi fakeApi()
               host().activeFileCallback = callback;
               host().activeFileUserData = userData;
           };
+    // The functions of LogSquirl 26.11, which the plugin reads only when the
+    // size the host passes reports them.
+    api.open_regex_lab = []( void*, const char*, int, LogSquirlRegexLabCallbackFn, void* ) {
+        host().calls.append( "open_regex_lab" );
+        return 0;
+    };
+    api.go_to_log_line = []( void*, uint64_t ) {
+        host().calls.append( "go_to_log_line" );
+        return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
+    };
+    api.get_selected_log_lines = []( void*, const char** text, size_t*, size_t* ) {
+        host().calls.append( "get_selected_log_lines" );
+        *text = nullptr;
+        return static_cast<int>( LOGSQUIRL_LOG_LINES_NO_SELECTION );
+    };
     return api;
 }
+
+/**
+ * The base part of @p api, as LogSquirl 26.10 passes it: in a heap block of
+ * exactly LOGSQUIRL_HOST_API_BASE_SIZE bytes, so that any read past the
+ * table is a read past the block, which AddressSanitizer reports.
+ */
+struct BaseTable {
+    explicit BaseTable( const LogSquirlHostApi& api )
+        : block( static_cast<unsigned char*>( std::malloc( LOGSQUIRL_HOST_API_BASE_SIZE ) ) )
+    {
+        REQUIRE( block );
+        std::memcpy( block, &api, LOGSQUIRL_HOST_API_BASE_SIZE );
+    }
+    ~BaseTable()
+    {
+        std::free( block );
+    }
+    BaseTable( const BaseTable& ) = delete;
+    BaseTable& operator=( const BaseTable& ) = delete;
+
+    const LogSquirlHostApi* api() const
+    {
+        return reinterpret_cast<const LogSquirlHostApi*>( block );
+    }
+
+    unsigned char* block;
+};
 
 template <typename Predicate>
 bool processUntil( Predicate done, int boundMs = 10000 )
@@ -656,6 +704,107 @@ SCENARIO( "The plugin's entry points cope with the host's unusual calls", "[plug
                 REQUIRE( host().calls.isEmpty() );
                 REQUIRE_FALSE( openEditorWindow() );
             }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin learns from the host's table which host functions it offers", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    writeFile( logDir.path() + "/vin.log", "VIN: OLDHOST\n" );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = ( logDir.path() + "/vin.log" ).toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+    const QString all = "Custom Footer plugin ready. Host functions: Regex Lab, Go to line, "
+                        "selected Log Lines.";
+    const QString none = "Custom Footer plugin ready. Host functions: none.";
+
+    WHEN( "LogSquirl 26.11 loads it through init_ex(), with its whole table" )
+    {
+        REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+
+        THEN( "the session reports all three host functions, and none is called yet" )
+        {
+            REQUIRE( host().infos.contains( all ) );
+            REQUIRE_FALSE( host().calls.contains( "open_regex_lab" ) );
+            REQUIRE_FALSE( host().calls.contains( "go_to_log_line" ) );
+            REQUIRE_FALSE( host().calls.contains( "get_selected_log_lines" ) );
+        }
+    }
+
+    WHEN( "a host passes init_ex() a table that ends before the selected Log Lines" )
+    {
+        REQUIRE( logsquirl_plugin_init_ex( &api, &handle,
+                                           offsetof( LogSquirlHostApi, get_selected_log_lines ) )
+                 == 0 );
+
+        THEN( "the session reports the Regex Lab and Go to line only" )
+        {
+            REQUIRE( host().infos.contains(
+                "Custom Footer plugin ready. Host functions: Regex Lab, Go to line." ) );
+        }
+    }
+
+    WHEN( "LogSquirl 26.10 loads it through init(), with the base table" )
+    {
+        BaseTable base( api );
+        REQUIRE( logsquirl_plugin_init( base.api(), &handle ) == 0 );
+
+        THEN( "the session reports none, nothing reads past the table, and the footer works" )
+        {
+            REQUIRE( host().infos.contains( none ) );
+            REQUIRE( host().footerWidget );
+            REQUIRE( waitForText( "OLDHOST" ) );
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+
+    WHEN( "a host passes init_ex() the base table" )
+    {
+        BaseTable base( api );
+        REQUIRE( logsquirl_plugin_init_ex( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE )
+                 == 0 );
+
+        THEN( "the session reports none, and nothing reads past the table" )
+        {
+            REQUIRE( host().infos.contains( none ) );
+            REQUIRE( waitForText( "OLDHOST" ) );
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+
+    WHEN( "a host passes init_ex() a table smaller than the base table" )
+    {
+        BaseTable base( api );
+        const int result
+            = logsquirl_plugin_init_ex( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE - 1 );
+
+        THEN( "it fails without calling the host" )
+        {
+            REQUIRE( result == 1 );
+            REQUIRE( host().calls.isEmpty() );
+        }
+    }
+
+    WHEN( "init_ex() is called without the host's table or handle" )
+    {
+        THEN( "it fails without calling the host" )
+        {
+            REQUIRE( logsquirl_plugin_init_ex( nullptr, &handle, sizeof( LogSquirlHostApi ) )
+                     == 1 );
+            REQUIRE( logsquirl_plugin_init_ex( &api, nullptr, sizeof( LogSquirlHostApi ) ) == 1 );
+            REQUIRE( host().calls.isEmpty() );
         }
     }
 

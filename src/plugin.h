@@ -29,7 +29,12 @@
 extern "C" {
 
 LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( void );
+/// Called by LogSquirl 26.10 and older: init_ex() with the base table.
 LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
+/// Called instead of init() by LogSquirl 26.11 and newer, with the size of
+/// their table, which tells the host functions they offer.
+LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* api, void* handle,
+                                                      size_t api_size );
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void );
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget );
 

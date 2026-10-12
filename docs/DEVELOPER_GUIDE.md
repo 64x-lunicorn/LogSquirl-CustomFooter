@@ -316,8 +316,9 @@ hidden global test state.
 | **FooterController** | `footercontroller.h/.cpp` | Cached rules, background scans, file watching |
 | **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |
 | **FooterConfig** | `footerconfig.h/.cpp` | INI persistence + JSON import/export |
-| **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog: rule list, detail panel, validation |
-| **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and validation problems |
+| **RuleCheck** | `rulecheck.h/.cpp` | Decides whether a rule is usable and, if not, why, for the scanner and the editor |
+| **FooterEditor** | `footereditor.h/.cpp` | Rule editor dialog: rule list, detail panel, the rule check's problems |
+| **RuleListModel** | `rulelistmodel.h/.cpp` | The editor's rules, one row each with its mappings and the rule check's problems |
 | **RuleListView** | `rulelistview.h/.cpp` | The rule list: drag & drop and Ctrl+Shift+Up/Down to reorder rules |
 | **RuleDetailPanel** | `ruledetailpanel.h/.cpp` | Form for the selected rule: fields, mappings, problem marks |
 | **FileFollower** | `filefollower.h`, `followerclock.h/.cpp`, `changesource.h` | Follows the active file for an owner: runs its job, reruns after changes with a gap, skips changes that cannot matter |
@@ -334,9 +335,11 @@ hidden global test state.
 ## Scanning Algorithm
 
 1. Build compiled `QRegularExpression` objects for each enabled rule, once
-   per set of rules. A rule without a line pattern is incomplete and
-   ignored; one without a key, or with an invalid line or value pattern, is
-   skipped and reported in `FooterScanner::problems()`.
+   per set of rules. The `RuleCheck` decides which: a rule without a line
+   pattern is incomplete and ignored (`RuleCheck::isUsed()`); one with a
+   problem, such as no key or an invalid line or value pattern, is skipped
+   and reported in `FooterScanner::problems()` with the lines the editor
+   lists for it (`RuleCheck::listing()`).
 2. Rules sharing a key are **alternatives**: the key's value comes from the
    first line that any of them matches; if several match that line, the
    rule higher in the list wins. The key is shown once, at the position of
@@ -403,15 +406,28 @@ in a detail panel on the right.
   Offscreen, `QDrag::exec()` returns at once, so those events have no
   source and the `InternalMove` view ignores them; the tests switch the
   view to `DragDrop` to get past that check to the same drop handling.
-- **Validation** checks one rule: an invalid pattern, or an enabled rule
-  with a line pattern but no key, becomes a problem of that field. An edit
-  validates only the edited rule, and new rules are validated when they are
-  added; removing or moving rules validates nothing and only renumbers the
-  problems. Problems are marked at the field with the reason, on the rule's
-  row in the list (`problemColor()`), and below the list with the rule
-  number; OK and Apply stay disabled while there are any. Each pattern is
-  compiled once per dialog and its error cached
-  (`FooterEditor::patternCompilations()`, `ruleValidations()`).
+- **The rule check** (`RuleCheck`, `rulecheck.h`) is the one place that
+  decides whether a rule is usable and, if not, why; the editor only shows
+  what it returns, and the scanner skips rules by the same predicate, so
+  they never disagree. It takes the rules and each row's unfinished simple
+  rule, and returns each row's problems per field (`RuleProblems`), the
+  "Rule N: …" listing, whether the rules can be saved, the keys in use
+  (of the rules the scanner uses, for the template dialog) and, per rule,
+  the first problem that keeps it from matching anything, which the
+  preview shows instead of a result (`RuleProblems::preventingMatches()`).
+  An invalid pattern, also of a disabled rule, an enabled rule with a line
+  pattern but no key, and an unfinished simple rule's end character are
+  problems, always listed in that order: key, line pattern, value pattern,
+  end character. The editor's `RuleCheck` follows the model's rows: an
+  edit re-checks only the edited rule (`setRule()`), new rules are checked
+  when they are added, and removing or moving rules checks nothing and
+  only renumbers the listing. It owns the cache of pattern errors, so each
+  pattern is compiled once per dialog; tests inject a counting compiler
+  (`tests/rulecheck_test.cpp`, table-driven, without widgets). Problems are
+  marked at the field with the reason, on the rule's row in the list
+  (`problemColor()`; the model keeps a copy of each row's problems, which
+  moves with the row), and below the list with the rule number; OK and
+  Apply stay disabled while there are any.
 - **Live preview**: the panel's last section, a `RulePreviewView`, shows
   `FooterScanner::preview()` of the selected rule against the active file,
   which the plugin passes in with `FooterEditor::setActiveFile()` when the
@@ -430,10 +446,12 @@ in a detail panel on the right.
   which enabled rule of the key supplies the key's value, and from which
   line. A disabled rule is previewed too, but never supplies the key.
   Without an active file, an invalid pattern or no line pattern, it
-  returns a status that the view explains; without a file this is
-  decided on the GUI thread, as nothing is read. A rule without a line
-  pattern because of a problem, such as an unfinished simple rule, shows
-  that problem and is not scanned. Each change schedules one preview
+  returns a status that the view explains, an invalid pattern in the rule
+  check's words; without a file this is decided on the GUI thread, as
+  nothing is read. In the editor, a rule with a problem that keeps it
+  from matching, such as an invalid pattern or an unfinished simple rule,
+  shows the rule check's problem and is not scanned; a rule only missing
+  its key is previewed. Each change schedules one preview
   (`FooterEditor::schedulePreview()`): an edit where it is stored, a
   rule enabled in the list, and rows inserted, removed or moved; not
   every `dataChanged()`, which validation marks emit too. The long line
@@ -483,8 +501,8 @@ panel hands the fields to the editor as `unfinishedSimpleRule()`. That is
 editor state, not part of the domain type `FooterEntry`: `RuleListModel`
 keeps it per row, next to the rule's problems, so it moves with the rule
 (also by drag & drop) and never reaches `entries()`, a save or an export.
-The editor turns it into a problem at the end character field that blocks
-OK and Apply, and passes it to `showEntry()` again, so switching rules loses
+The rule check turns it into a problem at the end character field that blocks
+OK and Apply, and the editor passes it to `showEntry()` again, so switching rules loses
 nothing. In simple mode the simple
 fields regenerate the patterns on every edit and the pattern fields are
 read-only; `entry()` always reads the pattern fields. **Advanced** makes them
@@ -538,8 +556,8 @@ with lines it must find and lines it must not, through `FooterScanner`
 `RuleTemplateDialog` lists name and description in a `QTreeWidget`, with a
 key field enabled only for a template that asks for one; OK is enabled
 once `entry()` has a key, and a hint says a typed trailing `=` is dropped.
-It gets the keys of enabled rules with a line pattern, the ones the scanner
-uses, in `reset()` and shows a note when the new rule's key is one of
+It gets the keys of the rules the scanner uses, `RuleCheck::keysInUse()`,
+in `reset()` and shows a note when the new rule's key is one of
 them: the rule is still added, as an alternative. `FooterEditor::addFromTemplate()` commits the panel's
 pending edit, keeps one dialog, calls `reset()` and `open()` (not `exec()`,
 so tests click through it), and on `accepted` appends `entry()` and selects

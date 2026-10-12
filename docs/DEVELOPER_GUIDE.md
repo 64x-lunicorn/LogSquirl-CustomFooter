@@ -339,7 +339,8 @@ hidden global test state.
    pattern is incomplete and ignored (`RuleCheck::isUsed()`); one with a
    problem, such as no key or an invalid line or value pattern, is skipped
    and reported in `FooterScanner::problems()` with the lines the editor
-   lists for it (`RuleCheck::listing()`).
+   lists for it (`RuleCheck::listing()`). Each pattern is compiled once:
+   the check tells the problems from the scanner's compiled patterns.
 2. Rules sharing a key are **alternatives**: the key's value comes from the
    first line that any of them matches; if several match that line, the
    rule higher in the list wins. The key is shown once, at the position of
@@ -373,10 +374,12 @@ hidden global test state.
 `FooterEditor` shows the rules in a list on the left and the selected rule
 in a detail panel on the right.
 
-- **`RuleListModel`** holds the rules. Each row is a whole `FooterEntry`,
-  mappings included, plus its `RuleProblems`, so a rule's data and
-  validation marks stay together whichever way rows are inserted, removed
-  or moved (`moveRows()`). The list shows
+- **`RuleListModel`** holds the rules, in a `RuleCheck`. Each row is a
+  whole `FooterEntry`, mappings included, plus its unfinished simple rule
+  and its `RuleProblems`, which the check updates in the same step, so a
+  rule's data and validation marks stay together whichever way rows are
+  changed, inserted, removed or moved (`moveRows()`), and nothing that
+  reacts to a signal of the model sees problems of other rows. The list shows
   the enabled state as the check box of the key column, the key, and the
   line pattern elided to one line; everything else is edited in the panel.
 - **`RuleDetailPanel`** edits a copy of the selected rule and emits
@@ -418,15 +421,15 @@ in a detail panel on the right.
   An invalid pattern, also of a disabled rule, an enabled rule with a line
   pattern but no key, and an unfinished simple rule's end character are
   problems, always listed in that order: key, line pattern, value pattern,
-  end character. The editor's `RuleCheck` follows the model's rows: an
-  edit re-checks only the edited rule (`setRule()`), new rules are checked
-  when they are added, and removing or moving rules checks nothing and
-  only renumbers the listing. It owns the cache of pattern errors, so each
+  end character. The editor's `RuleCheck` is where `RuleListModel` keeps
+  its rows, the only copy of the rules and their problems: an edit
+  re-checks only the edited rule (`setRule()`), new rules are checked when
+  they are added, and removing or moving rules checks nothing and only
+  renumbers the listing. It owns the cache of pattern errors, so each
   pattern is compiled once per dialog; tests inject a counting compiler
   (`tests/rulecheck_test.cpp`, table-driven, without widgets). Problems are
   marked at the field with the reason, on the rule's row in the list
-  (`problemColor()`; the model keeps a copy of each row's problems, which
-  moves with the row), and below the list with the rule number; OK and
+  (`problemColor()`), and below the list with the rule number; OK and
   Apply stay disabled while there are any.
 - **Live preview**: the panel's last section, a `RulePreviewView`, shows
   `FooterScanner::preview()` of the selected rule against the active file,

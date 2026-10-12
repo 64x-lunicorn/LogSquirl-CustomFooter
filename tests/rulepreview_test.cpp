@@ -319,14 +319,23 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
             gate.release.release();
             REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 1; } ) );
 
-            THEN( "it is previewed again only after the pause, never back to back" )
+            THEN( "it is not previewed again before the pause, never back to back" )
             {
                 REQUIRE( previewer.previewsStarted() == 1 );
                 REQUIRE( previewer.isBusy() );
+            }
+
+            AND_WHEN( "the pause passes" )
+            {
                 gate.release.release();
                 test.clock->advance( kGap );
-                REQUIRE( previewer.previewsStarted() == 2 );
-                REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 2; } ) );
+
+                THEN( "it is previewed again" )
+                {
+                    REQUIRE( previewer.previewsStarted() == 2 );
+                    REQUIRE(
+                        processUntil( [ &emitted ] { return emitted.patterns.size() == 2; } ) );
+                }
             }
         }
     }

@@ -84,7 +84,8 @@ void RulePreviewer::setEditDelay( int ms )
 
 void RulePreviewer::schedule( const QList<FooterEntry>& entries, int rule, Start start )
 {
-    // The shown preview is outdated: nothing of it runs or is followed on.
+    // The shown preview is outdated: without a job the follower is idle,
+    // and nothing of it runs or is followed on until the request starts.
     follower_.follow( QString(), nullptr );
 
     request_ = Request{ entries, rule };
@@ -114,6 +115,7 @@ void RulePreviewer::clear()
     startTimer_->stop();
     request_.reset();
     startSoon_ = false;
+    // Without a job the follower is idle: nothing runs or is followed.
     follower_.follow( QString(), nullptr );
 }
 

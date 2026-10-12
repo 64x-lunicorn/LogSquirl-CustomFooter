@@ -249,23 +249,26 @@ result. It has three commands and a query:
   idle: nothing runs and nothing is followed.
 - `nudge()`: only the file changed, as when the change source reports a
   change. During a run, one rerun is flagged and nothing cancelled; while
-  idle, a wake-up is set a gap from now, and no sooner than a gap after
-  the last run finished; while a wake-up is pending, nothing changes, so
-  a busy log never postpones it. A rerun waits a gap after its run too.
-  When the wake-up comes and the predicate says the change cannot matter,
-  nothing runs and the file is watched again; otherwise the job runs.
+  idle, a wake-up is set a gap from now; while a wake-up is pending,
+  nothing changes, so a busy log never postpones it. A flagged rerun
+  wakes up a gap after its run finished. When the wake-up comes, the
+  file is watched again first; then, if the predicate says the change
+  cannot matter, nothing runs, and otherwise the job runs. So a change
+  made while the predicate or the job reads the file is always reported.
 - `stop()`: cancel, wait for the worker, and deliver nothing more.
 - `status()`: busy, waiting for the file, runs started and finished.
 
 Its invariants, documented in the header and tested in
-`tests/filefollower_test.cpp`: every run rearms the change source just
-before the job starts, so the file is watched whenever it is read; the
-job's previous result is a copy of the last one delivered since
-`follow()`, never one of an outdated or failed run; the sink gets only
+`tests/filefollower_test.cpp`: the change source is rearmed once before
+every run, before the predicate too and never between it and the job,
+so the file is watched whenever it is read; the job's previous result
+is the last one delivered since `follow()`, never one of an outdated or
+failed run, even one already on its way; the sink gets only
 results of runs that are not outdated, never from within a command; a
 job that throws counts as finished without a result, and the gap and a
 rerun still apply; everything but the job runs on the context's thread.
-The gap is defined once, `FollowerParts::kGapMs` (500 ms).
+The gap is defined once, `FollowerParts::kGapMs` (500 ms); the footer's
+`FooterController::kRescanDelayMs` goes in favour of it with #35.
 
 **Seams.** Two things are injected through the constructor
 (`FollowerParts`), each with two adapters:

@@ -59,7 +59,9 @@ class FooterController : public QObject {
     Q_OBJECT
 
 public:
-    /// How long file changes are collected before the file is scanned again.
+    /// How long file changes are collected before the file is scanned
+    /// again; until #35 moves the footer onto the file follower and its
+    /// FollowerParts::kGapMs.
     static constexpr int kRescanDelayMs = 500;
 
     /// Receives a problem of the rules, in plain English. May be empty.

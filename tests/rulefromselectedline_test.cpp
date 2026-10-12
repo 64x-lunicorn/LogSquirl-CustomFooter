@@ -216,12 +216,15 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
     editor.setActiveFile( log );
     FromLineUi ui( editor );
 
-    THEN( "it shows no line before a rule is made from one" )
+    WHEN( "it is opened, and no rule is made from a line" )
     {
-        REQUIRE_FALSE( ui.lineShown() );
+        THEN( "it shows no line" )
+        {
+            REQUIRE_FALSE( ui.lineShown() );
+        }
     }
 
-    GIVEN( "a rule made from the VIN line" )
+    WHEN( "a rule is made from the VIN line" )
     {
         editor.addRuleFromLine( kVinLine );
 
@@ -237,7 +240,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
             REQUIRE( ui.canAccept() );
         }
 
-        WHEN( "the VIN is marked in the line" )
+        AND_WHEN( "the VIN is marked in the line" )
         {
             ui.mark( "WDB1234567" );
 
@@ -304,7 +307,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
             }
         }
 
-        WHEN( "the user clicks where the VIN starts" )
+        AND_WHEN( "the user clicks where the VIN starts" )
         {
             ui.clickAt( "WDB1234567" );
 
@@ -316,7 +319,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
             }
         }
 
-        WHEN( "another rule is selected" )
+        AND_WHEN( "another rule is selected" )
         {
             ui.select( 0 );
 
@@ -336,7 +339,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
             }
         }
 
-        WHEN( "the rule made from the line is moved up" )
+        AND_WHEN( "the rule made from the line is moved up" )
         {
             child<QToolButton>( editor, "moveUpButton" )->click();
             ui.mark( "WDB1234567" );
@@ -350,7 +353,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
             }
         }
 
-        WHEN( "the rule made from the line is removed" )
+        AND_WHEN( "the rule made from the line is removed" )
         {
             child<QToolButton>( editor, "removeRuleButton" )->click();
 
@@ -382,7 +385,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
         }
     }
 
-    GIVEN( "a rule made from the first of several selected lines" )
+    WHEN( "a rule is made from the first of several selected lines" )
     {
         editor.addRuleFromLine( kVinLine, 3 );
 
@@ -393,18 +396,22 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
         }
     }
 
-    GIVEN( "a second rule made from a line" )
+    GIVEN( "a rule made from a line, with its value marked" )
     {
         editor.addRuleFromLine( kVinLine );
         ui.mark( "WDB1234567" );
-        editor.addRuleFromLine( "user=alice, id=1" );
 
-        THEN( "a third rule shows the new line, and the first one keeps its rule" )
+        WHEN( "a rule is made from another line" )
         {
-            REQUIRE( editor.entries().size() == 3 );
-            REQUIRE( ui.currentRow() == 2 );
-            REQUIRE( ui.line->text() == "user=alice, id=1" );
-            REQUIRE( editor.entries().at( 1 ).key == "VIN" );
+            editor.addRuleFromLine( "user=alice, id=1" );
+
+            THEN( "a third rule shows the new line, and the first one keeps its rule" )
+            {
+                REQUIRE( editor.entries().size() == 3 );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.line->text() == "user=alice, id=1" );
+                REQUIRE( editor.entries().at( 1 ).key == "VIN" );
+            }
         }
     }
 }
@@ -488,9 +495,12 @@ SCENARIO( "The rule editor offers a rule from the selected line only when asked 
     FooterEditor editor( {} );
     auto* button = child<QToolButton>( editor, "ruleFromLineButton" );
 
-    THEN( "the button is hidden by default" )
+    WHEN( "it is not offered" )
     {
-        REQUIRE_FALSE( button->isVisibleTo( &editor ) );
+        THEN( "the button is hidden" )
+        {
+            REQUIRE_FALSE( button->isVisibleTo( &editor ) );
+        }
     }
 
     WHEN( "it is offered, and the button is clicked" )

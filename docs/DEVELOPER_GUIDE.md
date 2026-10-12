@@ -384,3 +384,6 @@ forward-compatible changes.  See the README for format examples.
 3. Update `FooterConfig` to persist/load the new field (both INI and JSON).
 4. Update `FooterEditor` to expose the field in the UI.
 5. Add test scenarios in `tests/`.
+   The suite runs on Qt's offscreen platform: `tests/tests_main.cpp` sets
+   `QT_QPA_PLATFORM=offscreen` unless it is already set, so widget tests
+   (tooltips, `QFileDialog`) behave the same on every desktop and in CI.

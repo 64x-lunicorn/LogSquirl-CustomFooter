@@ -19,10 +19,9 @@
 
 #pragma once
 
-#include "activefilewatcher.h"
+#include "filefollower.h"
 #include "footerentry.h"
 #include "footerscanner.h"
-#include "latestjob.h"
 
 #include <QList>
 #include <QObject>
@@ -48,12 +47,14 @@ namespace custom_footer {
  * emitted, whatever order results arrive in. Without an active file the
  * preview is made on the GUI thread, as it reads nothing.
  *
- * The active file is watched as the footer watches it (ActiveFileWatcher):
- * when it changes on disk, e.g. a growing log, or reappears after it was
- * rotated away, the preview is made again, after a pause that collects the
- * changes. A running preview of the file is not cancelled for that; it
- * finishes, and one more preview covers the changes made meanwhile, again
- * only after the pause, so a busy log is never scanned back to back.
+ * The active file is followed by a FileFollower: when it changes on disk,
+ * e.g. a growing log, or reappears after it was rotated away, the preview
+ * is made again, after a pause that collects the changes. A running preview
+ * of the file is not cancelled for that; it finishes, and one more preview
+ * covers the changes made meanwhile, again only after the pause, so a busy
+ * log is never scanned back to back. A change that cannot alter the shown
+ * preview (FooterScanner::fileUnchangedFor()) is not previewed, and the
+ * file is followed on.
  *
  * Destroying the previewer, or stop(), cancels a running preview, waits for
  * the worker, and leaves no timer running and no result pending: no code of
@@ -79,10 +80,10 @@ public:
 
     /// The pause after the last edit before the preview starts.
     static constexpr int kDelayMs = 300;
-    /// The pause collecting changes of the active file before it is previewed again.
-    static constexpr int kRescanDelayMs = 500;
 
-    explicit RulePreviewer( QObject* parent = nullptr );
+    /// @p parts are the clock and change source of the active file's
+    /// follower; tests pass their own.
+    explicit RulePreviewer( QObject* parent = nullptr, FollowerParts parts = {} );
     ~RulePreviewer() override;
 
     /// The file to preview against; empty for none. The same file again
@@ -90,15 +91,15 @@ public:
     void setActiveFile( const QString& filePath );
     const QString& activeFile() const
     {
-        return fileWatcher_->file();
+        return activeFile_;
     }
 
     /// The scan's line limit, as configured for the footer. A new limit
     /// previews the request again.
     void setMaxLines( int maxLines );
 
-    /// The pauses, kDelayMs and kRescanDelayMs by default; tests set 0.
-    void setDelays( int editMs, int fileChangeMs );
+    /// The pause after an edit, kDelayMs by default; tests set 0.
+    void setEditDelay( int ms );
 
     /// Preview rule @p rule of @p entries instead of any earlier request.
     void schedule( const QList<FooterEntry>& entries, int rule, Start start = Start::AfterPause );
@@ -121,18 +122,14 @@ public:
     /// them finished, emitted or dropped as outdated; for tests.
     int previewsStarted() const
     {
-        return previews_.started();
+        return follower_.status().started;
     }
     int previewsFinished() const
     {
-        return previews_.finished();
+        return follower_.status().finished;
     }
 
     void setPreviewFunction( PreviewFunction function );
-
-    /// A monotonic clock in milliseconds, for the pause between previews of
-    /// a changing file; tests set the time themselves.
-    void setClock( std::function<qint64()> clock );
 
 Q_SIGNALS:
     /// A preview was requested; the shown one is outdated until previewed().
@@ -149,18 +146,10 @@ private:
 
     /// Start the scheduled preview: its pause has passed, or flush().
     void startScheduled();
-    /// Preview the current request now.
+    /// Preview the current request now, and follow the active file with it.
     void start();
-    /// Whether changes of the active file are to be previewed: there is a
-    /// request and a file, and no preview of the request is scheduled
-    /// anyway.
-    bool followsFileChanges() const;
-    /// The active file changed: preview it again after the pause, or after
-    /// the running preview.
-    void noteChange();
-    /// The pause after a change of the active file has passed.
-    void previewChangedFile();
 
+    QString activeFile_;
     int maxLines_ = FooterScanner::kDefaultMaxLines;
     int editDelayMs_ = kDelayMs;
     PreviewFunction previewFunction_;
@@ -172,20 +161,10 @@ private:
     bool startSoon_ = false;
     QTimer* startTimer_ = nullptr;
 
-    /// The active file, with the pause after its changes.
-    ActiveFileWatcher* fileWatcher_ = nullptr;
-    /// The file changed while its preview was running: preview it again.
-    bool rerun_ = false;
-    int fileChangeDelayMs_ = kRescanDelayMs;
-    std::function<qint64()> clock_;
-    /// When the last preview of the request finished, by clock_, and the
-    /// preview; a change of the file is previewed no sooner than the pause
-    /// after it, and not at all if it cannot alter it.
-    std::optional<qint64> lastFinished_;
-    std::optional<Preview> lastPreview_;
-
-    /// The previews: only the latest request's result is emitted.
-    LatestJob<Preview> previews_{ this };
+    /// The previews of the request against the active file, on a worker
+    /// thread, followed when the file changes: only the latest request's
+    /// result is emitted.
+    FileFollower<Preview> follower_;
 };
 
 } // namespace custom_footer

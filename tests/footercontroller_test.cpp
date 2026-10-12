@@ -24,7 +24,6 @@
 
 #include <catch2/catch.hpp>
 
-#include "activefilewatcher.h"
 #include "footerconfig.h"
 #include "footercontroller.h"
 #include "footerdisplaywidget.h"
@@ -400,8 +399,6 @@ SCENARIO( "FooterController does not rescan a file it only read", "[footercontro
 
     FooterDisplayWidget widget;
     FooterController controller( &widget, configDir.path() );
-    auto* fileWatcher = controller.findChild<ActiveFileWatcher*>();
-    REQUIRE( fileWatcher );
 
     GIVEN( "a scanned file, with a key still missing" )
     {
@@ -409,28 +406,20 @@ SCENARIO( "FooterController does not rescan a file it only read", "[footercontro
         REQUIRE( waitFor( [ &widget ] { return shownText( widget ) == "VIN: READ"; } ) );
         const int scans = controller.scansStarted();
 
-        WHEN( "the system reports a change that was only the scan reading the file" )
+        WHEN( "the file is only read, as by the scan itself, and the pause passes" )
         {
-            // As Linux and Windows may, e.g. for its access time.
-            REQUIRE( QMetaObject::invokeMethod( fileWatcher, "fileChanged", Qt::DirectConnection,
-                                                Q_ARG( QString, path ) ) );
-
-            THEN( "no rescan is scheduled" )
+            // Linux and Windows may report a read, e.g. for its access time;
+            // which notifications count is tested with FileChangeSource.
             {
-                REQUIRE_FALSE( fileWatcher->isPending() );
-                REQUIRE( controller.scansStarted() == scans );
+                QFile file( path );
+                REQUIRE( file.open( QIODevice::ReadOnly ) );
+                REQUIRE( file.readAll() == "VIN: READ\n" );
             }
-        }
+            settle( 3 * FooterController::kRescanDelayMs );
 
-        WHEN( "the file grew, and the system reports it" )
-        {
-            writeFile( path, "more\n", true );
-            REQUIRE( QMetaObject::invokeMethod( fileWatcher, "fileChanged", Qt::DirectConnection,
-                                                Q_ARG( QString, path ) ) );
-
-            THEN( "it is scanned again" )
+            THEN( "it is not scanned again" )
             {
-                REQUIRE( fileWatcher->isPending() );
+                REQUIRE( controller.scansStarted() == scans );
             }
         }
     }

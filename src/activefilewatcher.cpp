@@ -19,8 +19,6 @@
 
 #include "activefilewatcher.h"
 
-#include <QFileInfo>
-
 namespace custom_footer {
 
 ActiveFileWatcher::ActiveFileWatcher( int delayMs, QObject* parent )
@@ -29,127 +27,27 @@ ActiveFileWatcher::ActiveFileWatcher( int delayMs, QObject* parent )
 {
     timer_.setSingleShot( true );
     connect( &timer_, &QTimer::timeout, this, &ActiveFileWatcher::changed );
-    connect( &watcher_, &QFileSystemWatcher::fileChanged, this, &ActiveFileWatcher::fileChanged );
-    connect( &watcher_, &QFileSystemWatcher::directoryChanged, this,
-             &ActiveFileWatcher::directoryChanged );
+    source_.changed = [ this ] {
+        if ( !timer_.isActive() ) {
+            timer_.start( delayMs_ );
+        }
+    };
 }
 
 void ActiveFileWatcher::setFile( const QString& filePath )
 {
     timer_.stop();
-    unwatch();
-    file_ = filePath;
-    known_ = {};
+    source_.setFile( filePath );
 }
 
 void ActiveFileWatcher::watch()
 {
-    if ( file_.isEmpty() ) {
-        return;
-    }
-    // The owner reads the file now: later notifications are compared to it.
-    known_ = stampOf( file_ );
-    if ( !systemNotifications_ ) {
-        return;
-    }
-    if ( !QFileInfo::exists( file_ ) ) {
-        // Rotated away or not created yet: wait in its directory for it.
-        watcher_.removePath( file_ );
-        const auto dir = QFileInfo( file_ ).absolutePath();
-        if ( watchedDir_ != dir && QFileInfo::exists( dir ) ) {
-            unwatch();
-            if ( watcher_.addPath( dir ) ) {
-                watchedDir_ = dir;
-            }
-        }
-        return;
-    }
-
-    if ( !watchedDir_.isEmpty() ) {
-        watcher_.removePath( watchedDir_ );
-        watchedDir_.clear();
-    }
-    if ( !watcher_.files().contains( file_ ) ) {
-        watcher_.addPath( file_ );
-    }
-}
-
-void ActiveFileWatcher::schedule()
-{
-    if ( !timer_.isActive() ) {
-        timer_.start( delayMs_ );
-    }
-}
-
-void ActiveFileWatcher::scheduleIn( int delayMs )
-{
-    timer_.start( delayMs );
+    source_.rearm();
 }
 
 void ActiveFileWatcher::cancelPending()
 {
     timer_.stop();
-}
-
-void ActiveFileWatcher::setSystemNotifications( bool enabled )
-{
-    systemNotifications_ = enabled;
-    if ( !enabled ) {
-        timer_.stop();
-        unwatch();
-    }
-}
-
-void ActiveFileWatcher::setDelay( int delayMs )
-{
-    delayMs_ = delayMs;
-}
-
-void ActiveFileWatcher::fileChanged( const QString& path )
-{
-    // A change of a file watched before, still queued.
-    if ( path != file_ ) {
-        return;
-    }
-    // Only read, e.g. by the owner's own scan: nothing to read again.
-    const auto now = stampOf( file_ );
-    if ( now == known_ ) {
-        return;
-    }
-    known_ = now;
-    // The file may have been renamed away, and some watchers would keep
-    // following it: watch() watches whatever is at the path then.
-    watcher_.removePath( file_ );
-    schedule();
-}
-
-void ActiveFileWatcher::directoryChanged( const QString& path )
-{
-    if ( path == watchedDir_ && QFileInfo::exists( file_ ) ) {
-        schedule();
-    }
-}
-
-ActiveFileWatcher::Stamp ActiveFileWatcher::stampOf( const QString& filePath )
-{
-    const QFileInfo info( filePath );
-    Stamp stamp;
-    stamp.exists = info.exists();
-    if ( stamp.exists ) {
-        stamp.size = info.size();
-        stamp.modified = info.lastModified();
-        stamp.birth = info.birthTime();
-    }
-    return stamp;
-}
-
-void ActiveFileWatcher::unwatch()
-{
-    const auto paths = watchedPaths();
-    if ( !paths.isEmpty() ) {
-        watcher_.removePaths( paths );
-    }
-    watchedDir_.clear();
 }
 
 } // namespace custom_footer

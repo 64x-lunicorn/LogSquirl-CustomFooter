@@ -25,7 +25,7 @@
 
 #include <catch2/catch.hpp>
 
-#include "activefilewatcher.h"
+#include "followerfakes.h"
 #include "footereditor.h"
 #include "footerscanner.h"
 #include "rulelistmodel.h"
@@ -138,6 +138,24 @@ struct GatedPreview {
     }
 };
 
+/// The follower's parts with the test's clock and change source, and those.
+struct TestParts {
+    TestParts()
+    {
+        auto manualClock = std::make_unique<ManualClock>();
+        auto fakeChanges = std::make_unique<FakeChangeSource>();
+        clock = manualClock.get();
+        changes = fakeChanges.get();
+        parts = FollowerParts{ std::move( manualClock ), std::move( fakeChanges ) };
+    }
+
+    ManualClock* clock = nullptr;
+    FakeChangeSource* changes = nullptr;
+    FollowerParts parts;
+};
+
+constexpr int kGap = FollowerParts::kGapMs;
+
 template <typename Widget>
 Widget* child( QObject& parent, const char* name )
 {
@@ -188,7 +206,7 @@ SCENARIO( "RulePreviewer previews once typing pauses", "[preview][previewer]" )
         {
             // No real pause in tests: the pause ends with the next pass of
             // the event loop, after the edits made before it.
-            previewer.setDelays( 0, 0 );
+            previewer.setEditDelay( 0 );
             previewer.schedule( { rule( "K", "tim" ) }, 0 );
             previewer.schedule( { rule( "K", "timed" ) }, 0 );
             REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
@@ -234,7 +252,8 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
     GIVEN( "a preview of an old pattern still running" )
     {
         GatedPreview gate;
-        RulePreviewer previewer;
+        TestParts test;
+        RulePreviewer previewer( nullptr, std::move( test.parts ) );
         previewer.setPreviewFunction( gate.function() );
         previewer.setActiveFile( "/some/file.log" );
         Emitted emitted( previewer );
@@ -264,7 +283,7 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
         WHEN( "a newer pattern is typed, and the old preview finishes during the pause" )
         {
             // A pause no test outlasts: the newer preview does not start.
-            previewer.setDelays( 3600 * 1000, 0 );
+            previewer.setEditDelay( 3600 * 1000 );
             previewer.schedule( { rule( "K", "newer" ) }, 0 );
             gate.release.release();
             // The old preview's result arrives while the newer one waits.
@@ -280,9 +299,10 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
 
         WHEN( "the active file is set again, e.g. because it changed" )
         {
-            previewer.setDelays( 0, 0 );
             previewer.setActiveFile( "/some/file.log" );
             gate.release.release( 2 );
+            REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 1; } ) );
+            test.clock->advance( kGap );
             REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 2; } ) );
 
             THEN( "the running preview is not cancelled but shown, and made once more" )
@@ -295,18 +315,28 @@ SCENARIO( "RulePreviewer never shows an outdated preview", "[preview][previewer]
 
         WHEN( "the file changes while its preview runs" )
         {
-            // A pause after a change that no test outlasts.
-            previewer.setDelays( 0, 3600 * 1000 );
-            previewer.setActiveFile( "/some/file.log" );
+            test.changes->fire();
             gate.release.release();
             REQUIRE( processUntil( [ &emitted ] { return emitted.patterns.size() == 1; } ) );
 
-            THEN( "it is previewed again only after the pause, never back to back" )
+            THEN( "it is not previewed again before the pause, never back to back" )
             {
                 REQUIRE( previewer.previewsStarted() == 1 );
                 REQUIRE( previewer.isBusy() );
             }
-            previewer.stop();
+
+            AND_WHEN( "the pause passes" )
+            {
+                gate.release.release();
+                test.clock->advance( kGap );
+
+                THEN( "it is previewed again" )
+                {
+                    REQUIRE( previewer.previewsStarted() == 2 );
+                    REQUIRE(
+                        processUntil( [ &emitted ] { return emitted.patterns.size() == 2; } ) );
+                }
+            }
         }
     }
 }
@@ -315,39 +345,33 @@ SCENARIO( "RulePreviewer never previews a changed file back to back", "[preview]
 {
     GIVEN( "a preview that just finished, with a clock the test sets" )
     {
-        RulePreviewer previewer;
+        // The test says when time passes and when the file changes.
+        TestParts test;
+        RulePreviewer previewer( nullptr, std::move( test.parts ) );
         previewer.setPreviewFunction(
             []( const QString&, const QList<FooterEntry>& entries, int index, int,
                 const std::atomic_bool* ) { return previewOfPattern( entries, index ); } );
-        // Timers that never fire by themselves: the test says when time passes.
-        const int pause = 3600 * 1000;
-        previewer.setDelays( 0, pause );
-        qint64 now = 0;
-        previewer.setClock( [ &now ] { return now; } );
-        auto* fileWatcher = previewer.findChild<ActiveFileWatcher*>();
-        REQUIRE( fileWatcher );
-        fileWatcher->setSystemNotifications( false );
         previewer.setActiveFile( "/some/file.log" );
 
         previewer.schedule( { rule( "K", "k" ) }, 0 );
         previewer.flush();
-        now = 1000;
+        test.clock->setNow( 1000 );
         REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
         REQUIRE( previewer.previewsStarted() == 1 );
 
-        WHEN( "the pause after a change of the file ends right after it finished" )
+        WHEN( "the file changes right after it finished" )
         {
-            now = 1010;
-            Q_EMIT fileWatcher->changed();
+            test.clock->setNow( 1010 );
+            test.changes->fire();
 
-            THEN( "the file is previewed again only a full pause after that preview" )
+            THEN( "the file is previewed again only a full pause later" )
             {
                 REQUIRE( previewer.previewsStarted() == 1 );
                 REQUIRE( previewer.isBusy() );
-                REQUIRE( fileWatcher->isPending() );
 
-                now = 1000 + pause;
-                Q_EMIT fileWatcher->changed();
+                test.clock->setNow( 1000 + kGap );
+                REQUIRE( previewer.previewsStarted() == 1 );
+                test.clock->setNow( 1010 + kGap );
                 REQUIRE( previewer.previewsStarted() == 2 );
             }
         }
@@ -361,15 +385,11 @@ SCENARIO( "RulePreviewer skips previews a change of the file cannot alter", "[pr
     const auto path = tmpDir.path() + "/grow.log";
     writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\n" );
 
-    RulePreviewer previewer;
-    previewer.setDelays( 0, 3600 * 1000 );
-    qint64 now = 0;
-    previewer.setClock( [ &now ] { return now; } );
-    auto* fileWatcher = previewer.findChild<ActiveFileWatcher*>();
-    REQUIRE( fileWatcher );
-    // The test reports the changes (changed()): what the previewer decides
-    // is tested here, not the system's notifications.
-    fileWatcher->setSystemNotifications( false );
+    // The test reports the changes: what the previewer decides is tested
+    // here, not the system's notifications.
+    TestParts test;
+    RulePreviewer previewer( nullptr, std::move( test.parts ) );
+    previewer.setEditDelay( 0 );
     previewer.setActiveFile( path );
     std::vector<Preview> previews;
     QObject::connect( &previewer, &RulePreviewer::previewed,
@@ -380,12 +400,11 @@ SCENARIO( "RulePreviewer skips previews a change of the file cannot alter", "[pr
         previewer.schedule( { rule( "X", "x=(\\d+)" ) }, 0 );
         previewer.flush();
         REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
-        // Long after it, so only the file decides.
-        now = 1000 * 1000 * 1000;
     };
     const auto fileChanged = [ & ] {
         const int started = previewer.previewsStarted();
-        Q_EMIT fileWatcher->changed();
+        test.changes->fire();
+        test.clock->advance( kGap );
         REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
         return previewer.previewsStarted() > started;
     };
@@ -436,9 +455,10 @@ SCENARIO( "RulePreviewer follows the file after skipping a change of it", "[prev
         const auto path = tmpDir.path() + "/skip.log";
         writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\n" );
 
+        // The real follower: the system's notifications, and the pause after
+        // a change (500 ms), long enough to see it pending on a slow machine.
         RulePreviewer previewer;
-        // A pause long enough to see it pending even on a slow machine.
-        previewer.setDelays( 0, 300 );
+        previewer.setEditDelay( 0 );
         previewer.setMaxLines( 2 );
         previewer.setActiveFile( path );
         std::vector<Preview> previews;
@@ -565,8 +585,8 @@ SCENARIO( "The editor previews the selected rule against the active file",
 
     auto* removeRule = child<QToolButton>( editor, "removeRuleButton" );
     auto* mappings = child<QTableWidget>( editor, "mappingTable" );
-    // No real pauses: they end with the next pass of the event loop.
-    previewer->setDelays( 0, 0 );
+    // No real pause after edits: it ends with the next pass of the event loop.
+    previewer->setEditDelay( 0 );
 
     const auto settle = [ previewer ] {
         previewer->flush();
@@ -862,7 +882,7 @@ SCENARIO( "The editor's preview explains an unfinished simple rule", "[preview][
     {
         FooterEditor editor( { { "User", "user=\\s*([^,]*[^,\\s])", "", true, {} } } );
         auto* previewer = child<RulePreviewer>( editor, "rulePreviewer" );
-        previewer->setDelays( 0, 0 );
+        previewer->setEditDelay( 0 );
         auto* message = child<QLabel>( editor, "previewMessage" );
         auto* line = child<QTextEdit>( editor, "previewLine" );
         editor.setActiveFile( path );

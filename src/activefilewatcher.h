@@ -19,32 +19,25 @@
 
 #pragma once
 
-#include <QDateTime>
-#include <QFileSystemWatcher>
+#include "filechangesource.h"
+
 #include <QObject>
 #include <QString>
-#include <QStringList>
 #include <QTimer>
 
 namespace custom_footer {
 
 /**
- * Watches the active log file for its owner, the footer or the editor's
- * preview, and says when it should be read again.
+ * Watches the active log file for the footer and says when it should be
+ * scanned again: a FileChangeSource with a pause after its changes.
  *
  * Changes are collected for a pause before changed() is emitted, without
- * postponing it for as long as a busy log keeps changing. Once a change was
- * seen, the file is no longer watched until the owner calls watch() again
- * when it reads the file: a file that was renamed away and replaced is then
- * watched at its path. While the file is missing, e.g. after it was rotated
- * away, its directory is watched instead, and changed() is emitted once
- * the file is there again.
+ * postponing it for as long as a busy log keeps changing. What counts as a
+ * change, and what is watched until the owner reads the file again
+ * (watch()), is the FileChangeSource's.
  *
- * Some systems report reading the file as a change of it, e.g. of its
- * access time, so an owner reacting to every notification would read the
- * file again and again. A notification is therefore reported only if the
- * file's size, modification or birth time, or its existence differ from
- * when the owner last read it (watch()) or the last change was reported.
+ * The editor's preview follows the file with a FileFollower instead; the
+ * footer moves onto it too (#35), and this class goes then.
  */
 class ActiveFileWatcher : public QObject {
     Q_OBJECT
@@ -57,17 +50,11 @@ public:
     void setFile( const QString& filePath );
     const QString& file() const
     {
-        return file_;
+        return source_.file();
     }
 
     /// Watch the file again, or its directory while it is missing.
     void watch();
-
-    /// Emit changed() after the pause, as for a change of the file.
-    void schedule();
-
-    /// Emit changed() after @p delayMs instead, replacing a pending change.
-    void scheduleIn( int delayMs );
 
     /// Drop a change not yet reported.
     void cancelPending();
@@ -81,58 +68,17 @@ public:
     /// Whether the file is missing and its directory is watched for it.
     bool isWaitingForFile() const
     {
-        return !watchedDir_.isEmpty();
+        return source_.waitingForFile();
     }
-
-    /// What is watched, for tests.
-    QStringList watchedPaths() const
-    {
-        return watcher_.files() + watcher_.directories();
-    }
-
-    void setDelay( int delayMs );
-
-    /// Whether the file system is asked for notifications at all. Tests of
-    /// what an owner does on changed() turn it off and emit changed()
-    /// themselves: some systems report reads of the file too, e.g. its
-    /// access time, which would arm the pause behind the test's back.
-    void setSystemNotifications( bool enabled );
 
 Q_SIGNALS:
     /// The file changed, or reappeared, and the pause has passed.
     void changed();
 
-private Q_SLOTS:
-    void fileChanged( const QString& path );
-    void directoryChanged( const QString& path );
-
 private:
-    /// What tells a change of the file's content or identity.
-    struct Stamp {
-        bool exists = false;
-        qint64 size = -1;
-        QDateTime modified;
-        QDateTime birth;
-
-        bool operator==( const Stamp& other ) const
-        {
-            return exists == other.exists && size == other.size && modified == other.modified
-                   && birth == other.birth;
-        }
-    };
-    static Stamp stampOf( const QString& filePath );
-
-    void unwatch();
-
-    QString file_;
-    /// The file's directory, watched while the file is missing.
-    QString watchedDir_;
-    QFileSystemWatcher watcher_;
+    FileChangeSource source_;
     QTimer timer_;
     int delayMs_;
-    bool systemNotifications_ = true;
-    /// The file as last read by the owner, or as last reported changed.
-    Stamp known_;
 };
 
 } // namespace custom_footer

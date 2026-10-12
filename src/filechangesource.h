@@ -37,8 +37,9 @@ namespace custom_footer {
  * which the owner calls when it reads the file: a file that was renamed
  * away and replaced is then watched at its path. While the file is missing,
  * e.g. after it was rotated away, its directory is watched instead, and a
- * change is reported once the file is there again. Notifications queued for
- * a file followed before are ignored.
+ * change is reported once the file is there again; then the directory is
+ * no longer watched either, however many notifications creating the file
+ * brings. Notifications queued for a file followed before are ignored.
  *
  * Some systems report reading the file as a change of it, e.g. of its
  * access time, so an owner reacting to every notification would read the

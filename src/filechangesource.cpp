@@ -98,9 +98,14 @@ void FileChangeSource::fileChanged( const QString& path )
 
 void FileChangeSource::directoryChanged( const QString& path )
 {
-    if ( path == watchedDir_ && QFileInfo::exists( file_ ) ) {
-        report();
+    if ( path != watchedDir_ || !QFileInfo::exists( file_ ) ) {
+        return;
     }
+    // Creating the file may bring several notifications: one report, and
+    // rearm() watches the file once the owner reads it.
+    known_ = stampOf( file_ );
+    unwatch();
+    report();
 }
 
 void FileChangeSource::report()

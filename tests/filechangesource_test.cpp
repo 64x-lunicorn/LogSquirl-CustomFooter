@@ -143,9 +143,14 @@ SCENARIO( "FileChangeSource follows the active file", "[filechangesource]" )
             {
                 writeBytes( first, "new\n" );
 
-                THEN( "a change is reported, and the file is watched again once read" )
+                THEN( "one change is reported, and the file is watched again once read" )
                 {
-                    REQUIRE( processUntil( [ &changes ] { return changes == 2; } ) );
+                    REQUIRE( processUntil( [ &changes ] { return changes >= 2; } ) );
+                    REQUIRE_FALSE( source.waitingForFile() );
+                    REQUIRE( source.watchedPaths().isEmpty() );
+                    // Late notifications of the creation report nothing more.
+                    processUntil( [] { return false; }, 200 );
+                    REQUIRE( changes == 2 );
                     source.rearm();
                     REQUIRE_FALSE( source.waitingForFile() );
                     REQUIRE( source.watchedPaths() == QStringList{ first } );

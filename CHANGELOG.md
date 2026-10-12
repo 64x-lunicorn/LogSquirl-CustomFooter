@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The live preview kept an old value** — once the rule editor's preview
+  had skipped a change of the active file that could not alter it (e.g.
+  lines appended beyond the scan limit), it stopped following the file:
+  a later truncation or rotation was not previewed until the rule was
+  edited or another file opened. The preview now keeps following the file.
+
 ## [0.4.0] — 2026-10-01
 
 ### Added

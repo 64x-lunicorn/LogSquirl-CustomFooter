@@ -427,6 +427,60 @@ SCENARIO( "RulePreviewer skips previews a change of the file cannot alter", "[pr
     }
 }
 
+SCENARIO( "RulePreviewer follows the file after skipping a change of it", "[preview][previewer]" )
+{
+    GIVEN( "a preview that stopped at the line limit of a watched file" )
+    {
+        QTemporaryDir tmpDir;
+        REQUIRE( tmpDir.isValid() );
+        const auto path = tmpDir.path() + "/skip.log";
+        writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\n" );
+
+        RulePreviewer previewer;
+        // A pause short enough for a test, long enough to see it pending.
+        previewer.setDelays( 0, 50 );
+        previewer.setMaxLines( 2 );
+        previewer.setActiveFile( path );
+        std::vector<Preview> previews;
+        QObject::connect(
+            &previewer, &RulePreviewer::previewed,
+            [ &previews ]( const Preview& preview ) { previews.push_back( preview ); } );
+        previewer.schedule( { rule( "X", "x=(\\d+)" ) }, 0 );
+        previewer.flush();
+        REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
+        REQUIRE( previews.size() == 1 );
+        REQUIRE( previews.back().lineLimitReached );
+        REQUIRE( previews.back().value->value == "1" );
+
+        WHEN( "lines are appended beyond the limit, and the change is skipped" )
+        {
+            const int started = previewer.previewsStarted();
+            {
+                QFile file( path );
+                REQUIRE( file.open( QIODevice::Append ) );
+                REQUIRE( file.write( "x=6\n" ) == 4 );
+            }
+            // The change is noticed, and its pause passes without a preview.
+            REQUIRE( processUntil( [ &previewer ] { return previewer.isBusy(); } ) );
+            REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
+            REQUIRE( previewer.previewsStarted() == started );
+
+            AND_WHEN( "the file is then truncated to a different value within the limit" )
+            {
+                writeBytes( path, "x=7\n" );
+
+                THEN( "the truncated file is previewed" )
+                {
+                    REQUIRE( processUntil( [ &previews ] {
+                        return previews.back().value && previews.back().value->value == "7";
+                    } ) );
+                    REQUIRE_FALSE( previews.back().lineLimitReached );
+                }
+            }
+        }
+    }
+}
+
 SCENARIO( "The editor's preview stops when the editor closes", "[preview][footereditor]" )
 {
     QTemporaryDir tmpDir;

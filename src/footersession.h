@@ -19,10 +19,8 @@
 
 #pragma once
 
-#include "footerentry.h"
 #include "hostfunctions.h"
 
-#include <QList>
 #include <QPointer>
 #include <QString>
 

@@ -171,9 +171,9 @@ FooterEditor* openEditor( QWidget* over );
 
 The constructor loads the rules and starts the controller on the footer,
 which it does not own. Without a config dir it uses the defaults and
-saves nothing; the C entry points warn about that, as they know why. `setActiveFile()` hands the file to the
-controller and to an open editor, and remembers it for an editor opened
-later. `openEditor()` opens the editor with the rules, the line limit and
+saves nothing; the C entry points warn about that, as they know why.
+`setActiveFile()` hands the file to the controller and to an open editor,
+and remembers it for an editor opened later. `openEditor()` opens the editor with the rules, the line limit and
 the active file, or moves the open one over the given window and raises
 it; it returns at once. OK and Apply reach the session through the
 editor's signals (`finished()`, `applied()`); the session saves the rules
@@ -208,9 +208,10 @@ order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
 the active-file callback, and pushes `get_active_file_path()` into the
-session. If any step throws, `init()` logs it, shuts down and fails. The active file is read only there and in the host's active-file
-callback, both on the UI thread, which LogSquirl 26.11 requires; the
-session never asks the host. `shutdown()` destroys the session, then
+session. If any step throws, `init()` logs it, shuts down and fails. The
+active file is read only there and in the host's active-file callback,
+both on the UI thread, which LogSquirl 26.11 requires; the session never
+asks the host. `shutdown()` destroys the session, then
 unregisters and deletes the footer widget. The FakeHost tests in
 `tests/pluginlifecycle_test.cpp` drive these entry points and observe only
 what a host and a user see: registrations, the editor's window, saved

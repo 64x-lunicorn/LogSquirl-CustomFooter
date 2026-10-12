@@ -27,6 +27,8 @@
 #include <QApplication>
 #include <QEvent>
 
+#include <utility>
+
 namespace custom_footer {
 
 namespace {

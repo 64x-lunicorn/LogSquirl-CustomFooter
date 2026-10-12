@@ -28,6 +28,7 @@
 #include <QPointer>
 #include <QString>
 
+#include <functional>
 #include <memory>
 
 namespace custom_footer {
@@ -48,6 +49,9 @@ namespace custom_footer {
  * file is missing, e.g. after it was rotated away, its directory is watched
  * so that the file is scanned and watched again once it is recreated.
  *
+ * Problems of the rules, such as an invalid pattern, are reported to the
+ * warning function it is given, each time the rules are loaded.
+ *
  * Destroying the controller cancels a running scan and waits for it: no code
  * of the plugin runs on the worker thread afterwards.
  */
@@ -58,7 +62,10 @@ public:
     /// How long file changes are collected before the file is scanned again.
     static constexpr int kRescanDelayMs = 500;
 
-    FooterController( FooterDisplayWidget* widget, const QString& configDir,
+    /// Receives a problem of the rules, in plain English. May be empty.
+    using Warn = std::function<void( const QString& problem )>;
+
+    FooterController( FooterDisplayWidget* widget, const QString& configDir, Warn warn = {},
                       QObject* parent = nullptr );
     ~FooterController() override;
 
@@ -100,6 +107,7 @@ private:
 
     QPointer<FooterDisplayWidget> widget_;
     const QString configDir_;
+    const Warn warn_;
     QString activeFile_;
 
     std::shared_ptr<const FooterScanner> scanner_;

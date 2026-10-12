@@ -29,36 +29,45 @@ sequenceDiagram
     Plugin-->>Host: &kPluginInfo (id, name, version, type, …)
 
     Host->>Plugin: logsquirl_plugin_init(api, handle)
-    Plugin->>Plugin: Store api + handle in g_state
+    Plugin->>Plugin: Keep api + handle, build HostFunctions from api
+    Plugin->>Host: api->get_config_dir() (a warning if there is none)
     Plugin->>Host: api->register_menu_action("Plugins", "Custom Footer…", callback)
+    Plugin->>Plugin: Create the FooterDisplayWidget
     Plugin->>Host: api->register_footer_widget(footerWidget)
+    Plugin->>Plugin: Create a FooterSession on it
+    Note right of Plugin: The session's FooterController loads the rules<br/>and logs their problems as warnings
     Plugin->>Host: api->register_active_file_callback(onActiveFileChanged)
-    Plugin->>Plugin: FooterController loads and compiles the rules
-    Plugin->>Plugin: FooterController::setActiveFile(current file)
+    Plugin->>Host: api->get_active_file_path() (on the UI thread)
+    Plugin->>Plugin: FooterSession::setActiveFile(current file)
     Plugin-->>Host: return 0 (success)
 
     Note over Host,Plugin: User opens or switches to a log file
 
     Host->>Plugin: onActiveFileChanged(filePath)
-    Plugin->>Plugin: FooterController::setActiveFile(filePath)
+    Plugin->>Plugin: FooterSession::setActiveFile(filePath), for footer and editor
     Plugin->>Plugin: FooterScanner::scanFrom() on a worker thread
     Plugin->>Plugin: FooterDisplayWidget::updateValues(ordered), if still current
 
     Note over Host,Plugin: User clicks "Custom Footer…" in Plugins menu
 
     Host->>Plugin: onEditorMenuAction() callback
-    Plugin->>Plugin: Open FooterEditor over the main window with open(), and return
+    Plugin->>Plugin: FooterSession::openEditor(main window): open(), and return
     Plugin->>Plugin: User edits rules, clicks OK (FooterEditor::finished)
-    Plugin->>Plugin: FooterConfig::saveEntries()
-    Plugin->>Plugin: FooterController::reloadConfig()
+    Plugin->>Plugin: The session saves the rules (FooterConfig::saveEntries())
+    Plugin->>Plugin: and reloads them (FooterController::reloadConfig())
 
     Note over Host,Plugin: Host unloads the plugin
 
     Host->>Plugin: logsquirl_plugin_shutdown()
-    Plugin->>Plugin: Delete an open rule editor, cancel and wait for its preview
-    Plugin->>Plugin: Cancel and wait for a running scan
+    Plugin->>Plugin: Destroy the FooterSession:
+    Note right of Plugin: delete the rule editor, cancel and wait for its preview;<br/>then cancel and wait for a running scan
     Plugin->>Host: api->unregister_footer_widget(footerWidget)
+    Plugin->>Plugin: Delete the footer widget
 ```
+
+`plugin.cpp` is only the adapter between the host's C API and the
+[footer session](#footer-session). Every callback is one line into the
+session, wrapped in `guarded()`.
 
 ## Threading
 
@@ -70,9 +79,10 @@ change of the active file does not: the running scan finishes, and one
 follow-up scan then covers every change made meanwhile, however many there
 were. Otherwise a log that changes more often than it can be scanned would
 never show values. The result reaches the widget through a `QFutureWatcher`
-on the GUI thread. `logsquirl_plugin_shutdown()` deletes the controller first, which
-cancels the running scan and waits for the worker: after it returns, no code
-of the plugin runs, and the host may unload the library.
+on the GUI thread. `logsquirl_plugin_shutdown()` destroys the footer session
+first, which deletes the editor and then the controller; that cancels the
+running scan and waits for the worker: after it returns, no code of the
+plugin runs, and the host may unload the library.
 
 Both workers are a `LatestJob` (`latestjob.h`): one worker thread, a
 generation counter, a cancel flag, and results handed to the GUI thread
@@ -110,7 +120,7 @@ a change.
 
 The editor never runs in a nested event loop: `exec()` would keep plugin
 frames on the stack, and the host may shut the plugin down, and unload
-it, from within that loop. `openEditor()` in `plugin.cpp` creates it on
+it, from within that loop. `FooterSession::openEditor()` creates it on
 the heap, parented to the host's window, opens it with `open()`, and
 handles OK and Apply through `finished()` and `applied()`; a closed
 editor is deleted later. The host always passes its main window, even while its
@@ -121,9 +131,9 @@ deleted (`ModalGuest`). Its Import and Export file dialogs, error messages and t
 rule template dialog are opened with `open()` too, parented to the editor, never with the static
 `QFileDialog` and `QMessageBox` functions, which run nested loops. The
 one nested loop left is a drag in the rule list (`QDrag::exec()`); a
-shutdown during a drag cannot be triggered from the UI. `PluginState::editor` is a `QPointer` to it
-until it is deleted, and `logsquirl_plugin_shutdown()` deletes it at
-once: its destructor stops the preview (`RulePreviewer::stop()` cancels,
+shutdown during a drag cannot be triggered from the UI. The session keeps a `QPointer` to it
+until it is deleted, and the session's destructor deletes it at
+once: the editor's destructor stops the preview (`RulePreviewer::stop()` cancels,
 waits for the worker, stops its timers and deletes pending result
 watchers), and deleting the objects drops their timers and posted
 events. Closing the editor (`done()`) stops the preview for good; an edit
@@ -133,13 +143,99 @@ mapping cell being edited and disconnects the panel, model and list from
 the editor before any child is deleted.
 
 No exception may leave an entry point or host callback; they run their work
-through `guarded()`, which logs the failure instead.
+through `guarded()` (`hostfunctions.h`), which logs the failure instead. The
+handlers the session connects to the editor's signals do the same.
+
+## Footer Session
+
+`FooterSession` (`footersession.h/.cpp`) owns everything one loaded
+plugin needs:
+
+- the rules and the line limit, read from and written to the config dir
+  with `FooterConfig` by the session and its controller only; the editor
+  gets them from the session and hands them back through its signals;
+- the active file, the one the footer and the editor both see;
+- the `FooterController`, which fills the footer widget;
+- the rule editor, from when it opens until it is deleted: placing it over
+  an application-modal window (`placeEditor()`, `ModalGuest`), saving on
+  OK and Apply, deleting it once closed.
+
+Its interface is small:
+
+```cpp
+FooterSession( const QString& configDir, FooterDisplayWidget* footer, HostFunctions host = {} );
+~FooterSession();
+void setActiveFile( const QString& filePath );
+FooterEditor* openEditor( QWidget* over );
+```
+
+The constructor loads the rules and starts the controller on the footer,
+which it does not own. Without a config dir it uses the defaults and
+saves nothing; the C entry points warn about that, as they know why.
+`setActiveFile()` hands the file to the controller and to an open editor,
+and remembers it for an editor opened later. `openEditor()` opens the editor with the rules, the line limit and
+the active file, or moves the open one over the given window and raises
+it; it returns at once. OK and Apply reach the session through the
+editor's signals (`finished()`, `applied()`); the session saves the rules
+and reloads them, and a failed save is logged as a warning and reloads
+all the same. The editor never touches `FooterConfig`. All members run on
+the UI thread.
+
+`HostFunctions` (`hostfunctions.h`) is what the session needs from the
+host, as a value: today only `log`. A member the running host does not
+offer stays empty, and the session goes without it, so an older host is
+just the default value. `plugin.cpp` fills it from the host's function
+table; tests fill it with lambdas. The controller gets its warning sink
+from the session as a plain function, built from `log`.
+
+**Shutdown postcondition.** The destructor deletes the editor at once,
+open or closed but not yet deleted, with its dialogs, its preview
+(stopped and waited for), its timers and its pending events; then it
+destroys the controller, which cancels a running scan and waits for it.
+When the destructor returns, no plugin code runs: no thread, timer, queued
+event or callback reaches the session, the editor or the controller.
+`tests/footersession_test.cpp` checks this with the editor open while its
+preview and the footer's scan run, with a scan whose result would change
+the footer running at destruction, with its import or template dialog
+open, with a closed editor waiting to be deleted, and with the editor over
+an application-modal window.
+
+**What stays in the C ABI adapter.** `plugin.cpp` keeps file-local state
+only: the host's table and handle, the `HostFunctions` built from it, the
+footer widget (owned there, as the host must unregister it after the
+session is gone) and the session. `init()` calls the host in the same
+order as 0.4.0 did: it reads the config dir (warning if there is none),
+registers the menu action, creates and registers the footer widget,
+creates the session on it (which logs the rules' problems), registers
+the active-file callback, and pushes `get_active_file_path()` into the
+session. If any step throws, `init()` logs it, shuts down and fails. The
+active file is read only there and in the host's active-file callback,
+both on the UI thread, which LogSquirl 26.11 requires; the session never
+asks the host. `shutdown()` destroys the session, then
+unregisters and deletes the footer widget. The FakeHost tests in
+`tests/pluginlifecycle_test.cpp` drive these entry points and observe only
+what a host and a user see: registrations, the editor's window, saved
+files and log messages.
+
+**Why this design.** The session has two verbs, `setActiveFile()` and
+`openEditor()`, and everything else (saving, reloading, the line limit,
+placing the editor) happens behind them; public `save()`/`reload()`
+methods or a `RuleStore` port would be shallow pass-throughs with the
+editor as their only caller. Config I/O, the editor's lifetime and the
+shutdown order sit in one module, so the adapter only translates. The
+host seam is a value with two adapters, the C table and test lambdas;
+virtual host ports with one-method sub-ports would have no second real
+adapter. Host features that later versions add become optional members
+of `HostFunctions`, and a query of which are set, without changing the
+session's shape.
 
 ## Module Overview
 
 | Module | File(s) | Responsibility |
 |--------|---------|----------------|
-| **Plugin entry** | `plugin.cpp`, `plugin.h` | C ABI exports, global state, lifecycle |
+| **Plugin entry** | `plugin.cpp`, `plugin.h` | C ABI exports: translate between the host API and the session |
+| **FooterSession** | `footersession.h/.cpp` | Rules and line limit in the config dir, active file, controller, editor lifetime, shutdown order |
+| **HostFunctions** | `hostfunctions.h` | What the plugin needs from the host, as a value; `guarded()` |
 | **FooterEntry** | `footerentry.h` | Data model: key, linePattern, valuePattern, mappings |
 | **FooterController** | `footercontroller.h/.cpp` | Cached rules, background scans, file watching |
 | **FooterScanner** | `footerscanner.h/.cpp` | Compiles the rules once; line-by-line scanning with two-stage matching |

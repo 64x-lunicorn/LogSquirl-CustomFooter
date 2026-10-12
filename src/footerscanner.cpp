@@ -267,8 +267,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     if ( progress.values.size() < keys_.size() ) {
         const bool completed
             = forEachLine( file, position, maxLines, cancelled,
-                           [ this, &progress, &unterminated,
-                             &stoppedInLine ]( const QString& line, LineKind kind, qint64 ) {
+                           [ this, &progress, &unterminated, &stoppedInLine ](
+                               const QString& line, LineKind kind, qint64 lineNumber ) {
                                stoppedInLine = kind == LineKind::Stopped;
                                // The start of a line the limit stopped in is matched like
                                // that of any over-long line.
@@ -282,6 +282,10 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                                        continue;
                                    }
                                    if ( auto found = valueOf( rule, line ) ) {
+                                       // Counted on from the progress: a
+                                       // continued scan numbers the lines
+                                       // of the whole file.
+                                       found->lineNumber = lineNumber;
                                        values.insert( rule.key, std::move( *found ) );
                                    }
                                }
@@ -474,6 +478,13 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
                        } );
     if ( !completed ) {
         return cancel();
+    }
+    // The values carry their lines, as the footer's do.
+    if ( preview.value ) {
+        preview.value->lineNumber = preview.lineNumber;
+    }
+    if ( preview.keyValue ) {
+        preview.keyValue->lineNumber = preview.keyLineNumber;
     }
 
     // Counting a last line that is unterminated, or that the limit stopped in.

@@ -29,6 +29,9 @@ struct FooterValue {
     QString value;    ///< The value as shown, after the mappings.
     QString rawValue; ///< The value as found in the line, before the mappings.
     int rule = -1;    ///< Index of the rule that supplied it, in the list of rules.
+    /// The Log Line it was found in, counting from 1 as the host shows it;
+    /// 0 where it is not known.
+    qint64 lineNumber = 0;
 
     /// Whether a mapping changed the value.
     bool isMapped() const
@@ -38,7 +41,8 @@ struct FooterValue {
 
     friend bool operator==( const FooterValue& a, const FooterValue& b )
     {
-        return a.key == b.key && a.value == b.value && a.rawValue == b.rawValue && a.rule == b.rule;
+        return a.key == b.key && a.value == b.value && a.rawValue == b.rawValue && a.rule == b.rule
+               && a.lineNumber == b.lineNumber;
     }
     friend bool operator!=( const FooterValue& a, const FooterValue& b )
     {

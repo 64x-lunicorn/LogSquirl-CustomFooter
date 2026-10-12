@@ -655,8 +655,8 @@ SCENARIO( "FooterController shows where each value came from", "[footercontrolle
         THEN( "the widget gets the raw value and the rule of each shown value" )
         {
             REQUIRE( processUntil( [ & ] { return widget.values().size() == 2; } ) );
-            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0 } );
-            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
+            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0, 2 } );
+            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1, 1 } );
         }
     }
 }

@@ -97,7 +97,7 @@ SCENARIO( "FooterScanner previews what a rule finds in a file", "[footerscanner]
             THEN( "it shows the raw and the mapped value" )
             {
                 REQUIRE( preview.value );
-                REQUIRE( *preview.value == FooterValue{ "Mode", "Production", "0x04", 0 } );
+                REQUIRE( *preview.value == FooterValue{ "Mode", "Production", "0x04", 0, 4 } );
             }
             THEN( "it counts the matching lines of the whole file, without a limit reached" )
             {
@@ -263,7 +263,7 @@ SCENARIO( "FooterScanner previews which rule supplies a shared key", "[footersca
             REQUIRE( preview.value->value == "2.0" );
             REQUIRE( preview.lineNumber == 2 );
             REQUIRE( preview.keyValue );
-            REQUIRE( *preview.keyValue == FooterValue{ "Version", "1.0", "1.0", 2 } );
+            REQUIRE( *preview.keyValue == FooterValue{ "Version", "1.0", "1.0", 2, 1 } );
             REQUIRE( preview.keyLineNumber == 1 );
         }
         THEN( "it matches what the footer shows for the key" )

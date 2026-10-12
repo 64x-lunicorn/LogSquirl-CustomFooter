@@ -32,7 +32,9 @@
 #include "hostfunctions.h"
 #include "logsquirl_plugin_api.h"
 
+#include <QApplication>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFile>
@@ -42,6 +44,8 @@
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
+#include <QToolButton>
 
 #include <memory>
 
@@ -393,5 +397,158 @@ SCENARIO( "A footer session without a config dir saves nothing", "[footersession
                 REQUIRE( editor->isVisible() );
             }
         }
+    }
+}
+
+SCENARIO( "Destroying a footer session leaves nothing of the plugin running",
+          "[footersession][lifetime]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    // A rule that matches nothing, and no line limit to speak of, so that
+    // the footer's scan and the editor's preview read the whole file.
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), { rule( "Absent" ) } ) );
+    REQUIRE( FooterConfig::saveMaxLines( configDir.path(), 10'000'000 ) );
+    const auto big = logDir.path() + "/big.log";
+    writeFile( big, QByteArray( "a line of a log that no rule matches\n" ).repeated( 100'000 ) );
+
+    FooterDisplayWidget footer;
+    Log log;
+    auto session = std::make_unique<FooterSession>( configDir.path(), &footer, log.host() );
+
+    const auto destroyFromEventLoop = [ &session ] {
+        // As the host does: from its event loop, with no plugin frame on the stack.
+        bool destroyed = false;
+        QTimer::singleShot( 0, [ &session, &destroyed ] {
+            session.reset();
+            destroyed = true;
+        } );
+        REQUIRE( processUntil( [ &destroyed ] { return destroyed; } ) );
+    };
+    const auto runPendingWork = [] {
+        QCoreApplication::sendPostedEvents();
+        QCoreApplication::processEvents();
+    };
+
+    GIVEN( "the editor open while its preview and the footer's scan run" )
+    {
+        session->setActiveFile( big );
+        QPointer<FooterEditor> editor = session->openEditor( nullptr );
+        REQUIRE( editor );
+        auto* updating = child<QLabel>( *editor, "previewUpdating" );
+        REQUIRE( updating->isVisible() );
+        // Let the preview's worker start.
+        QCoreApplication::processEvents();
+        QList<QPointer<QObject>> parts;
+        for ( auto* part : editor->findChildren<QObject*>() ) {
+            parts.append( part );
+        }
+
+        WHEN( "the session is destroyed" )
+        {
+            destroyFromEventLoop();
+
+            THEN( "the editor and everything it owns are gone at once" )
+            {
+                REQUIRE_FALSE( editor );
+                for ( const auto& part : parts ) {
+                    REQUIRE_FALSE( part );
+                }
+            }
+
+            THEN( "no result reaches the footer afterwards" )
+            {
+                const auto before = footer.values();
+                runPendingWork();
+                REQUIRE( footer.values() == before );
+            }
+        }
+    }
+
+    GIVEN( "the editor with its import dialog open" )
+    {
+        QPointer<FooterEditor> editor = session->openEditor( nullptr );
+        REQUIRE( editor );
+        child<QToolButton>( *editor, "importButton" )->click();
+        QPointer<QDialog> dialog = child<QDialog>( *editor, "importDialog" );
+        REQUIRE( dialog->isVisible() );
+
+        WHEN( "the session is destroyed" )
+        {
+            destroyFromEventLoop();
+
+            THEN( "the editor and the dialog are gone" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( dialog );
+            }
+        }
+    }
+
+    GIVEN( "the editor with its template dialog open" )
+    {
+        QPointer<FooterEditor> editor = session->openEditor( nullptr );
+        REQUIRE( editor );
+        child<QToolButton>( *editor, "templateButton" )->click();
+        QPointer<QDialog> dialog = child<QDialog>( *editor, "ruleTemplateDialog" );
+        REQUIRE( dialog->isVisible() );
+
+        WHEN( "the session is destroyed" )
+        {
+            destroyFromEventLoop();
+
+            THEN( "the editor and the template dialog are gone" )
+            {
+                REQUIRE_FALSE( editor );
+                REQUIRE_FALSE( dialog );
+            }
+        }
+    }
+
+    GIVEN( "an editor that was closed and is waiting to be deleted" )
+    {
+        QPointer<FooterEditor> editor = session->openEditor( nullptr );
+        REQUIRE( editor );
+        editor->reject();
+        REQUIRE( editor );
+
+        WHEN( "the session is destroyed" )
+        {
+            session.reset();
+
+            THEN( "the editor is gone at once, and its deferred deletion is harmless" )
+            {
+                REQUIRE_FALSE( editor );
+                runPendingWork();
+            }
+        }
+    }
+
+    GIVEN( "the editor over an application-modal window that blocks its own" )
+    {
+        QWidget mainWindow;
+        mainWindow.show();
+        QDialog modal( &mainWindow );
+        modal.setWindowModality( Qt::ApplicationModal );
+        modal.show();
+        REQUIRE( QApplication::activeModalWidget() == &modal );
+        QPointer<FooterEditor> editor = session->openEditor( &mainWindow );
+        REQUIRE( editor );
+        REQUIRE( editor->parentWidget() == &modal );
+
+        WHEN( "the session is destroyed, and then the modal window closes" )
+        {
+            session.reset();
+            modal.reject();
+            runPendingWork();
+
+            THEN( "the editor is gone, and closing the modal window reaches no plugin code" )
+            {
+                REQUIRE_FALSE( editor );
+            }
+        }
+        modal.reject();
     }
 }

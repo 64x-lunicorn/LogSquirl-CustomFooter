@@ -137,7 +137,9 @@ public:
         /// What was read of the file, to tell whether a change of it can
         /// alter the preview (fileUnchangedFor()); no values.
         Progress read;
-        /// The file's size when the preview was made.
+        /// The file's size when the preview opened it, as Scan::fileSize, to
+        /// tell whether a change of it can alter the preview
+        /// (fileUnchangedFor()).
         qint64 fileSize = 0;
 
         bool limitReached() const

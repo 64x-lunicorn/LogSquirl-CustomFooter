@@ -418,6 +418,9 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         preview.status = Preview::Status::Unreadable;
         return preview;
     }
+    // Before reading, as the scan does: bytes appended while the preview
+    // reads count as unread.
+    preview.fileSize = file.size();
 
     const auto cancel = [] {
         Preview cancelledPreview;
@@ -488,7 +491,6 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     read.head = readAt( file, 0, qMin( read.offset, kIdentityBytes ) );
     const auto tailSize = qMin( read.offset, kIdentityBytes );
     read.tail = readAt( file, read.offset - tailSize, tailSize );
-    preview.fileSize = file.size();
 
     preview.status = Preview::Status::Scanned;
     return preview;

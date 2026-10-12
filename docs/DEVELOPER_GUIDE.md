@@ -159,11 +159,16 @@ a change but followed by one more, no sooner than the gap after it
 finished, so a busy log is never scanned back to back, and not at all
 when the change cannot alter it: lines appended beyond the limit the last
 preview stopped at, or a file left as it was
-(`FooterScanner::fileUnchangedFor()`, with the footer's identity checks,
-as the follower's skip predicate); the file is watched on after such a
-skip. The preview always scans the file from its start, unlike the
-footer, which continues where it stopped. Setting the same active file
-again counts as a change (`FileFollower::nudge()`).
+(`FooterScanner::fileUnchangedFor()`, with the footer's identity checks
+and its size rule, as the follower's skip predicate); the file is watched
+on after such a skip. Like a scan, a preview takes the file's size when it
+opens it, before reading (`Preview::fileSize`), so a line appended while
+it reads is a change; and the size is still needed besides the end of the
+last complete line read, as a file truncated to that end has lost a last
+line without a line break that the preview showed. The preview always
+scans the file from its start, unlike the footer, which continues where it
+stopped. Setting the same active file again counts as a change
+(`FileFollower::nudge()`).
 
 The editor never runs in a nested event loop: `exec()` would keep plugin
 frames on the stack, and the host may shut the plugin down, and unload

@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lines appended beyond the scan limit), it stopped following the file:
   a later truncation or rotation was not previewed until the rule was
   edited or another file opened. The preview now keeps following the file.
+- **The live preview missed a last line rewritten in place** — when the
+  active file ends in a line without a line break and that line was
+  rewritten at the same size, the preview kept showing the old line until
+  the file changed again. It is now previewed again.
+- **The live preview missed lines appended while it read the file** — a
+  line appended to the active file just as the preview finished reading
+  could be skipped as a change that cannot alter the preview, until the
+  file changed again. It is now previewed.
 
 ## [0.4.0] — 2026-10-01
 

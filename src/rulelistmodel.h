@@ -20,6 +20,7 @@
 #pragma once
 
 #include "footerentry.h"
+#include "rulecheck.h"
 #include "simplerule.h"
 
 #include <QAbstractTableModel>
@@ -48,34 +49,9 @@ inline QColor problemBackgroundColor()
     return color;
 }
 
-/// Why a rule keeps the rules from being saved, per field. Empty when the
-/// field is fine.
-struct RuleProblems {
-    QString key;
-    QString endCharacter; ///< Of a simple rule's value end.
-    QString linePattern;
-    QString valuePattern;
-
-    bool isEmpty() const
-    {
-        return key.isEmpty() && endCharacter.isEmpty() && linePattern.isEmpty()
-               && valuePattern.isEmpty();
-    }
-
-    bool operator==( const RuleProblems& other ) const
-    {
-        return key == other.key && endCharacter == other.endCharacter
-               && linePattern == other.linePattern && valuePattern == other.valuePattern;
-    }
-    bool operator!=( const RuleProblems& other ) const
-    {
-        return !( *this == other );
-    }
-};
-
 /**
- * The rules of the editor, in their order, each with its validation
- * problems.
+ * The rules of the editor, in their order, each with the problems the
+ * RuleCheck found in it, for display.
  *
  * Every rule is one row holding the whole FooterEntry, mappings included,
  * so a rule's data and marks stay together however the rows are inserted,

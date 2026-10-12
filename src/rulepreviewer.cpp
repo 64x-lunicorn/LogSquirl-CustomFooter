@@ -229,11 +229,12 @@ void RulePreviewer::previewChangedFile()
             return;
         }
     }
+    // Reading the file now: watch it again first, as start() does, so that a
+    // later change, even one made during the check below, is noticed.
+    fileWatcher_->watch();
     // Lines appended beyond the limits, or a change that left the file as
-    // it was, cannot alter the preview; the file is watched again as after
-    // a read, or a later change that can would never be previewed.
+    // it was, cannot alter the preview.
     if ( lastPreview_ && FooterScanner::fileUnchangedFor( fileWatcher_->file(), *lastPreview_ ) ) {
-        fileWatcher_->watch();
         return;
     }
     start();

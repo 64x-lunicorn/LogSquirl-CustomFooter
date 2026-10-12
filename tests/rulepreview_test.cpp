@@ -437,8 +437,8 @@ SCENARIO( "RulePreviewer follows the file after skipping a change of it", "[prev
         writeBytes( path, "x=1\nx=2\nx=3\nx=4\nx=5\n" );
 
         RulePreviewer previewer;
-        // A pause short enough for a test, long enough to see it pending.
-        previewer.setDelays( 0, 50 );
+        // A pause long enough to see it pending even on a slow machine.
+        previewer.setDelays( 0, 300 );
         previewer.setMaxLines( 2 );
         previewer.setActiveFile( path );
         std::vector<Preview> previews;
@@ -450,6 +450,7 @@ SCENARIO( "RulePreviewer follows the file after skipping a change of it", "[prev
         REQUIRE( processUntil( [ &previewer ] { return !previewer.isBusy(); } ) );
         REQUIRE( previews.size() == 1 );
         REQUIRE( previews.back().lineLimitReached );
+        REQUIRE( previews.back().value );
         REQUIRE( previews.back().value->value == "1" );
 
         WHEN( "lines are appended beyond the limit, and the change is skipped" )

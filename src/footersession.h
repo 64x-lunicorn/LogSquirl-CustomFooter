@@ -80,7 +80,9 @@ public:
      * The editor starts with the rules and the line limit of the config dir
      * and the active file. OK and Apply save its rules and show them in the
      * footer; a failed save is logged as a warning, and the rules are loaded
-     * again all the same. A closed editor is deleted later.
+     * again all the same. A closed editor is deleted later. Its Test…
+     * opens the host's Regex Lab, where the host offers it; a failure to
+     * open it is logged.
      *
      * The returned editor is valid until it is deleted after closing, or
      * the session is destroyed.

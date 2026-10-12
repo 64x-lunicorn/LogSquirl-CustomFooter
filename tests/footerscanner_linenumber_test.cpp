@@ -61,12 +61,51 @@ SCENARIO( "FooterScanner tells the Log Line of each value", "[footerscanner][lin
     GIVEN( "a key matched on several lines" )
     {
         writeBytes( path, "noise\nVIN: FIRST\nVIN: SECOND\n" );
-        const auto values = FooterScanner( vinAndIdRules() ).scanFrom( path, {} ).values;
 
-        THEN( "the value and its line are those of the first match, counting from 1" )
+        WHEN( "it is scanned" )
         {
-            REQUIRE( values[ "VIN" ].value == "FIRST" );
-            REQUIRE( values[ "VIN" ].lineNumber == 2 );
+            const auto values = FooterScanner( vinAndIdRules() ).scanFrom( path, {} ).values;
+
+            THEN( "the value and its line are those of the first match, counting from 1" )
+            {
+                REQUIRE( values[ "VIN" ].value == "FIRST" );
+                REQUIRE( values[ "VIN" ].lineNumber == 2 );
+            }
+        }
+    }
+
+    GIVEN( "a line with a lone carriage return in it" )
+    {
+        writeBytes( path, "noise\rVIN: CR\nid=1\n" );
+
+        WHEN( "it is scanned" )
+        {
+            const auto values = FooterScanner( vinAndIdRules() ).scanFrom( path, {} ).values;
+
+            THEN( "the carriage return does not end the line, as in the host" )
+            {
+                REQUIRE( values[ "VIN" ].value == "CR" );
+                REQUIRE( values[ "VIN" ].lineNumber == 1 );
+                REQUIRE( values[ "ID" ].lineNumber == 2 );
+            }
+        }
+    }
+
+    GIVEN( "a file starting with a UTF-8 byte order mark" )
+    {
+        writeBytes( path, "\xEF\xBB\xBF"
+                          "VIN: BOM\nid=2\n" );
+
+        WHEN( "it is scanned" )
+        {
+            const auto values = FooterScanner( vinAndIdRules() ).scanFrom( path, {} ).values;
+
+            THEN( "the mark is part of the first line, and the lines count as without it" )
+            {
+                REQUIRE( values[ "VIN" ].value == "BOM" );
+                REQUIRE( values[ "VIN" ].lineNumber == 1 );
+                REQUIRE( values[ "ID" ].lineNumber == 2 );
+            }
         }
     }
 
@@ -77,12 +116,16 @@ SCENARIO( "FooterScanner tells the Log Line of each value", "[footerscanner][lin
         entries.append( { "Mode", "legacy-mode (\\S+)", "", true, {} } );
         const FooterScanner scanner( entries );
         writeBytes( path, "noise\nlegacy-mode 4\nmode=0x04\n" );
-        const auto shown = scanner.footerValues( scanner.scanFrom( path, {} ).values );
 
-        THEN( "the shown value has the line of the rule that supplied it" )
+        WHEN( "it is scanned" )
         {
-            REQUIRE( shown.size() == 1 );
-            REQUIRE( shown[ 0 ] == FooterValue{ "Mode", "4", "4", 1, 2 } );
+            const auto shown = scanner.footerValues( scanner.scanFrom( path, {} ).values );
+
+            THEN( "the shown value has the line of the rule that supplied it" )
+            {
+                REQUIRE( shown.size() == 1 );
+                REQUIRE( shown[ 0 ] == FooterValue{ "Mode", "4", "4", 1, 2 } );
+            }
         }
     }
 
@@ -93,12 +136,16 @@ SCENARIO( "FooterScanner tells the Log Line of each value", "[footerscanner][lin
         entries.append( { "Build", "build=(\\S+)", "", true, {} } );
         const FooterScanner scanner( entries );
         writeBytes( path, "noise\nnoise\nbuild=7 rev=abc\nbuild=8\n" );
-        const auto shown = scanner.footerValues( scanner.scanFrom( path, {} ).values );
 
-        THEN( "the first rule wins on that line, and the line is that one" )
+        WHEN( "it is scanned" )
         {
-            REQUIRE( shown.size() == 1 );
-            REQUIRE( shown[ 0 ] == FooterValue{ "Build", "abc", "abc", 0, 3 } );
+            const auto shown = scanner.footerValues( scanner.scanFrom( path, {} ).values );
+
+            THEN( "the first rule wins on that line, and the line is that one" )
+            {
+                REQUIRE( shown.size() == 1 );
+                REQUIRE( shown[ 0 ] == FooterValue{ "Build", "abc", "abc", 0, 3 } );
+            }
         }
     }
 }
@@ -144,12 +191,12 @@ SCENARIO( "FooterScanner counts the Log Lines of its values across a continued s
         {
             writeBytes( path, "a\nb\n", true );
             const auto second = scanner.scanFrom( path, first.progress );
-            REQUIRE( second.resumed );
             writeBytes( path, "c\nid=9\n", true );
             const auto third = scanner.scanFrom( path, second.progress );
 
             THEN( "the line count is carried across every continued scan" )
             {
+                REQUIRE( second.resumed );
                 REQUIRE( third.resumed );
                 REQUIRE( third.values[ "ID" ].lineNumber == 6 );
                 REQUIRE( third.values[ "VIN" ].lineNumber == 2 );

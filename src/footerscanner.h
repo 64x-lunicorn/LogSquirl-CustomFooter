@@ -111,7 +111,8 @@ public:
         bool enabled = true; ///< Whether the rule is enabled; a disabled one supplies nothing.
 
         /// The rule's first match, if any: the value the footer would show
-        /// from it, and the line it is in.
+        /// from it, and the line it is in. The value's lineNumber is
+        /// lineNumber, copied once the preview is made.
         std::optional<FooterValue> value;
         qint64 lineNumber = 0; ///< Of the first match, counting from 1.
         QString line;          ///< The first matching line, as matched: at most kMaxLineBytes.
@@ -135,7 +136,8 @@ public:
         /// Other enabled rules have the same key.
         bool sharedKey = false;
         /// The value the footer shows for the rule's key in this file, from
-        /// whichever of its rules supplies it, and the line it is in.
+        /// whichever of its rules supplies it, and the line it is in. The
+        /// value's lineNumber is keyLineNumber, as in the footer.
         std::optional<FooterValue> keyValue;
         qint64 keyLineNumber = 0;
 

@@ -509,8 +509,9 @@ hidden global test state.
 5. Each found value is a `FooterValue`: key, shown value, raw value, the
    index of the rule that supplied it, and `lineNumber`, the Log Line it
    was found in, counting from 1 as LogSquirl does (a line ends at `\n`,
-   so `\r\n` ends one line; a last line without a line break counts too;
-   0 where unknown). As a key keeps the first value found, its line is the
+   so `\r\n` ends one line and a lone `\r` does not end one, as in the
+   host; a UTF-8 byte order mark belongs to the first line; a last line
+   without a line break counts too; 0 where unknown). As a key keeps the first value found, its line is the
    line of the shown value, also for rules sharing a key.
    `FooterScanner::footerValues()` hands them to the widget in rule order,
    for display, tooltips and going to the line. The preview's values carry

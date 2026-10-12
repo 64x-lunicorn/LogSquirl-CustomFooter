@@ -281,10 +281,9 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                                    if ( values.contains( rule.key ) ) {
                                        continue;
                                    }
+                                   // The line is counted on from the progress: a
+                                   // continued scan numbers the lines of the whole file.
                                    if ( auto found = valueOf( rule, line ) ) {
-                                       // Counted on from the progress: a
-                                       // continued scan numbers the lines
-                                       // of the whole file.
                                        found->lineNumber = lineNumber;
                                        values.insert( rule.key, std::move( *found ) );
                                    }
@@ -479,7 +478,8 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     if ( !completed ) {
         return cancel();
     }
-    // The values carry their lines, as the footer's do.
+    // The values carry their lines, as the footer's do: derived here, and
+    // only here, from lineNumber and keyLineNumber, the one record of them.
     if ( preview.value ) {
         preview.value->lineNumber = preview.lineNumber;
     }

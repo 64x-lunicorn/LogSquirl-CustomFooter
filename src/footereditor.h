@@ -93,6 +93,8 @@ class SelectedLinePicker;
  * The line stays with its rule when rules move, and goes with it; it is
  * shown only while that rule is selected. One line at a time: a rule made
  * from another line takes its place. The line is editor state, never saved.
+ * While the Regex Lab is open, marks are not taken, as its answer may be
+ * for this rule.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT

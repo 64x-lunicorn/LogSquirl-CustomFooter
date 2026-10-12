@@ -590,6 +590,14 @@ void FooterEditor::lineMarked( qsizetype start, qsizetype length )
     if ( !isLineRule( row ) ) {
         return;
     }
+    if ( regexLabOpen_ ) {
+        // Its answer may write a pattern into this very rule: the rule is
+        // left to it, as Test… is.
+        linePicker_->showMarkIgnored(
+            tr( "The Regex Lab is open: apply or cancel it there first, then click or mark the "
+                "value again." ) );
+        return;
+    }
     const auto made = ruleFromLine( linePicker_->line(), start, length );
     linePicker_->showRule( made );
     if ( !made.isRule() ) {

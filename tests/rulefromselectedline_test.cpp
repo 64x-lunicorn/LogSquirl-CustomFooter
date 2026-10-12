@@ -52,6 +52,7 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 
 using namespace custom_footer;
 
@@ -120,10 +121,13 @@ struct FromLineUi {
         line->setSelection( static_cast<int>( start ), static_cast<int>( value.size() ) );
     }
 
-    /// Click into the shown line where @p value starts.
-    void clickAt( const QString& value ) const
+    /// Click into the shown line where @p value starts: its first
+    /// occurrence after @p after.
+    void clickAt( const QString& value, const QString& after = QString() ) const
     {
-        const auto start = line->text().indexOf( value );
+        const auto from = line->text().indexOf( after );
+        REQUIRE( from >= 0 );
+        const auto start = line->text().indexOf( value, from + after.size() );
         REQUIRE( start >= 0 );
         line->setCursorPosition( static_cast<int>( start ) );
     }
@@ -430,6 +434,49 @@ SCENARIO( "The rule editor says when an earlier Log Line supplies the rule's val
             {
                 REQUIRE( ui.hint->text().contains( "Log Line 2 matches first" ) );
                 REQUIRE( ui.hint->text().contains( "“EARLY1”" ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "The rule editor takes no mark in the line while the Regex Lab is open",
+          "[rulefromline][footereditor][regexlab]" )
+{
+    FooterEditor editor( {} );
+    RegexLabDone answer;
+    editor.setRegexLab( [ &answer ]( const RegexLabPattern&, const QObject*, RegexLabDone done ) {
+        answer = std::move( done );
+        return true;
+    } );
+    FromLineUi ui( editor );
+
+    GIVEN( "a rule made from the VIN line, open in the Regex Lab" )
+    {
+        editor.addRuleFromLine( kVinLine );
+        ui.mark( "WDB1234567" );
+        child<QToolButton>( editor, "testLinePatternButton" )->click();
+        REQUIRE( answer );
+
+        WHEN( "another value is marked" )
+        {
+            ui.mark( "5", "speed=" );
+
+            THEN( "the rule is kept for the Lab's answer, and the hint says why" )
+            {
+                REQUIRE( ui.textBefore->text() == "VIN:" );
+                REQUIRE( editor.entries().at( 0 ).linePattern == "VIN:\\s*(\\S+)" );
+                REQUIRE( ui.hint->text().contains( "Regex Lab is open" ) );
+            }
+
+            AND_WHEN( "the Lab is cancelled, and the value is clicked" )
+            {
+                std::exchange( answer, nullptr )( std::nullopt );
+                ui.clickAt( "5", "speed=" );
+
+                THEN( "the click makes the rule" )
+                {
+                    REQUIRE( ui.textBefore->text() == "speed=" );
+                }
             }
         }
     }

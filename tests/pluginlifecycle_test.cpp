@@ -54,6 +54,14 @@ using namespace custom_footer;
 
 namespace {
 
+/// A menu action the plugin registered.
+struct MenuItem {
+    QString path;
+    QString label;
+    void ( *callback )( void* ) = nullptr;
+    void* userData = nullptr;
+};
+
 /// What the fake host was given by the plugin.
 struct FakeHost {
     QByteArray configDir;
@@ -62,8 +70,15 @@ struct FakeHost {
     QWidget* unregisteredWidget = nullptr;
     void ( *activeFileCallback )( void*, const char* ) = nullptr;
     void* activeFileUserData = nullptr;
+    /// The action that opens the rule editor: "Custom Footer…", or "Edit
+    /// Rules…" in the Custom Footer submenu.
     void ( *menuAction )( void* ) = nullptr;
     void* menuActionUserData = nullptr;
+    /// Every menu action registered, in order.
+    QList<MenuItem> menuItems;
+    /// The selected Log Lines get_selected_log_lines() hands over, joined
+    /// by '\n'; none selected while empty.
+    QByteArray selectedLines;
     QStringList warnings; ///< The messages logged as warnings.
     QStringList infos;    ///< The messages logged as information.
     /// Every call of the plugin, in order: the function's name, and for a
@@ -116,12 +131,17 @@ LogSquirlHostApi fakeApi()
         host().calls.append( "get_config_dir" );
         return host().configDir.constData();
     };
-    api.register_menu_action
-        = []( void*, const char*, const char*, void ( *callback )( void* ), void* userData ) {
-              host().calls.append( "register_menu_action" );
-              host().menuAction = callback;
-              host().menuActionUserData = userData;
-          };
+    api.register_menu_action = []( void*, const char* path, const char* label,
+                                   void ( *callback )( void* ), void* userData ) {
+        host().calls.append( "register_menu_action" );
+        host().menuItems.append(
+            { QString::fromUtf8( path ), QString::fromUtf8( label ), callback, userData } );
+        const auto name = QString::fromUtf8( label );
+        if ( name == "Custom Footer…" || name == "Edit Rules…" ) {
+            host().menuAction = callback;
+            host().menuActionUserData = userData;
+        }
+    };
     api.register_footer_widget = []( void*, void* widget ) {
         host().calls.append( "register_footer_widget" );
         host().footerWidget = static_cast<QWidget*>( widget );
@@ -159,10 +179,17 @@ LogSquirlHostApi fakeApi()
         host().wentTo.append( lineNumber );
         return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
     };
-    api.get_selected_log_lines = []( void*, const char** text, size_t*, size_t* ) {
+    api.get_selected_log_lines = []( void*, const char** text, size_t* length, size_t* ) {
         host().calls.append( "get_selected_log_lines" );
-        *text = nullptr;
-        return static_cast<int>( LOGSQUIRL_LOG_LINES_NO_SELECTION );
+        if ( host().selectedLines.isEmpty() ) {
+            *text = nullptr;
+            return static_cast<int>( LOGSQUIRL_LOG_LINES_NO_SELECTION );
+        }
+        *text = host().selectedLines.constData();
+        if ( length ) {
+            *length = static_cast<size_t>( host().selectedLines.size() );
+        }
+        return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
     };
     return api;
 }
@@ -727,6 +754,32 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
             REQUIRE_FALSE( host().calls.contains( "go_to_log_line" ) );
             REQUIRE_FALSE( host().calls.contains( "get_selected_log_lines" ) );
         }
+
+        THEN( "it registers Edit Rules… and Rule from Selected Line… in a Custom Footer "
+              "submenu instead of Custom Footer…, once the session knows the host offers the "
+              "selected Log Lines" )
+        {
+            REQUIRE( host().menuItems.size() == 2 );
+            REQUIRE( host().menuItems.at( 0 ).path == "Custom Footer" );
+            REQUIRE( host().menuItems.at( 0 ).label == "Edit Rules…" );
+            REQUIRE( host().menuItems.at( 1 ).path == "Custom Footer" );
+            REQUIRE( host().menuItems.at( 1 ).label == "Rule from Selected Line…" );
+            REQUIRE( host().calls
+                     == QStringList{ "log info", "get_config_dir", "register_footer_widget",
+                                     "register_menu_action", "register_menu_action",
+                                     "register_active_file_callback", "get_active_file_path",
+                                     "log info" } );
+        }
+
+        AND_WHEN( "Edit Rules… is clicked" )
+        {
+            host().menuItems.at( 0 ).callback( host().menuItems.at( 0 ).userData );
+
+            THEN( "the rule editor opens" )
+            {
+                REQUIRE( openEditorWindow() );
+            }
+        }
     }
 
     WHEN( "a host passes init_ex() a table that ends before the selected Log Lines" )
@@ -739,6 +792,12 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
         {
             REQUIRE( host().infos.contains(
                 "Custom Footer plugin ready. Host functions: Regex Lab, Go to line." ) );
+        }
+
+        THEN( "it does not offer Rule from Selected Line…" )
+        {
+            REQUIRE( host().menuItems.size() == 1 );
+            REQUIRE( host().menuItems.at( 0 ).label == "Custom Footer…" );
         }
     }
 
@@ -754,6 +813,13 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
             REQUIRE( waitForText( "OLDHOST" ) );
         }
 
+        THEN( "it registers only the Custom Footer… action, as 0.4.0 did" )
+        {
+            REQUIRE( host().menuItems.size() == 1 );
+            REQUIRE( host().menuItems.at( 0 ).path == "Plugins" );
+            REQUIRE( host().menuItems.at( 0 ).label == "Custom Footer…" );
+        }
+
         logsquirl_plugin_shutdown();
     }
 
@@ -763,10 +829,12 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
         REQUIRE( logsquirl_plugin_init_ex( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE )
                  == 0 );
 
-        THEN( "the session reports none, and nothing reads past the table" )
+        THEN( "the session reports none, nothing reads past the table, and only the Custom "
+              "Footer… action is registered" )
         {
             REQUIRE( host().infos.contains( none ) );
             REQUIRE( waitForText( "OLDHOST" ) );
+            REQUIRE( host().menuItems.size() == 1 );
         }
 
         logsquirl_plugin_shutdown();
@@ -963,6 +1031,87 @@ SCENARIO( "The plugin takes the user to the Log Line a footer value came from", 
         }
 
         logsquirl_plugin_shutdown();
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin makes a rule from the Log Line selected in LogSquirl 26.11",
+          "[plugin][rulefromline]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+    REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+    REQUIRE( host().menuItems.size() == 2 );
+    const auto ruleFromLine = host().menuItems.at( 1 );
+
+    GIVEN( "two Log Lines selected in the host" )
+    {
+        host().selectedLines = "VIN: WDB1234567\nsecond line";
+
+        WHEN( "Rule from Selected Line… is clicked" )
+        {
+            host().calls.clear();
+            ruleFromLine.callback( ruleFromLine.userData );
+            QPointer<FooterEditor> editor = openEditorWindow();
+
+            THEN( "the host's selection is read then, and the editor opens with the first line "
+                  "for the new rule" )
+            {
+                REQUIRE( host().calls.contains( "get_selected_log_lines" ) );
+                REQUIRE( editor );
+                auto* line = editor->findChild<QLineEdit*>( "selectedLineEdit" );
+                REQUIRE( line );
+                REQUIRE( line->text() == "VIN: WDB1234567" );
+                REQUIRE( line->isVisibleTo( editor.data() ) );
+            }
+
+            AND_WHEN( "the value is marked and the editor is accepted" )
+            {
+                auto* line = editor->findChild<QLineEdit*>( "selectedLineEdit" );
+                REQUIRE( line );
+                line->setSelection( 5, 10 );
+                editor->accept();
+
+                THEN( "the new rule is saved to the host's config dir" )
+                {
+                    const auto saved = FooterConfig::loadEntries( configDir.path() );
+                    REQUIRE( saved.size() == 1 );
+                    REQUIRE( saved.at( 0 ).key == "VIN" );
+                    REQUIRE( saved.at( 0 ).linePattern == "VIN:\\s*(\\S+)" );
+                }
+            }
+        }
+    }
+
+    GIVEN( "no Log Line selected in the host" )
+    {
+        WHEN( "Rule from Selected Line… is clicked" )
+        {
+            ruleFromLine.callback( ruleFromLine.userData );
+
+            THEN( "no editor opens, and a message, opened without blocking, says what to do" )
+            {
+                REQUIRE_FALSE( openEditorWindow() );
+                QPointer<QWidget> message;
+                for ( auto* widget : QApplication::topLevelWidgets() ) {
+                    if ( widget->objectName() == "noSelectedLineBox" && widget->isVisible() ) {
+                        message = widget;
+                    }
+                }
+                REQUIRE( message );
+
+                AND_THEN( "the plugin's shutdown takes it away" )
+                {
+                    logsquirl_plugin_shutdown();
+                    REQUIRE_FALSE( message );
+                }
+            }
+        }
     }
 
     logsquirl_plugin_shutdown();

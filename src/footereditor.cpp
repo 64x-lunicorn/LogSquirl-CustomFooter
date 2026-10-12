@@ -20,11 +20,14 @@
 #include "footereditor.h"
 #include "footerconfig.h"
 #include "ruledetailpanel.h"
+#include "rulefromline.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
 #include "rulepreviewer.h"
 #include "rulepreviewview.h"
 #include "ruletemplatedialog.h"
+#include "selectedlinepicker.h"
+#include "simplerule.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -153,6 +156,15 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
         tr( "Add a ready-made rule, e.g. for a version or an IP address" ) );
     toolLayout->addWidget( templateButton_ );
 
+    ruleFromLineButton_ = new QToolButton( listSide );
+    ruleFromLineButton_->setObjectName( "ruleFromLineButton" );
+    ruleFromLineButton_->setText( tr( "From selected line…" ) );
+    ruleFromLineButton_->setToolTip(
+        tr( "Add a rule made from the Log Line selected in LogSquirl: click or mark its value" ) );
+    // Only where the host can hand over the selected line.
+    ruleFromLineButton_->hide();
+    toolLayout->addWidget( ruleFromLineButton_ );
+
     removeButton_ = new QToolButton( listSide );
     removeButton_->setObjectName( "removeRuleButton" );
     removeButton_->setText( "−" ); // minus sign
@@ -191,8 +203,15 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
     listLayout->addLayout( toolLayout );
 
-    // ── Right: the selected rule ─────────────────────────────────────────
-    panel_ = new RuleDetailPanel( splitter );
+    // ── Right: the selected rule, below the line it was made from ────────
+    auto* ruleSide = new QWidget( splitter );
+    auto* ruleLayout = new QVBoxLayout( ruleSide );
+    ruleLayout->setContentsMargins( 0, 0, 0, 0 );
+    linePicker_ = new SelectedLinePicker( ruleSide );
+    linePicker_->hide();
+    ruleLayout->addWidget( linePicker_ );
+    panel_ = new RuleDetailPanel( ruleSide );
+    ruleLayout->addWidget( panel_, 1 );
 
     splitter->setStretchFactor( 0, 2 );
     splitter->setStretchFactor( 1, 3 );
@@ -211,6 +230,11 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     // ── Connections ──────────────────────────────────────────────────────
     connect( addButton_, &QToolButton::clicked, this, &FooterEditor::addEntry );
     connect( templateButton_, &QToolButton::clicked, this, &FooterEditor::addFromTemplate );
+    connect( ruleFromLineButton_, &QToolButton::clicked, this, [ this ] {
+        panel_->commitPendingEdit();
+        Q_EMIT ruleFromLineRequested();
+    } );
+    connect( linePicker_, &SelectedLinePicker::marked, this, &FooterEditor::lineMarked );
     connect( removeButton_, &QToolButton::clicked, this, &FooterEditor::removeEntry );
     connect( upButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryUp );
     connect( downButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryDown );
@@ -246,6 +270,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     previewer_ = new RulePreviewer( this );
     connect( previewer_, &RulePreviewer::updating, panel_->previewView(),
              &RulePreviewView::showUpdating );
+    connect( previewer_, &RulePreviewer::previewed, this, &FooterEditor::showLineRulePreview );
     connect( previewer_, &RulePreviewer::previewed, panel_->previewView(),
              &RulePreviewView::showPreview );
     // Edits schedule it where they are stored, once per edit; not on every
@@ -288,6 +313,7 @@ FooterEditor::~FooterEditor()
     disconnect( model_, nullptr, this, nullptr );
     disconnect( list_, nullptr, this, nullptr );
     disconnect( list_->selectionModel(), nullptr, this, nullptr );
+    disconnect( linePicker_, nullptr, this, nullptr );
     if ( templateDialog_ ) {
         disconnect( templateDialog_, nullptr, this, nullptr );
     }
@@ -308,6 +334,24 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
     if ( currentRow() < 0 && model_->rowCount() > 0 ) {
         selectRow( 0 );
     }
+}
+
+void FooterEditor::offerRuleFromLine( bool offered )
+{
+    ruleFromLineButton_->setVisible( offered );
+}
+
+void FooterEditor::addRuleFromLine( const QString& line, int selectedLines )
+{
+    panel_->commitPendingEdit();
+    linePicker_->showLine( line, selectedLines );
+    lineKey_.clear();
+    const int row = model_->rowCount();
+    model_->appendEntries( { FooterEntry() } );
+    // Known before the rule is selected, which shows the line.
+    lineRule_ = model_->index( row, RuleListModel::KeyColumn );
+    selectRow( row );
+    linePicker_->focusLine();
 }
 
 void FooterEditor::setActiveFile( const QString& filePath )
@@ -487,6 +531,7 @@ void FooterEditor::showCurrentRule()
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
+    linePicker_->setVisible( isLineRule( row ) );
 
     // Another rule: no need to wait for typing to pause. Coalesced with the
     // change that follows, e.g. the removal of the rule selected before.
@@ -499,7 +544,15 @@ void FooterEditor::storePanelInCurrentRule()
     if ( row < 0 ) {
         return;
     }
-    model_->setEntry( row, panel_->entry(), panel_->unfinishedSimpleRule() );
+    const auto before = model_->entry( row );
+    const auto edited = panel_->entry();
+    model_->setEntry( row, edited, panel_->unfinishedSimpleRule() );
+    if ( isLineRule( row )
+         && ( edited.linePattern != before.linePattern
+              || edited.valuePattern != before.valuePattern ) ) {
+        // The hint about the last mark no longer describes the rule.
+        linePicker_->showRuleEdited();
+    }
     showProblems();
     schedulePreview();
 }
@@ -537,6 +590,39 @@ void FooterEditor::testPattern( PatternField field )
     if ( !opened ) {
         setRegexLabOpen( false );
     }
+}
+
+void FooterEditor::lineMarked( qsizetype start, qsizetype length )
+{
+    const int row = currentRow();
+    if ( !isLineRule( row ) ) {
+        return;
+    }
+    if ( regexLabOpen_ ) {
+        // Its answer may write a pattern into this very rule: the rule is
+        // left to it, as Test… is.
+        linePicker_->showMarkIgnored(
+            tr( "The Regex Lab is open: apply or cancel it there first, then click or mark the "
+                "value again." ) );
+        return;
+    }
+    const auto made = ruleFromLine( linePicker_->line(), start, length );
+    linePicker_->showRule( made );
+    if ( !made.isRule() ) {
+        // The rule stays as the last mark made it.
+        return;
+    }
+    panel_->commitPendingEdit();
+    auto entry = model_->entry( row );
+    if ( entry.key.isEmpty() || entry.key == lineKey_ ) {
+        entry.key = made.key;
+    }
+    lineKey_ = made.key;
+    applySimpleRule( made.rule, entry );
+    model_->setEntry( row, entry );
+    // Shown again, in simple mode, and previewed soon.
+    showCurrentRule();
+    showProblems();
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────
@@ -615,6 +701,39 @@ void FooterEditor::appendAndSelect( const FooterEntry& entry )
     panel_->focusKey();
 }
 
+bool FooterEditor::isLineRule( int row ) const
+{
+    return row >= 0 && lineRule_.isValid() && lineRule_.row() == row;
+}
+
+void FooterEditor::showLineRulePreview( const FooterScanner::Preview& preview )
+{
+    // The preview is always of the selected rule.
+    if ( !isLineRule( currentRow() ) ) {
+        return;
+    }
+    if ( preview.status != FooterScanner::Preview::Status::Scanned || !preview.value ) {
+        linePicker_->clearEarlierMatch();
+        return;
+    }
+    // The preview's line is as matched: without a line break, and only the
+    // start of a long line.
+    auto matched = QStringView( preview.line );
+    auto shown = QStringView( linePicker_->line() );
+    if ( matched.endsWith( QLatin1Char( '\r' ) ) ) {
+        matched.chop( 1 );
+    }
+    if ( shown.endsWith( QLatin1Char( '\r' ) ) ) {
+        shown.chop( 1 );
+    }
+    // Both may be only the start of a long line.
+    if ( !matched.isEmpty() && ( shown.startsWith( matched ) || matched.startsWith( shown ) ) ) {
+        linePicker_->clearEarlierMatch();
+        return;
+    }
+    linePicker_->showEarlierMatch( preview.lineNumber, preview.value->value );
+}
+
 void FooterEditor::moveEntry( int from, int to )
 {
     // The selection moves with the rule, and the panel keeps showing it.
@@ -651,6 +770,10 @@ void FooterEditor::schedulePreview( RulePreviewer::Start start )
     if ( !problem.isEmpty() ) {
         previewer_->clear();
         panel_->previewView()->showRuleProblem( problem );
+        if ( isLineRule( row ) ) {
+            // Nothing matches first now.
+            linePicker_->clearEarlierMatch();
+        }
         return;
     }
     previewer_->schedule( model_->entries(), row, start );

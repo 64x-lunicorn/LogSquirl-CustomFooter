@@ -41,6 +41,7 @@ class RuleDetailPanel;
 class RuleListModel;
 class RuleListView;
 class RuleTemplateDialog;
+class SelectedLinePicker;
 
 /**
  * Modal dialog for editing footer extraction rules.
@@ -48,10 +49,13 @@ class RuleTemplateDialog;
  * Layout:
  *   - Left: the rule list (RuleListModel in a RuleListView), one row per rule
  *     with its enabled check box, key and line pattern, and below it the
- *     [+] [From template…] [-] [↑] [↓] [Import] [Export] buttons. Rules are reordered with
- *     ↑/↓, Ctrl+Shift+Up/Down in the list, or by dragging them
+ *     [+] [From template…] [From selected line…] [-] [↑] [↓] [Import] [Export]
+ *     buttons. Rules are reordered with ↑/↓, Ctrl+Shift+Up/Down in the list,
+ *     or by dragging them. [From selected line…] is shown only where
+ *     offerRuleFromLine() offers it
  *   - Right: the RuleDetailPanel for the selected rule, with all its fields
- *     and value mappings
+ *     and value mappings; above it, for a rule made from a Log Line, that
+ *     line, to click or mark the value in
  *   - Below: the problems of all rules, and OK / Cancel / Apply
  *
  * The rules live in the model, one row each with its mappings and problems,
@@ -81,6 +85,16 @@ class RuleTemplateDialog;
  * gets "Match case" on, or off for a pattern that starts with (?i) (after
  * any start-of-pattern items such as (*CRLF)), which the Lab gets without
  * it; an applied pattern gets (?i) there when "Match case" came back off.
+ *
+ * A rule made from a Log Line (addRuleFromLine()) starts empty, in simple
+ * mode, with the line shown above the panel. Each click or mark in the line
+ * makes the rule again (ruleFromLine()): the text before the value, where
+ * the value ends, and the suggested key, unless the user changed the key.
+ * The line stays with its rule when rules move, and goes with it; it is
+ * shown only while that rule is selected. One line at a time: a rule made
+ * from another line takes its place. The line is editor state, never saved.
+ * While the Regex Lab is open, marks are not taken, as its answer may be
+ * for this rule.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -111,9 +125,22 @@ public:
     /// Append entries after the existing ones, as an import does.
     void appendEntries( const QList<FooterEntry>& entries );
 
+    /// Show the [From selected line…] button, which emits
+    /// ruleFromLineRequested(), or hide it. Hidden by default.
+    void offerRuleFromLine( bool offered );
+
+    /// Append a new, empty rule in simple mode, select it, and show @p line
+    /// above the panel to click or mark the value in. @p selectedLines is
+    /// how many Log Lines were selected, of which @p line is the first.
+    void addRuleFromLine( const QString& line, int selectedLines = 1 );
+
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
     void applied();
+
+    /// Emitted when the user clicks [From selected line…]: the owner reads
+    /// the selected Log Line and calls addRuleFromLine(), or says why not.
+    void ruleFromLineRequested();
 
 private Q_SLOTS:
     void addEntry();
@@ -133,6 +160,8 @@ private Q_SLOTS:
     void ruleChanged( int row );
     /// Open the selected rule's pattern in @p field in the Regex Lab.
     void testPattern( PatternField field );
+    /// Make the rule from its line again, for the value marked in it.
+    void lineMarked( qsizetype start, qsizetype length );
 
 private:
     int currentRow() const;
@@ -140,6 +169,11 @@ private:
     /// Append @p entry as a new rule, select it and focus its key.
     void appendAndSelect( const FooterEntry& entry );
     void moveEntry( int from, int to );
+    /// Whether @p row is the rule made from the line the picker shows.
+    bool isLineRule( int row ) const;
+    /// Tell at the picker when the preview of the rule made from its line
+    /// finds its first match in another Log Line.
+    void showLineRulePreview( const FooterScanner::Preview& preview );
 
     /// Show a warning without blocking: opened with open().
     void showError( const QString& title, const QString& text, const QString& objectName );
@@ -177,6 +211,14 @@ private:
     QToolButton* templateButton_ = nullptr;
     /// Made on first use and kept, so each opening starts from reset().
     RuleTemplateDialog* templateDialog_ = nullptr;
+    QToolButton* ruleFromLineButton_ = nullptr;
+    /// The Log Line of the rule made from one, shown above the panel.
+    SelectedLinePicker* linePicker_ = nullptr;
+    /// That rule's row; invalid once it is removed or no rule has a line.
+    QPersistentModelIndex lineRule_;
+    /// The key last suggested from the line: replaced by the next one
+    /// unless the user changed it.
+    QString lineKey_;
     QToolButton* removeButton_ = nullptr;
     QToolButton* upButton_ = nullptr;
     QToolButton* downButton_ = nullptr;

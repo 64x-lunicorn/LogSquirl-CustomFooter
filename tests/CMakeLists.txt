@@ -40,6 +40,8 @@ add_executable(logsquirl_custom_footer_tests
     rulepreview_test.cpp
     configroundtrip_test.cpp
     simplerule_test.cpp
+    rulefromline_test.cpp
+    rulefromselectedline_test.cpp
     simplemode_test.cpp
     ruletemplate_test.cpp
     latestjob_test.cpp
@@ -75,6 +77,8 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/rulelistview.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruledetailpanel.cpp"
         "${CMAKE_SOURCE_DIR}/src/simplerule.cpp"
+        "${CMAKE_SOURCE_DIR}/src/rulefromline.cpp"
+        "${CMAKE_SOURCE_DIR}/src/selectedlinepicker.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruletemplate.cpp"
         "${CMAKE_SOURCE_DIR}/src/ruletemplatedialog.cpp"
         "${CMAKE_SOURCE_DIR}/src/rulepreviewer.cpp"

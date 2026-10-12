@@ -45,6 +45,8 @@ add_library(logsquirl_custom_footer SHARED
     src/rulelistview.cpp
     src/ruledetailpanel.cpp
     src/simplerule.cpp
+    src/rulefromline.cpp
+    src/selectedlinepicker.cpp
     src/ruletemplate.cpp
     src/ruletemplatedialog.cpp
     src/rulepreviewer.cpp

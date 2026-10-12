@@ -78,11 +78,13 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
 
 ## Configuration
 
-Rules are edited in *Plugins → Custom Footer…*. The dialog lists the rules on
-the left, each with its enabled check box, key and line pattern, with buttons
-to add (also from a template), remove, reorder, import and export them. The panel on the right shows
-the selected rule: its key, line pattern, value pattern and value mappings.
-Changes show up in the list as you type.
+Rules are edited in *Plugins → Custom Footer…* (on LogSquirl 26.11,
+*Plugins → Custom Footer → Edit Rules…*). The dialog lists the rules on the
+left, each with its enabled check box, key and line pattern, with buttons to
+add (also from a template or a selected Log Line), remove, reorder, import
+and export them. The panel on the right shows the selected rule: its key,
+line pattern, value pattern and value mappings. Changes show up in the list
+as you type.
 
 Order matters: among rules sharing a key, the one higher in the list wins on
 the same line. Reorder rules by dragging them in the list, with the ↑/↓
@@ -181,6 +183,48 @@ give the key without `=` (a trailing `=` is dropped); for lists separated
 by `;` or `,`, change `(\S+)` in the pattern to `([^;]+)`. If an enabled
 rule with a line pattern already has the template's key, the dialog says
 so: the new rule becomes an alternative for that key.
+
+### Rule from a selected line
+
+On LogSquirl 26.11 or later, select the Log Line that holds the value and
+choose *Plugins → Custom Footer → Rule from Selected Line…*. (There the
+editor itself is *Plugins → Custom Footer → Edit Rules…*.) The rule editor
+opens, or comes forward with your edits kept, with a new rule in simple
+mode, and shows the line above the rule's fields. Click where the value
+starts, or mark the value with the mouse:
+
+- the text before the value becomes **text before the value**: the word
+  right before it (`VIN:`), with the word before that if it is only a
+  separator (`id =`);
+- **value ends at** follows from the mark: whitespace for one word, the
+  character after the value (e.g. `,` in `speed=5,rpm=300`), or the end of
+  the line for a value with spaces in it;
+- the **key** is suggested from that text (`VIN:` → `VIN`, `[VIN]` →
+  `VIN`, `app.version=` → `app.version`). A key you type yourself is kept
+  when you mark another value.
+
+The preview shows the extracted value at once. A click marks the whole
+word it lands in; spaces around a mark are not part of the value. Of a very
+long line only the first 64 KiB are shown, as the footer reads no further.
+Some marks make no rule, and the editor says why: a value at the very
+start of the line has no text before it, and a value whose text before it
+also appears earlier in the line would never be found, as a rule takes the
+first match (`a: 1 a: 2` marking `2`). Mark another value then, or write an
+advanced rule.
+
+Like every rule, the new one gives its key the value of the **first** Log
+Line in the file it matches, not necessarily the selected one. If an
+earlier Log Line matches first, the editor says which one and what the
+footer will show.
+
+When several lines are selected, the rule is made from the first, and the
+editor says so. The editor's **From selected line…** button does the same
+with the line selected when the editor opened: while the editor is open,
+LogSquirl's window, and so its selection, cannot change. Without a selected
+line or an open Log File, a message says what to do. While the Regex Lab is
+open for the editor, marks in the line are not taken. LogSquirl 26.10 does
+not offer the selected line: there the menu has *Plugins → Custom Footer…*
+as before, and the button is not shown.
 
 ### How rules are applied
 

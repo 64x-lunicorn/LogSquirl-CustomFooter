@@ -36,7 +36,9 @@
  *      we turn the table into HostFunctions (HostApiAdapter, which reads
  *      only the members api_size reports), make the footer widget and a
  *      FooterSession on it, and register the widget, a menu action and an
- *      active-file callback.
+ *      active-file callback. The menu action is "Custom Footer…", or, where
+ *      the host hands over the selected Log Lines (26.11), a submenu
+ *      "Custom Footer" with "Edit Rules…" and "Rule from Selected Line…".
  *   3. When the active file changes, onActiveFileChanged() hands it to the
  *      session, for the footer and the rule editor.
  *   4. Host calls shutdown() — destroying the session stops everything of
@@ -146,13 +148,27 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
     } );
 }
 
-/// Called when the user clicks "Custom Footer…" in the Plugins menu.
+/// Called when the user clicks "Custom Footer…" in the Plugins menu, or
+/// "Custom Footer → Edit Rules…" on a host with the selected Log Lines.
 static void onEditorMenuAction( void* /* userData */ )
 {
     guarded( plugin().host(), "the rule editor", [] {
         auto& state = plugin();
         if ( state.session ) {
             state.session->openEditor( state.footer ? state.footer->window() : nullptr );
+        }
+    } );
+}
+
+/// Called when the user clicks "Custom Footer → Rule from Selected Line…"
+/// in the Plugins menu; registered only where the host offers the
+/// selected Log Lines.
+static void onRuleFromLineMenuAction( void* /* userData */ )
+{
+    guarded( plugin().host(), "making a rule from the selected line", [] {
+        auto& state = plugin();
+        if ( state.session ) {
+            state.session->ruleFromSelectedLine( state.footer ? state.footer->window() : nullptr );
         }
     } );
 }
@@ -207,15 +223,31 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
                                              "rules are neither loaded nor saved" ) );
         }
 
-        // Register menu action to open the rule editor.
-        api->register_menu_action( handle, "Plugins", "Custom Footer…", &onEditorMenuAction,
-                                   nullptr );
+        // Register menu action to open the rule editor, where a host
+        // without the selected Log Lines (26.10) has it, as with 0.4.0. One
+        // test for both menus: the host functions the session is made with,
+        // so it is what has( HostFeature::SelectedLogLines ) reports.
+        const bool ruleFromLine = static_cast<bool>( host.selectedLogLines );
+        if ( !ruleFromLine ) {
+            api->register_menu_action( handle, "Plugins", "Custom Footer…", &onEditorMenuAction,
+                                       nullptr );
+        }
 
         // Create the footer display widget, and the session that fills it;
         // the session loads the rules and logs their problems.
         state.footer = new FooterDisplayWidget();
         api->register_footer_widget( handle, static_cast<void*>( state.footer ) );
         state.session = std::make_unique<FooterSession>( configDir, state.footer, host );
+
+        // Where the host hands over the selected Log Lines (26.11), a rule
+        // can be made from one: both actions go into a submenu
+        // Plugins → Custom Footer.
+        if ( ruleFromLine ) {
+            api->register_menu_action( handle, "Custom Footer", "Edit Rules…", &onEditorMenuAction,
+                                       nullptr );
+            api->register_menu_action( handle, "Custom Footer", "Rule from Selected Line…",
+                                       &onRuleFromLineMenuAction, nullptr );
+        }
 
         // Register callback for active file changes.
         api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );

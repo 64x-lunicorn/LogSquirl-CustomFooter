@@ -201,13 +201,64 @@ SCENARIO( "FooterController scans the active file in the background", "[footerco
 
         THEN( "they are used only after a reload" )
         {
-            controller->setActiveFile( first );
+            // A real scan with the rules loaded before: the file was rewritten.
+            const int scans = controller->scansStarted();
+            writeFile( first, "VIN: REWRITTEN\n" );
+            fakes.changes->fire();
             fakes.clock->advance( kGap );
-            REQUIRE( scansSettle( *controller ) );
-            REQUIRE( shownText( widget ) == "VIN: FIRST" );
+            REQUIRE( controller->scansStarted() == scans + 1 );
+            REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: REWRITTEN"; } ) );
 
             controller->reloadConfig();
-            REQUIRE( processUntil( [ & ] { return shownText( widget ) == "Vehicle: FIRST"; } ) );
+            REQUIRE(
+                processUntil( [ & ] { return shownText( widget ) == "Vehicle: REWRITTEN"; } ) );
+        }
+    }
+}
+
+SCENARIO( "FooterController scans afresh with rules reloaded while it scans", "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                          { "Missing", "never=(\\S+)", "", true, {} } } ) );
+
+    const auto path = logDir.path() + "/reloaded.log";
+    writeFile( path, "VIN: FIRST\nid=1\n" );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    GIVEN( "a scanned file, with a key still missing, being scanned on" )
+    {
+        controller->setActiveFile( path );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST"; } ) );
+        writeFile( path, "more\n", true );
+        fakes.changes->fire();
+        fakes.clock->advance( kGap );
+        // Running until its result is handled here, as events are not processed yet.
+        REQUIRE( controller->scansStarted() == 2 );
+
+        WHEN( "other rules are saved and reloaded" )
+        {
+            REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                                { { "Vehicle", "VIN:\\s+(\\S+)", "", true, {} },
+                                                  { "ID", "id=(\\S+)", "", true, {} } } ) );
+            controller->reloadConfig();
+
+            THEN( "the running scan is dropped, and the file scanned at once from its start" )
+            {
+                REQUIRE( controller->scansStarted() == 3 );
+                REQUIRE( scansSettle( *controller ) );
+                REQUIRE( controller->scansFinished() == 3 );
+                // Both values are in lines the earlier scans had read already.
+                REQUIRE( shownText( widget ) == "Vehicle: FIRST | ID: 1" );
+                REQUIRE( fakes.clock->now() == kGap );
+            }
         }
     }
 }

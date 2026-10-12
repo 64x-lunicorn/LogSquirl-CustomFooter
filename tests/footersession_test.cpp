@@ -223,11 +223,11 @@ SCENARIO( "A footer session shows the values of the active file", "[footersessio
         {
             FooterSession session( {}, &footer, log.host() );
 
-            THEN( "it warns once that rules are neither loaded nor saved" )
+            THEN( "it runs without rules, and leaves the warning to the C entry points" )
             {
-                REQUIRE( log.warnings
-                         == QStringList{ "Custom Footer: the host gave no config directory; rules "
-                                         "are neither loaded nor saved" } );
+                session.setActiveFile( first );
+                REQUIRE( footer.values().isEmpty() );
+                REQUIRE( log.warnings.isEmpty() );
             }
         }
     }
@@ -377,7 +377,6 @@ SCENARIO( "A footer session without a config dir saves nothing", "[footersession
     FooterDisplayWidget footer;
     Log log;
     FooterSession session( {}, &footer, log.host() );
-    log.warnings.clear();
 
     GIVEN( "the open editor with a new rule" )
     {

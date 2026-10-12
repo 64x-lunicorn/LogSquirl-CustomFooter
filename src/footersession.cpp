@@ -148,11 +148,6 @@ FooterSession::FooterSession( const QString& configDir, FooterDisplayWidget* foo
     : configDir_( configDir )
     , host_( std::move( host ) )
 {
-    if ( configDir_.isEmpty() ) {
-        host_.logMessage( LOGSQUIRL_LOG_WARNING,
-                          QStringLiteral( "Custom Footer: the host gave no config directory; "
-                                          "rules are neither loaded nor saved" ) );
-    }
     controller_ = std::make_unique<FooterController>(
         footer, configDir_, [ host = host_ ]( const QString& warning ) {
             host.logMessage( LOGSQUIRL_LOG_WARNING,
@@ -212,15 +207,12 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     placeEditor( editor, over, host_ );
 
     // Apply button: save and rescan without closing the dialog.
-    QObject::connect( editor, &FooterEditor::applied, editor, [ this, editor ] {
-        guarded( host_, "saving the rules", [ this, editor ] { save( editor->entries() ); } );
-    } );
+    QObject::connect( editor, &FooterEditor::applied, editor,
+                      [ this, editor ] { saveFrom( *editor ); } );
     QObject::connect( editor, &QDialog::finished, editor, [ this, editor ]( int result ) {
-        guarded( host_, "saving the rules", [ this, editor, result ] {
-            if ( result == QDialog::Accepted ) {
-                save( editor->entries() );
-            }
-        } );
+        if ( result == QDialog::Accepted ) {
+            saveFrom( *editor );
+        }
         // Deleted later, as it is still in its own signal; the destructor
         // deletes it at once if that comes first.
         editor->deleteLater();
@@ -230,14 +222,18 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     return editor;
 }
 
-void FooterSession::save( const QList<FooterEntry>& entries )
+void FooterSession::saveFrom( const FooterEditor& editor ) noexcept
 {
-    if ( !FooterConfig::saveEntries( configDir_, entries ) ) {
-        host_.logMessage(
-            LOGSQUIRL_LOG_WARNING,
-            QStringLiteral( "Custom Footer: could not save the rules to the config directory" ) );
-    }
-    controller_->reloadConfig();
+    guarded( host_, "saving the rules", [ this, &editor ] {
+        if ( !FooterConfig::saveEntries( configDir_, editor.entries() ) ) {
+            host_.logMessage(
+                LOGSQUIRL_LOG_WARNING,
+                QStringLiteral(
+                    "Custom Footer: could not save the rules to the config directory" ) );
+        }
+        // Loaded again all the same: the footer shows what the file holds.
+        controller_->reloadConfig();
+    } );
 }
 
 } // namespace custom_footer

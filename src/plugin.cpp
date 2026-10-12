@@ -80,7 +80,6 @@ struct Plugin {
     HostFunctions host;
     /// Owned here, as the host must unregister it after the session is gone.
     FooterDisplayWidget* footer = nullptr;
-    bool footerRegistered = false;
     std::unique_ptr<FooterSession> session;
 };
 
@@ -128,9 +127,9 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
 static void onEditorMenuAction( void* /* userData */ )
 {
     guarded( plugin().host, "the rule editor", [] {
-        auto& st = plugin();
-        if ( st.session ) {
-            st.session->openEditor( st.footer ? st.footer->window() : nullptr );
+        auto& state = plugin();
+        if ( state.session ) {
+            state.session->openEditor( state.footer ? state.footer->window() : nullptr );
         }
     } );
 }
@@ -155,34 +154,41 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
         logsquirl_plugin_shutdown();
     }
 
-    auto& st = plugin();
-    st.api = api;
-    st.handle = handle;
-    st.host = hostFunctions( api, handle );
+    auto& state = plugin();
+    state.api = api;
+    state.handle = handle;
+    state.host = hostFunctions( api, handle );
 
-    const bool ok = guarded( st.host, "initialisation", [ &st, api, handle ] {
-        api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin initialising…" );
+    const bool ok = guarded( state.host, "initialisation", [ &state, api, handle ] {
+        const auto& host = state.host;
+        host.logMessage( LOGSQUIRL_LOG_INFO,
+                         QStringLiteral( "Custom Footer plugin initialising…" ) );
 
-        // The session loads the rules, and warns if there is no config dir.
-        st.footer = new FooterDisplayWidget();
-        st.session = std::make_unique<FooterSession>( fromHost( api->get_config_dir( handle ) ),
-                                                      st.footer, st.host );
+        const auto configDir = fromHost( api->get_config_dir( handle ) );
+        if ( configDir.isEmpty() ) {
+            host.logMessage( LOGSQUIRL_LOG_WARNING,
+                             QStringLiteral( "Custom Footer: the host gave no config directory; "
+                                             "rules are neither loaded nor saved" ) );
+        }
 
         // Register menu action to open the rule editor.
         api->register_menu_action( handle, "Plugins", "Custom Footer…", &onEditorMenuAction,
                                    nullptr );
 
-        api->register_footer_widget( handle, static_cast<void*>( st.footer ) );
-        st.footerRegistered = true;
+        // Create the footer display widget, and the session that fills it;
+        // the session loads the rules and logs their problems.
+        state.footer = new FooterDisplayWidget();
+        api->register_footer_widget( handle, static_cast<void*>( state.footer ) );
+        state.session = std::make_unique<FooterSession>( configDir, state.footer, host );
 
         // Register callback for active file changes.
         api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
 
         // Initial scan if a file is already open. Read here, on the UI
         // thread, and pushed into the session, which never asks the host.
-        st.session->setActiveFile( fromHost( api->get_active_file_path( handle ) ) );
+        state.session->setActiveFile( fromHost( api->get_active_file_path( handle ) ) );
 
-        api->log_message( handle, LOGSQUIRL_LOG_INFO, "Custom Footer plugin ready." );
+        host.logMessage( LOGSQUIRL_LOG_INFO, QStringLiteral( "Custom Footer plugin ready." ) );
     } );
 
     if ( !ok ) {
@@ -194,28 +200,25 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
-    auto& st = plugin();
-    guarded( st.host, "shutdown", [ &st ] {
-        st.host.logMessage( LOGSQUIRL_LOG_INFO,
-                            QStringLiteral( "Custom Footer plugin shutting down…" ) );
+    auto& state = plugin();
+    guarded( state.host, "shutdown", [ &state ] {
+        state.host.logMessage( LOGSQUIRL_LOG_INFO,
+                               QStringLiteral( "Custom Footer plugin shutting down…" ) );
 
         // First the session: when its destructor returns, no plugin code
         // runs, and the host may unload the library after this returns.
-        st.session.reset();
+        state.session.reset();
 
-        if ( st.footer ) {
-            if ( st.footerRegistered ) {
-                st.api->unregister_footer_widget( st.handle, static_cast<void*>( st.footer ) );
-            }
-            delete st.footer;
-            st.footer = nullptr;
+        if ( state.footer ) {
+            state.api->unregister_footer_widget( state.handle, static_cast<void*>( state.footer ) );
+            delete state.footer;
+            state.footer = nullptr;
         }
     } );
 
-    st.footerRegistered = false;
-    st.host = {};
-    st.api = nullptr;
-    st.handle = nullptr;
+    state.host = {};
+    state.api = nullptr;
+    state.handle = nullptr;
 }
 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )

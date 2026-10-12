@@ -43,6 +43,8 @@
 #include <QToolButton>
 #include <QWidget>
 
+#include <stdexcept>
+
 using namespace custom_footer;
 
 namespace {
@@ -58,6 +60,12 @@ struct FakeHost {
     void ( *menuAction )( void* ) = nullptr;
     void* menuActionUserData = nullptr;
     QStringList warnings; ///< The messages logged as warnings.
+    /// Every call of the plugin, in order: the function's name, and for a
+    /// log message its level ("log info", "log warning", "log error").
+    QStringList calls;
+    /// register_active_file_callback() throws, as a failing host function
+    /// would: the plugin's initialisation fails at that point.
+    bool failActiveFileCallback = false;
 };
 
 FakeHost& host()
@@ -66,29 +74,56 @@ FakeHost& host()
     return instance;
 }
 
+QString levelName( int level )
+{
+    switch ( level ) {
+    case LOGSQUIRL_LOG_WARNING:
+        return "warning";
+    case LOGSQUIRL_LOG_ERROR:
+        return "error";
+    default:
+        return "info";
+    }
+}
+
 LogSquirlHostApi fakeApi()
 {
     LogSquirlHostApi api{};
     api.api_version = LOGSQUIRL_PLUGIN_API_VERSION;
     api.log_message = []( void*, int level, const char* message ) {
+        host().calls.append( "log " + levelName( level ) );
         if ( level == LOGSQUIRL_LOG_WARNING ) {
             host().warnings.append( QString::fromUtf8( message ) );
         }
     };
-    api.get_config_dir = []( void* ) { return host().configDir.constData(); };
+    api.get_config_dir = []( void* ) {
+        host().calls.append( "get_config_dir" );
+        return host().configDir.constData();
+    };
     api.register_menu_action
         = []( void*, const char*, const char*, void ( *callback )( void* ), void* userData ) {
+              host().calls.append( "register_menu_action" );
               host().menuAction = callback;
               host().menuActionUserData = userData;
           };
-    api.register_footer_widget
-        = []( void*, void* widget ) { host().footerWidget = static_cast<QWidget*>( widget ); };
+    api.register_footer_widget = []( void*, void* widget ) {
+        host().calls.append( "register_footer_widget" );
+        host().footerWidget = static_cast<QWidget*>( widget );
+    };
     api.unregister_footer_widget = []( void*, void* widget ) {
+        host().calls.append( "unregister_footer_widget" );
         host().unregisteredWidget = static_cast<QWidget*>( widget );
     };
-    api.get_active_file_path = []( void* ) { return host().activeFile.constData(); };
+    api.get_active_file_path = []( void* ) {
+        host().calls.append( "get_active_file_path" );
+        return host().activeFile.constData();
+    };
     api.register_active_file_callback
         = []( void*, void ( *callback )( void*, const char* ), void* userData ) {
+              host().calls.append( "register_active_file_callback" );
+              if ( host().failActiveFileCallback ) {
+                  throw std::runtime_error( "no callbacks today" );
+              }
               host().activeFileCallback = callback;
               host().activeFileUserData = userData;
           };
@@ -484,6 +519,15 @@ SCENARIO( "The plugin logs what is wrong through the host", "[plugin]" )
                          == QStringList{ "Custom Footer: the host gave no config directory; rules "
                                          "are neither loaded nor saved" } );
             }
+
+            THEN( "before it registers anything" )
+            {
+                REQUIRE( host().calls
+                         == QStringList{ "log info", "get_config_dir", "log warning",
+                                         "register_menu_action", "register_footer_widget",
+                                         "register_active_file_callback", "get_active_file_path",
+                                         "log info" } );
+            }
         }
     }
 
@@ -503,6 +547,111 @@ SCENARIO( "The plugin logs what is wrong through the host", "[plugin]" )
             {
                 REQUIRE( host().warnings.size() == 1 );
                 REQUIRE( host().warnings.at( 0 ).startsWith( "Custom Footer: Rule 1 (Broken): " ) );
+            }
+
+            THEN( "when the rules are loaded, after the footer widget is registered" )
+            {
+                REQUIRE( host().calls
+                         == QStringList{ "log info", "get_config_dir", "register_menu_action",
+                                         "register_footer_widget", "log warning",
+                                         "register_active_file_callback", "get_active_file_path",
+                                         "log info" } );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin's entry points cope with the host's unusual calls", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    WHEN( "init() is called without the host's table or handle" )
+    {
+        THEN( "it fails without calling the host" )
+        {
+            REQUIRE( logsquirl_plugin_init( nullptr, &handle ) == 1 );
+            REQUIRE( logsquirl_plugin_init( &api, nullptr ) == 1 );
+            REQUIRE( host().calls.isEmpty() );
+        }
+    }
+
+    WHEN( "shutdown() and configure() are called without init()" )
+    {
+        logsquirl_plugin_shutdown();
+        logsquirl_plugin_configure( nullptr );
+
+        THEN( "nothing happens: the host is not called and no editor opens" )
+        {
+            REQUIRE( host().calls.isEmpty() );
+            REQUIRE_FALSE( openEditorWindow() );
+        }
+    }
+
+    WHEN( "init() is called twice" )
+    {
+        REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+        QWidget* const first = host().footerWidget;
+        const QPointer<QWidget> firstAlive = first;
+        host().calls.clear();
+        REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+
+        THEN( "the first footer widget is unregistered and deleted before the second one is "
+              "registered" )
+        {
+            REQUIRE( host().unregisteredWidget == first );
+            REQUIRE( host().footerWidget );
+            REQUIRE_FALSE( firstAlive );
+            const auto unregistered = host().calls.indexOf( "unregister_footer_widget" );
+            REQUIRE( unregistered >= 0 );
+            REQUIRE( unregistered < host().calls.indexOf( "register_footer_widget" ) );
+        }
+
+        THEN( "one editor opens" )
+        {
+            logsquirl_plugin_configure( nullptr );
+            logsquirl_plugin_configure( nullptr );
+            int open = 0;
+            for ( auto* widget : QApplication::topLevelWidgets() ) {
+                if ( qobject_cast<FooterEditor*>( widget ) && widget->isVisible() ) {
+                    ++open;
+                }
+            }
+            REQUIRE( open == 1 );
+        }
+    }
+
+    WHEN( "init() fails part way, as a host function throws" )
+    {
+        host().failActiveFileCallback = true;
+        const int result = logsquirl_plugin_init( &api, &handle );
+
+        THEN( "it reports the failure, logs it, and takes the footer widget back" )
+        {
+            REQUIRE( result == 1 );
+            REQUIRE( host().calls
+                     == QStringList{ "log info", "get_config_dir", "register_menu_action",
+                                     "register_footer_widget", "register_active_file_callback",
+                                     "log error", "log info", "unregister_footer_widget" } );
+            REQUIRE_FALSE( host().footerWidget );
+        }
+
+        AND_WHEN( "the host shuts it down all the same, and the menu action is clicked" )
+        {
+            host().calls.clear();
+            logsquirl_plugin_shutdown();
+            host().menuAction( host().menuActionUserData );
+
+            THEN( "nothing happens" )
+            {
+                REQUIRE( host().calls.isEmpty() );
+                REQUIRE_FALSE( openEditorWindow() );
             }
         }
     }

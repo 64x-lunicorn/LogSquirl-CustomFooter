@@ -41,16 +41,18 @@ class FooterEditor;
  * in the config dir, the active file, the controller that fills the footer,
  * and the rule editor from when it opens until it is deleted.
  *
- * The rules are read and written only here. The footer and the editor
+ * The rules are read and written only by the session and its controller;
+ * the editor gets them from the session and hands them back through its
+ * signals, and the C entry points never touch them. The footer and the editor
  * always see the same active file, which is pushed in with setActiveFile()
  * and never asked of the host. All members run on the UI thread only.
  */
 class FooterSession {
 public:
     /// Loads the rules and the line limit from @p configDir and starts the
-    /// controller on @p footer. Without a config dir the defaults are used,
-    /// nothing is saved, and that is logged once. @p footer is not owned
-    /// and must outlive the session.
+    /// controller on @p footer. Without a config dir the defaults are used
+    /// and nothing is saved. @p footer is not owned and must outlive the
+    /// session.
     FooterSession( const QString& configDir, FooterDisplayWidget* footer, HostFunctions host = {} );
 
     /// Shuts down, in this order: deletes the editor at once, open or closed
@@ -88,8 +90,9 @@ public:
     FooterEditor* openEditor( QWidget* over );
 
 private:
-    /// Save the editor's rules and show them in the footer.
-    void save( const QList<FooterEntry>& entries );
+    /// Save the editor's rules and show them in the footer. Logs instead
+    /// of throwing, as it runs in a handler of the editor's signals.
+    void saveFrom( const FooterEditor& editor ) noexcept;
 
     const QString configDir_;
     const HostFunctions host_;

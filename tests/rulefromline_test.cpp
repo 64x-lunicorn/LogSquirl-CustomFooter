@@ -119,6 +119,21 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
             }
         }
 
+        WHEN( "the user clicks into the middle of the VIN, or into its first letter" )
+        {
+            const auto inMiddle = ruleFromLine( line, line.indexOf( "WDB" ) + 4, 0 );
+            const auto inFirst = ruleFromLine( line, line.indexOf( "WDB" ) + 1, 0 );
+
+            THEN( "the value is the whole word the click lands in" )
+            {
+                REQUIRE( inMiddle.isRule() );
+                REQUIRE( inMiddle.value == "WDB1234567" );
+                REQUIRE( inMiddle.rule.textBefore == "VIN:" );
+                REQUIRE( inFirst.value == "WDB1234567" );
+                REQUIRE( inFirst.rule.textBefore == "VIN:" );
+            }
+        }
+
         WHEN( "the user clicks into the space before the VIN" )
         {
             const auto made = ruleFromLine( line, line.indexOf( "VIN:" ) + 4, 0 );
@@ -370,13 +385,14 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
         WHEN( "the mark starts on the accent, and on the emoji's second unit" )
         {
-            const auto onAccent = ruleFromLine( line, line.indexOf( "e" ) + 1, 0 );
-            const auto inEmoji = ruleFromLine( line, line.indexOf( "t" ) + 2, 0 );
+            // Marks, not clicks: a click takes the whole word it lands in.
+            const auto onAccent = ruleFromLine( line, line.indexOf( "e" ) + 1, 2 );
+            const auto inEmoji = ruleFromLine( line, line.indexOf( "t" ) + 2, 1 );
 
             THEN( "it starts at the character the accent belongs to, and at the emoji" )
             {
                 REQUIRE( onAccent.isRule() );
-                REQUIRE( onAccent.value == QString::fromUtf8( "e\xCC\x81t\xF0\x9F\x98\x80" ) );
+                REQUIRE( onAccent.value == QString::fromUtf8( "e\xCC\x81t" ) );
                 REQUIRE( onAccent.rule.textBefore == "k:" );
                 REQUIRE( inEmoji.isRule() );
                 REQUIRE( inEmoji.value == QString::fromUtf8( "\xF0\x9F\x98\x80" ) );

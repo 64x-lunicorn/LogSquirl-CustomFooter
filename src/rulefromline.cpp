@@ -144,6 +144,11 @@ RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype lengt
         ++valueStart;
     }
     if ( length == 0 ) {
+        // A click inside a word takes the whole word, not its rest.
+        while ( valueStart > 0 && valueStart < line.size() && !isSpace( line.at( valueStart ) )
+                && !isSpace( line.at( valueStart - 1 ) ) ) {
+            --valueStart;
+        }
         while ( valueStart < line.size() && isSpace( line.at( valueStart ) ) ) {
             ++valueStart;
         }

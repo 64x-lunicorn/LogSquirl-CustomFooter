@@ -60,7 +60,7 @@ struct RuleFromLine {
  *
  * The value is the @p length characters (UTF-16 units) at @p start, without
  * the whitespace around them; a @p length of 0 is a click, which marks the
- * word starting at the first non-whitespace at or after @p start. A start
+ * whole word it lands in, or the next word after whitespace. A start
  * on a combining mark or on the second half of a surrogate pair moves back
  * to the character it belongs to, and an end inside one moves forward.
  * Whitespace is ASCII whitespace, as in simple rules.

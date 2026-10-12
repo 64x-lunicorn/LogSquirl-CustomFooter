@@ -475,12 +475,14 @@ SCENARIO( "The rule editor takes no mark in the line while the Regex Lab is open
                 REQUIRE( ui.hint->text().contains( "Regex Lab is open" ) );
             }
 
-            AND_WHEN( "the Lab is cancelled, and the value is clicked" )
+            AND_WHEN( "the Lab is cancelled, and the value is marked anew" )
             {
                 std::exchange( answer, nullptr )( std::nullopt );
-                ui.clickAt( "5", "speed=" );
+                // As a new drag starts: the mark changes on its way.
+                ui.clickAt( "INFO" );
+                ui.mark( "5", "speed=" );
 
-                THEN( "the click makes the rule" )
+                THEN( "the mark makes the rule" )
                 {
                     REQUIRE( ui.textBefore->text() == "speed=" );
                 }

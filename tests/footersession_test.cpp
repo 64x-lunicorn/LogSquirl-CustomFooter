@@ -399,6 +399,55 @@ SCENARIO( "A footer session without a config dir saves nothing", "[footersession
     }
 }
 
+SCENARIO( "A footer session reports which host functions the host offers", "[footersession]" )
+{
+    FooterDisplayWidget footer;
+
+    GIVEN( "a session made with the host functions of an older host" )
+    {
+        Log log;
+        FooterSession session( {}, &footer, log.host() );
+
+        THEN( "it reports none of them" )
+        {
+            REQUIRE_FALSE( session.has( HostFeature::RegexLab ) );
+            REQUIRE_FALSE( session.has( HostFeature::GoToLogLine ) );
+            REQUIRE_FALSE( session.has( HostFeature::SelectedLogLines ) );
+        }
+    }
+
+    GIVEN( "a session made with all three" )
+    {
+        HostFunctions host;
+        host.openRegexLab
+            = []( const RegexLabPattern&, const QObject*, RegexLabDone ) { return true; };
+        host.goToLogLine = []( std::uint64_t ) { return true; };
+        host.selectedLogLines = [] { return std::optional<SelectedLogLines>(); };
+        FooterSession session( {}, &footer, host );
+
+        THEN( "it reports each" )
+        {
+            REQUIRE( session.has( HostFeature::RegexLab ) );
+            REQUIRE( session.has( HostFeature::GoToLogLine ) );
+            REQUIRE( session.has( HostFeature::SelectedLogLines ) );
+        }
+    }
+
+    GIVEN( "a session made with Go to line only" )
+    {
+        HostFunctions host;
+        host.goToLogLine = []( std::uint64_t ) { return true; };
+        FooterSession session( {}, &footer, host );
+
+        THEN( "it reports that one only" )
+        {
+            REQUIRE_FALSE( session.has( HostFeature::RegexLab ) );
+            REQUIRE( session.has( HostFeature::GoToLogLine ) );
+            REQUIRE_FALSE( session.has( HostFeature::SelectedLogLines ) );
+        }
+    }
+}
+
 SCENARIO( "Destroying a footer session leaves nothing of the plugin running",
           "[footersession][lifetime]" )
 {

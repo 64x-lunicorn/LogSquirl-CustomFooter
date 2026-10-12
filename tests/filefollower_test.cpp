@@ -487,6 +487,8 @@ SCENARIO( "FileFollower delivers nothing once stopped", "[filefollower]" )
             THEN( "the run was cancelled and waited for, and nothing is delivered or pending" )
             {
                 REQUIRE( jobs.sawCancel );
+                // The dropped run counts as finished (#39).
+                REQUIRE( rig.follower->status().finished == 1 );
                 QCoreApplication::processEvents();
                 REQUIRE( rig.delivered.empty() );
                 REQUIRE_FALSE( rig.follower->status().busy );

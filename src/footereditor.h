@@ -167,6 +167,11 @@ private:
     /// Append @p entry as a new rule, select it and focus its key.
     void appendAndSelect( const FooterEntry& entry );
     void moveEntry( int from, int to );
+    /// Whether @p row is the rule made from the line the picker shows.
+    bool isLineRule( int row ) const;
+    /// Tell at the picker when the preview of the rule made from its line
+    /// finds its first match in another Log Line.
+    void showLineRulePreview( const FooterScanner::Preview& preview );
 
     /// Show a warning without blocking: opened with open().
     void showError( const QString& title, const QString& text, const QString& objectName );

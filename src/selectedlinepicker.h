@@ -33,10 +33,8 @@ namespace custom_footer {
  * The Log Line a rule is made from, for the user to click or mark its value
  * in, with a hint above it that says what to do and what was found.
  *
- * The line is read-only. Every click into it and every mark emits marked(),
- * with the mark's start and length in UTF-16 units (0 for a click); the
- * same mark twice in a row is emitted once. The owner makes the rule and
- * shows the result with showRule().
+ * The line is read-only. Every click into it and every mark emits marked();
+ * the owner makes the rule and shows the result with showRule().
  */
 class SelectedLinePicker : public QGroupBox {
     Q_OBJECT
@@ -55,19 +53,33 @@ public:
     /// why it makes no rule.
     void showRule( const RuleFromLine& rule );
 
+    /// Show that the last mark was not taken, and why. The same mark again
+    /// is emitted again.
+    void showMarkIgnored( const QString& reason );
+
+    /// Add to the hint that in the active file Log Line @p lineNumber
+    /// matches first, so the footer shows its value @p value rather than
+    /// the shown line's. Until the hint changes otherwise.
+    void showEarlierMatch( qint64 lineNumber, const QString& value );
+
     /// Put the focus into the line, to click or mark the value.
     void focusLine();
 
 Q_SIGNALS:
+    /// The user clicked into the line (@p length 0) or marked @p length
+    /// UTF-16 units of it at @p start. The same mark twice in a row is
+    /// emitted once.
     void marked( qsizetype start, qsizetype length );
 
 private:
     void markChanged();
+    /// Show @p hint, without a note of an earlier match.
+    void setHint( const QString& hint );
 
     QLabel* hint_ = nullptr;
     QLineEdit* line_ = nullptr;
-    /// What showLine() says, before any mark.
-    QString lineHint_;
+    /// The hint without a note of an earlier match.
+    QString hintText_;
     /// The last mark emitted, to emit each once.
     qsizetype markStart_ = -1;
     qsizetype markLength_ = -1;

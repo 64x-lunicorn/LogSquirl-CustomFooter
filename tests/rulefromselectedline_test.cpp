@@ -256,10 +256,12 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
                 REQUIRE( ui.canAccept() );
             }
 
-            THEN( "the preview shows the value it extracts from the active file" )
+            THEN( "the preview shows the value it extracts from the active file, from this "
+                  "line, so the hint does not warn of another" )
             {
                 REQUIRE( processUntil(
                     [ &ui ] { return ui.previewValue->text().contains( "“WDB1234567”" ); } ) );
+                REQUIRE_FALSE( ui.hint->text().contains( "matches first" ) );
             }
 
             AND_WHEN( "the key is changed, and another value is marked" )
@@ -399,6 +401,36 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
             REQUIRE( ui.currentRow() == 2 );
             REQUIRE( ui.line->text() == "user=alice, id=1" );
             REQUIRE( editor.entries().at( 1 ).key == "VIN" );
+        }
+    }
+}
+
+SCENARIO( "The rule editor says when an earlier Log Line supplies the rule's value",
+          "[rulefromline][footereditor]" )
+{
+    QTemporaryDir logDir;
+    REQUIRE( logDir.isValid() );
+    const auto log = logDir.path() + "/car.log";
+    writeFile( log, "start\nVIN: EARLY1\n" + kVinLine + "\n" );
+
+    GIVEN( "a rule made from a line, in a file where an earlier line has the same text" )
+    {
+        FooterEditor editor( {} );
+        editor.setActiveFile( log );
+        FromLineUi ui( editor );
+        editor.addRuleFromLine( kVinLine );
+
+        WHEN( "the value is marked, and the preview is shown" )
+        {
+            ui.mark( "WDB1234567" );
+            REQUIRE( processUntil(
+                [ &ui ] { return ui.previewValue->text().contains( "“EARLY1”" ); } ) );
+
+            THEN( "the hint says which Log Line matches first, and its value" )
+            {
+                REQUIRE( ui.hint->text().contains( "Log Line 2 matches first" ) );
+                REQUIRE( ui.hint->text().contains( "“EARLY1”" ) );
+            }
         }
     }
 }

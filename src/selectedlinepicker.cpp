@@ -66,13 +66,13 @@ void SelectedLinePicker::showLine( const QString& line, int selectedLines )
     }
     markStart_ = -1;
     markLength_ = -1;
-    lineHint_ = tr( "Click where the value starts in this Log Line, or mark the value." );
+    auto hint = tr( "Click where the value starts in this Log Line, or mark the value." );
     if ( selectedLines > 1 ) {
-        lineHint_ += QLatin1Char( ' ' )
-                     + tr( "%1 Log Lines are selected: the rule is made from the first." )
-                           .arg( selectedLines );
+        hint += QLatin1Char( ' ' )
+                + tr( "%1 Log Lines are selected: the rule is made from the first." )
+                      .arg( selectedLines );
     }
-    hint_->setText( lineHint_ );
+    setHint( hint );
 }
 
 QString SelectedLinePicker::line() const
@@ -84,31 +84,47 @@ void SelectedLinePicker::showRule( const RuleFromLine& rule )
 {
     switch ( rule.problem ) {
     case MarkProblem::None:
-        hint_->setText( tr( "Value: “%1”, after “%2”. Click or mark again to change it." )
-                            .arg( rule.value, rule.rule.textBefore ) );
+        setHint( tr( "Value: “%1”, after “%2”. Click or mark again to change it." )
+                     .arg( rule.value, rule.rule.textBefore ) );
         return;
     case MarkProblem::NothingMarked:
-        hint_->setText( tr( "Click where the value starts in this Log Line, or mark the value." ) );
+        setHint( tr( "Click where the value starts in this Log Line, or mark the value." ) );
         return;
     case MarkProblem::NoTextBefore:
-        hint_->setText( tr( "This value starts the line, but a simple rule needs text before "
-                            "the value. Mark another value, or write an advanced rule." ) );
+        setHint( tr( "This value starts the line, but a simple rule needs text before the "
+                     "value. Mark another value, or write an advanced rule." ) );
         return;
     case MarkProblem::BeyondLineLimit:
-        hint_->setText( tr( "The footer reads only the first 64 KiB of a line, and this value "
-                            "lies beyond them. Mark a value nearer the start of the line." ) );
+        setHint( tr( "The footer reads only the first 64 KiB of a line, and this value lies "
+                     "beyond them. Mark a value nearer the start of the line." ) );
         return;
     case MarkProblem::TextBeforeEarlier:
-        hint_->setText( tr( "The text before this value, “%1”, also appears earlier in the "
-                            "line, so the rule would find the earlier value. Mark a value whose "
-                            "text before it is unique, or write an advanced rule." )
-                            .arg( rule.rule.textBefore ) );
+        setHint( tr( "The text before this value, “%1”, also appears earlier in the line, so "
+                     "the rule would find the earlier value. Mark a value whose text before it "
+                     "is unique, or write an advanced rule." )
+                     .arg( rule.rule.textBefore ) );
         return;
     case MarkProblem::NoSimpleRule:
-        hint_->setText( tr( "No simple rule finds exactly this value. Mark another value, or "
-                            "write an advanced rule." ) );
+        setHint( tr( "No simple rule finds exactly this value. Mark another value, or write an "
+                     "advanced rule." ) );
         return;
     }
+}
+
+void SelectedLinePicker::showMarkIgnored( const QString& reason )
+{
+    markStart_ = -1;
+    markLength_ = -1;
+    setHint( reason );
+}
+
+void SelectedLinePicker::showEarlierMatch( qint64 lineNumber, const QString& value )
+{
+    hint_->setText( hintText_ + QLatin1Char( ' ' )
+                    + tr( "In the active file, Log Line %1 matches first: the footer shows its "
+                          "value “%2”, not this line's." )
+                          .arg( lineNumber )
+                          .arg( value ) );
 }
 
 void SelectedLinePicker::focusLine()
@@ -127,6 +143,12 @@ void SelectedLinePicker::markChanged()
     markStart_ = start;
     markLength_ = length;
     Q_EMIT marked( start, length );
+}
+
+void SelectedLinePicker::setHint( const QString& hint )
+{
+    hintText_ = hint;
+    hint_->setText( hint );
 }
 
 } // namespace custom_footer

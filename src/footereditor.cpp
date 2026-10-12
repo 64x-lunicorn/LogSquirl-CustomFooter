@@ -270,6 +270,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     previewer_ = new RulePreviewer( this );
     connect( previewer_, &RulePreviewer::updating, panel_->previewView(),
              &RulePreviewView::showUpdating );
+    connect( previewer_, &RulePreviewer::previewed, this, &FooterEditor::showLineRulePreview );
     connect( previewer_, &RulePreviewer::previewed, panel_->previewView(),
              &RulePreviewView::showPreview );
     // Edits schedule it where they are stored, once per edit; not on every
@@ -530,7 +531,7 @@ void FooterEditor::showCurrentRule()
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
-    linePicker_->setVisible( row >= 0 && lineRule_.isValid() && lineRule_.row() == row );
+    linePicker_->setVisible( isLineRule( row ) );
 
     // Another rule: no need to wait for typing to pause. Coalesced with the
     // change that follows, e.g. the removal of the rule selected before.
@@ -586,7 +587,7 @@ void FooterEditor::testPattern( PatternField field )
 void FooterEditor::lineMarked( qsizetype start, qsizetype length )
 {
     const int row = currentRow();
-    if ( row < 0 || !lineRule_.isValid() || lineRule_.row() != row ) {
+    if ( !isLineRule( row ) ) {
         return;
     }
     const auto made = ruleFromLine( linePicker_->line(), start, length );
@@ -682,6 +683,34 @@ void FooterEditor::appendAndSelect( const FooterEntry& entry )
     model_->appendEntries( { entry } );
     selectRow( row );
     panel_->focusKey();
+}
+
+bool FooterEditor::isLineRule( int row ) const
+{
+    return row >= 0 && lineRule_.isValid() && lineRule_.row() == row;
+}
+
+void FooterEditor::showLineRulePreview( const FooterScanner::Preview& preview )
+{
+    // The preview is always of the selected rule.
+    if ( !isLineRule( currentRow() ) || preview.status != FooterScanner::Preview::Status::Scanned
+         || !preview.value ) {
+        return;
+    }
+    // The preview's line is as matched: without a line break, and only the
+    // start of a long line.
+    auto matched = QStringView( preview.line );
+    auto shown = QStringView( linePicker_->line() );
+    if ( matched.endsWith( QLatin1Char( '\r' ) ) ) {
+        matched.chop( 1 );
+    }
+    if ( shown.endsWith( QLatin1Char( '\r' ) ) ) {
+        shown.chop( 1 );
+    }
+    if ( !matched.isEmpty() && shown.startsWith( matched ) ) {
+        return;
+    }
+    linePicker_->showEarlierMatch( preview.lineNumber, preview.value->value );
 }
 
 void FooterEditor::moveEntry( int from, int to )

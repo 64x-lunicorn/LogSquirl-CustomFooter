@@ -543,7 +543,11 @@ SCENARIO( "FooterController shows the Log Line of each value as the active file 
                                                        { "ID", "id=(\\S+)", "", true, {} } } ) );
 
     const auto log = logDir.path() + "/lines.log";
-    writeFile( log, "starting up\nVIN: A\n" );
+    // Filler lines after the value, so that a line well inside the file can
+    // change in place without changing the bytes that identify it.
+    const QByteArray head = "starting up\nVIN: A\n";
+    const QByteArray filler = "filler filler filler filler filler\n";
+    writeFile( log, head + filler.repeated( 30 ) );
 
     FooterDisplayWidget widget;
     Fakes fakes;
@@ -565,30 +569,41 @@ SCENARIO( "FooterController shows the Log Line of each value as the active file 
         controller->setActiveFile( log );
         REQUIRE( processUntil( [ & ] { return shownLines() == "VIN: A @ 2"; } ) );
 
-        WHEN( "lines with the other key are appended, and the file is scanned on" )
+        REQUIRE( scansSettle( *controller ) );
+
+        WHEN( "a line already scanned changes in place, lines with the other key are appended, "
+              "and the change is reported" )
         {
+            {
+                // A fresh scan would take ID from the changed line, line 18.
+                QFile file( log );
+                REQUIRE( file.open( QIODevice::ReadWrite ) );
+                REQUIRE( file.seek( head.size() + filler.size() * 15 ) );
+                REQUIRE( file.write( "id=999" ) == 6 );
+            }
             writeFile( log, "noise\nVIN: LATER\nid=7\n", true );
             fakes.changes->fire();
             fakes.clock->advance( kGap );
 
-            THEN( "the new value has its line in the whole file, and the old one keeps its line" )
+            THEN( "one more scan reads only the appended lines, numbered in the whole file, and "
+                  "the old value keeps its line" )
             {
                 REQUIRE(
-                    processUntil( [ & ] { return shownLines() == "VIN: A @ 2 | ID: 7 @ 5"; } ) );
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 2 | ID: 7 @ 35"; } ) );
+                REQUIRE( controller->scansStarted() == 2 );
+            }
+        }
 
-                AND_WHEN( "the file is truncated and written again with the same values" )
-                {
-                    REQUIRE( scansSettle( *controller ) );
-                    writeFile( log, "VIN: A\nid=7\n" );
-                    fakes.changes->fire();
-                    fakes.clock->advance( kGap );
+        WHEN( "the file is truncated and written again with the same values" )
+        {
+            writeFile( log, "VIN: A\nid=7\n" );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
 
-                    THEN( "the lines come from the new scan from its start" )
-                    {
-                        REQUIRE( processUntil(
-                            [ & ] { return shownLines() == "VIN: A @ 1 | ID: 7 @ 2"; } ) );
-                    }
-                }
+            THEN( "the lines come from the new scan from its start" )
+            {
+                REQUIRE(
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 1 | ID: 7 @ 2"; } ) );
             }
         }
     }

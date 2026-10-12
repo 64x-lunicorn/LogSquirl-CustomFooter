@@ -521,7 +521,11 @@ SCENARIO( "A footer session goes to the Log Line a value came from", "[footerses
                                           { "Mode", "legacy-mode (\\S+)", "", true, {} },
                                           rule( "VIN" ) } ) );
     const auto log = logDir.path() + "/jump.log";
-    writeFile( log, "starting\nlegacy-mode 4\nmode=0x04\n" );
+    // Filler lines after the values, so that a line well inside the file
+    // can change in place without changing the bytes that identify it.
+    const QByteArray head = "starting\nlegacy-mode 4\nmode=0x04\n";
+    const QByteArray filler = "filler filler filler filler filler\n";
+    writeFile( log, head + filler.repeated( 30 ) );
 
     FooterDisplayWidget footer;
     footer.show();
@@ -557,24 +561,35 @@ SCENARIO( "A footer session goes to the Log Line a value came from", "[footerses
         }
     }
 
-    WHEN( "the file grows and is scanned on from where it stopped" )
+    WHEN( "a line already scanned changes in place, lines are appended, and it is scanned on" )
     {
-        QFile file( log );
-        REQUIRE( file.open( QIODevice::Append ) );
-        REQUIRE( file.write( "noise\nVIN: ABC\n" ) > 0 );
-        file.close();
+        {
+            // A fresh scan would take VIN from the changed line, line 19.
+            QFile file( log );
+            REQUIRE( file.open( QIODevice::ReadWrite ) );
+            REQUIRE( file.seek( head.size() + filler.size() * 15 ) );
+            REQUIRE( file.write( "VIN: 999" ) == 8 );
+            REQUIRE( file.seek( file.size() ) );
+            REQUIRE( file.write( "noise\nVIN: ABC\n" ) > 0 );
+        }
         session->setActiveFile( log );
-        REQUIRE( processUntil(
-            [ & ] { return shown( footer ) == QStringList{ "Mode=4", "VIN=ABC" }; } ) );
+
+        THEN( "only the appended lines were scanned, so the scan was continued" )
+        {
+            REQUIRE( processUntil(
+                [ & ] { return shown( footer ) == QStringList{ "Mode=4", "VIN=ABC" }; } ) );
+        }
 
         AND_WHEN( "the user goes to the Log Line of the new value, and of the old one" )
         {
+            REQUIRE( processUntil(
+                [ & ] { return shown( footer ) == QStringList{ "Mode=4", "VIN=ABC" }; } ) );
             goToLineOf( footer, "VIN" );
             goToLineOf( footer, "Mode" );
 
             THEN( "the host goes to the lines in the whole file" )
             {
-                REQUIRE( wentTo == QList<std::uint64_t>{ 5, 2 } );
+                REQUIRE( wentTo == QList<std::uint64_t>{ 35, 2 } );
             }
         }
     }
@@ -611,14 +626,22 @@ SCENARIO( "A footer session goes to the Log Line a value came from", "[footerses
     WHEN( "the session is destroyed" )
     {
         session.reset();
+        auto* item = itemOf( footer, "Mode" );
+        REQUIRE( item );
 
         THEN( "the footer no longer offers it" )
         {
-            auto* item = itemOf( footer, "Mode" );
-            REQUIRE( item );
             REQUIRE_FALSE( offersGoToLine( *item ) );
+        }
+
+        AND_WHEN( "the value is double-clicked" )
+        {
             doubleClick( item );
-            REQUIRE( wentTo.isEmpty() );
+
+            THEN( "the host is not asked" )
+            {
+                REQUIRE( wentTo.isEmpty() );
+            }
         }
     }
 }

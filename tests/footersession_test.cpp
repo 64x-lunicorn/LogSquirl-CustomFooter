@@ -407,12 +407,14 @@ SCENARIO( "Destroying a footer session leaves nothing of the plugin running",
     QTemporaryDir logDir;
     REQUIRE( configDir.isValid() );
     REQUIRE( logDir.isValid() );
-    // A rule that matches nothing, and no line limit to speak of, so that
-    // the footer's scan and the editor's preview read the whole file.
-    REQUIRE( FooterConfig::saveEntries( configDir.path(), { rule( "Absent" ) } ) );
+    // A rule that matches only the last line, and no line limit to speak
+    // of, so that the footer's scan and the editor's preview read the whole
+    // file, and a finished scan changes the footer.
+    REQUIRE( FooterConfig::saveEntries( configDir.path(), { rule( "Late" ) } ) );
     REQUIRE( FooterConfig::saveMaxLines( configDir.path(), 10'000'000 ) );
     const auto big = logDir.path() + "/big.log";
-    writeFile( big, QByteArray( "a line of a log that no rule matches\n" ).repeated( 100'000 ) );
+    writeFile( big, QByteArray( "a line of a log that no rule matches\n" ).repeated( 300'000 )
+                        + "Late: yes\n" );
 
     FooterDisplayWidget footer;
     Log log;
@@ -457,12 +459,41 @@ SCENARIO( "Destroying a footer session leaves nothing of the plugin running",
                     REQUIRE_FALSE( part );
                 }
             }
+        }
+    }
 
-            THEN( "no result reaches the footer afterwards" )
+    GIVEN( "the footer's scan of a big file running" )
+    {
+        // How long a whole scan of the file takes here, with another session
+        // on another footer, which also shows that a finished scan changes
+        // the footer.
+        qint64 scanMs = 0;
+        {
+            FooterDisplayWidget otherFooter;
+            FooterSession other( configDir.path(), &otherFooter );
+            QElapsedTimer scan;
+            scan.start();
+            other.setActiveFile( big );
+            REQUIRE( processUntil(
+                [ & ] { return shown( otherFooter ) == QStringList{ "Late=yes" }; } ) );
+            scanMs = scan.elapsed();
+        }
+
+        QElapsedTimer sinceStart;
+        sinceStart.start();
+        session->setActiveFile( big );
+
+        WHEN( "the session is destroyed before the scan could finish" )
+        {
+            REQUIRE( footer.values().isEmpty() );
+            session.reset();
+            REQUIRE( sinceStart.elapsed() < scanMs );
+
+            THEN( "the scan's result never reaches the footer" )
             {
-                const auto before = footer.values();
                 runPendingWork();
-                REQUIRE( footer.values() == before );
+                REQUIRE_FALSE( processUntil( [ & ] { return !footer.values().isEmpty(); },
+                                             int( 3 * scanMs + 200 ) ) );
             }
         }
     }

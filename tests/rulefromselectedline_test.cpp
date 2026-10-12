@@ -1,0 +1,432 @@
+/*
+ * Copyright (C) 2026 LogSquirl Contributors
+ *
+ * This file is part of logsquirl-custom-footer.
+ *
+ * logsquirl-custom-footer is free software: you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * logsquirl-custom-footer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with logsquirl-custom-footer.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file rulefromselectedline_test.cpp
+ * @brief BDD tests for "Rule from selected line": the rule editor makes a
+ *        new simple rule from a Log Line, and the footer session starts it
+ *        with the line the host functions hand over.
+ */
+
+#include <catch2/catch.hpp>
+
+#include "footerconfig.h"
+#include "footerdisplaywidget.h"
+#include "footereditor.h"
+#include "footersession.h"
+#include "hostfunctions.h"
+#include "rulelistmodel.h"
+#include "simplerule.h"
+
+#include <QApplication>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QDialogButtonBox>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMessageBox>
+#include <QPointer>
+#include <QPushButton>
+#include <QTableView>
+#include <QTemporaryDir>
+#include <QThread>
+#include <QToolButton>
+
+#include <memory>
+#include <optional>
+
+using namespace custom_footer;
+
+namespace {
+
+template <typename Predicate>
+bool processUntil( Predicate done, int boundMs = 10000 )
+{
+    QElapsedTimer timer;
+    timer.start();
+    while ( !done() ) {
+        if ( timer.elapsed() > boundMs ) {
+            return false;
+        }
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+        QThread::msleep( 1 );
+    }
+    return true;
+}
+
+void writeFile( const QString& path, const QString& content )
+{
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    const auto bytes = content.toUtf8();
+    REQUIRE( file.write( bytes ) == bytes.size() );
+}
+
+template <typename Widget>
+Widget* child( QObject& parent, const char* name )
+{
+    auto* widget = parent.findChild<Widget*>( name );
+    REQUIRE( widget );
+    return widget;
+}
+
+const QString kVinLine = "2026-10-12 08:15:02.123 INFO VIN: WDB1234567 speed=5";
+
+/// The editor's widgets for a rule from a line, found as the user sees them.
+struct FromLineUi {
+    explicit FromLineUi( FooterEditor& editor )
+        : dialog( &editor )
+        , list( child<QTableView>( editor, "ruleList" ) )
+        , model( qobject_cast<RuleListModel*>( list->model() ) )
+        , line( child<QLineEdit>( editor, "selectedLineEdit" ) )
+        , hint( child<QLabel>( editor, "selectedLineHint" ) )
+        , key( child<QLineEdit>( editor, "keyEdit" ) )
+        , textBefore( child<QLineEdit>( editor, "textBeforeEdit" ) )
+        , valueEnd( child<QComboBox>( editor, "valueEndCombo" ) )
+        , linePattern( child<QLineEdit>( editor, "linePatternEdit" ) )
+        , previewValue( child<QLabel>( editor, "previewValue" ) )
+        , buttons( editor.findChild<QDialogButtonBox*>() )
+    {
+        REQUIRE( model );
+        REQUIRE( buttons );
+    }
+
+    /// Mark @p value in the shown line, as the user does with the mouse:
+    /// its first occurrence after @p after.
+    void mark( const QString& value, const QString& after = QString() ) const
+    {
+        const auto from = line->text().indexOf( after );
+        REQUIRE( from >= 0 );
+        const auto start = line->text().indexOf( value, from + after.size() );
+        REQUIRE( start >= 0 );
+        line->setSelection( static_cast<int>( start ), static_cast<int>( value.size() ) );
+    }
+
+    /// Click into the shown line where @p value starts.
+    void clickAt( const QString& value ) const
+    {
+        const auto start = line->text().indexOf( value );
+        REQUIRE( start >= 0 );
+        line->setCursorPosition( static_cast<int>( start ) );
+    }
+
+    void select( int row ) const
+    {
+        list->setCurrentIndex( model->index( row, RuleListModel::KeyColumn ) );
+    }
+
+    int currentRow() const
+    {
+        return list->currentIndex().row();
+    }
+
+    bool lineShown() const
+    {
+        return line->isVisibleTo( dialog );
+    }
+
+    ValueEnd shownValueEnd() const
+    {
+        return static_cast<ValueEnd>( valueEnd->currentData().toInt() );
+    }
+
+    bool canAccept() const
+    {
+        return buttons->button( QDialogButtonBox::Ok )->isEnabled();
+    }
+
+    FooterEditor* dialog;
+    QTableView* list;
+    RuleListModel* model;
+    QLineEdit* line;
+    QLabel* hint;
+    QLineEdit* key;
+    QLineEdit* textBefore;
+    QComboBox* valueEnd;
+    QLineEdit* linePattern;
+    QLabel* previewValue;
+    QDialogButtonBox* buttons;
+};
+
+/// The open message box that says no Log Line is selected, if one is open.
+QMessageBox* noSelectionHint()
+{
+    for ( auto* widget : QApplication::allWidgets() ) {
+        auto* box = qobject_cast<QMessageBox*>( widget );
+        if ( box && box->objectName() == "noSelectedLineBox" && box->isVisible() ) {
+            return box;
+        }
+    }
+    return nullptr;
+}
+
+/// Host functions whose selected Log Lines are @p lines, nothing for none;
+/// counts the calls.
+struct FakeSelection {
+    std::optional<QStringList> lines;
+    int calls = 0;
+
+    HostFunctions host()
+    {
+        HostFunctions functions;
+        functions.selectedLogLines = [ this ]() -> std::optional<SelectedLogLines> {
+            ++calls;
+            if ( !lines ) {
+                return std::nullopt;
+            }
+            return SelectedLogLines{ *lines, false };
+        };
+        return functions;
+    }
+};
+
+} // namespace
+
+SCENARIO( "The rule editor makes a new simple rule from a Log Line",
+          "[rulefromline][footereditor]" )
+{
+    QTemporaryDir logDir;
+    REQUIRE( logDir.isValid() );
+    const auto log = logDir.path() + "/car.log";
+    writeFile( log, "2026-10-12 08:15:01.000 INFO start\n" + kVinLine + "\n" );
+
+    FooterEditor editor( { { "Mode", "Mode:\\s+(\\S+)", "", true, {} } } );
+    editor.setActiveFile( log );
+    FromLineUi ui( editor );
+
+    THEN( "it shows no line before a rule is made from one" )
+    {
+        REQUIRE_FALSE( ui.lineShown() );
+    }
+
+    GIVEN( "a rule made from the VIN line" )
+    {
+        editor.addRuleFromLine( kVinLine );
+
+        THEN( "a new rule is selected, in simple mode, with the line to mark the value in" )
+        {
+            REQUIRE( editor.entries().size() == 2 );
+            REQUIRE( ui.currentRow() == 1 );
+            REQUIRE( ui.lineShown() );
+            REQUIRE( ui.line->text() == kVinLine );
+            REQUIRE( ui.line->isReadOnly() );
+            REQUIRE( ui.textBefore->isVisibleTo( &editor ) );
+            REQUIRE( ui.hint->text().contains( "Click where the value starts" ) );
+            REQUIRE( ui.canAccept() );
+        }
+
+        WHEN( "the VIN is marked in the line" )
+        {
+            ui.mark( "WDB1234567" );
+
+            THEN( "the text before it, where it ends and the key are filled in" )
+            {
+                REQUIRE( ui.textBefore->text() == "VIN:" );
+                REQUIRE( ui.shownValueEnd() == ValueEnd::Whitespace );
+                REQUIRE( ui.key->text() == "VIN" );
+                REQUIRE( ui.linePattern->text() == "VIN:\\s*(\\S+)" );
+                REQUIRE( ui.hint->text().contains( "“WDB1234567”" ) );
+            }
+
+            THEN( "the new rule is a simple rule with those patterns, ready to save" )
+            {
+                const auto entry = editor.entries().at( 1 );
+                REQUIRE( entry.key == "VIN" );
+                REQUIRE( entry.linePattern == "VIN:\\s*(\\S+)" );
+                REQUIRE( entry.valuePattern.isEmpty() );
+                REQUIRE( simpleRuleOf( entry ) );
+                REQUIRE( ui.canAccept() );
+            }
+
+            THEN( "the preview shows the value it extracts from the active file" )
+            {
+                REQUIRE( processUntil(
+                    [ &ui ] { return ui.previewValue->text().contains( "“WDB1234567”" ); } ) );
+            }
+
+            AND_WHEN( "the key is changed, and another value is marked" )
+            {
+                ui.key->setText( "Speed" );
+                ui.mark( "5", "speed=" );
+
+                THEN( "the rule follows the new mark, but the key typed is kept" )
+                {
+                    REQUIRE( ui.textBefore->text() == "speed=" );
+                    REQUIRE( ui.key->text() == "Speed" );
+                }
+            }
+
+            AND_WHEN( "another value is marked without changing the key" )
+            {
+                ui.mark( "5", "speed=" );
+
+                THEN( "the key suggested for it replaces the one suggested before" )
+                {
+                    REQUIRE( ui.textBefore->text() == "speed=" );
+                    REQUIRE( ui.key->text() == "speed" );
+                }
+            }
+
+            AND_WHEN( "the word at the start of the line is marked, with no text before it" )
+            {
+                ui.mark( "2026-10-12" );
+
+                THEN( "the rule is kept as it was, and the hint says why" )
+                {
+                    REQUIRE( ui.textBefore->text() == "VIN:" );
+                    REQUIRE( ui.key->text() == "VIN" );
+                    REQUIRE( ui.hint->text().contains( "No simple rule" ) );
+                }
+            }
+        }
+
+        WHEN( "the user clicks where the VIN starts" )
+        {
+            ui.clickAt( "WDB1234567" );
+
+            THEN( "the word starting there is the value" )
+            {
+                REQUIRE( ui.textBefore->text() == "VIN:" );
+                REQUIRE( ui.key->text() == "VIN" );
+                REQUIRE( editor.entries().at( 1 ).linePattern == "VIN:\\s*(\\S+)" );
+            }
+        }
+
+        WHEN( "another rule is selected" )
+        {
+            ui.select( 0 );
+
+            THEN( "the line is not shown for it" )
+            {
+                REQUIRE_FALSE( ui.lineShown() );
+            }
+
+            AND_WHEN( "the rule made from the line is selected again" )
+            {
+                ui.select( 1 );
+
+                THEN( "the line is shown again" )
+                {
+                    REQUIRE( ui.lineShown() );
+                }
+            }
+        }
+
+        WHEN( "the rule made from the line is moved up" )
+        {
+            child<QToolButton>( editor, "moveUpButton" )->click();
+            ui.mark( "WDB1234567" );
+
+            THEN( "the line stays with it" )
+            {
+                REQUIRE( ui.currentRow() == 0 );
+                REQUIRE( ui.lineShown() );
+                REQUIRE( editor.entries().at( 0 ).key == "VIN" );
+                REQUIRE( editor.entries().at( 1 ).key == "Mode" );
+            }
+        }
+
+        WHEN( "the rule made from the line is removed" )
+        {
+            child<QToolButton>( editor, "removeRuleButton" )->click();
+
+            THEN( "the line goes with it" )
+            {
+                REQUIRE( editor.entries().size() == 1 );
+                REQUIRE_FALSE( ui.lineShown() );
+            }
+        }
+    }
+
+    GIVEN( "a rule made from a line with special characters before the value" )
+    {
+        const QString line = QString::fromUtf8( "\t  [sensor.temp](°C)*+?^$|{2}\\:\t21.5 ok  " );
+        editor.addRuleFromLine( line );
+
+        WHEN( "the value is marked" )
+        {
+            ui.mark( "21.5" );
+
+            THEN( "the text is taken literally, and the pattern escapes it" )
+            {
+                REQUIRE( ui.textBefore->text() == "[sensor.temp](°C)*+?^$|{2}\\:" );
+                REQUIRE( ui.linePattern->text()
+                         == QString::fromUtf8( "\\[sensor\\.temp]\\(°C\\)\\*\\+\\?\\^\\$\\|\\{2}"
+                                               "\\\\:\\s*(\\S+)" ) );
+                REQUIRE( ui.key->text() == "sensor.temp" );
+            }
+        }
+    }
+
+    GIVEN( "a rule made from the first of several selected lines" )
+    {
+        editor.addRuleFromLine( kVinLine, 3 );
+
+        THEN( "the hint says that the first of them is shown" )
+        {
+            REQUIRE( ui.line->text() == kVinLine );
+            REQUIRE( ui.hint->text().contains( "3 Log Lines are selected" ) );
+        }
+    }
+
+    GIVEN( "a second rule made from a line" )
+    {
+        editor.addRuleFromLine( kVinLine );
+        ui.mark( "WDB1234567" );
+        editor.addRuleFromLine( "user=alice, id=1" );
+
+        THEN( "a third rule shows the new line, and the first one keeps its rule" )
+        {
+            REQUIRE( editor.entries().size() == 3 );
+            REQUIRE( ui.currentRow() == 2 );
+            REQUIRE( ui.line->text() == "user=alice, id=1" );
+            REQUIRE( editor.entries().at( 1 ).key == "VIN" );
+        }
+    }
+}
+
+SCENARIO( "The rule editor offers a rule from the selected line only when asked to",
+          "[rulefromline][footereditor]" )
+{
+    FooterEditor editor( {} );
+    auto* button = child<QToolButton>( editor, "ruleFromLineButton" );
+
+    THEN( "the button is hidden by default" )
+    {
+        REQUIRE_FALSE( button->isVisibleTo( &editor ) );
+    }
+
+    WHEN( "it is offered, and the button is clicked" )
+    {
+        editor.offerRuleFromLine( true );
+        int requests = 0;
+        QObject::connect( &editor, &FooterEditor::ruleFromLineRequested,
+                          [ &requests ] { ++requests; } );
+        button->click();
+
+        THEN( "the button is shown, and the editor asks for the selected line" )
+        {
+            REQUIRE( button->isVisibleTo( &editor ) );
+            REQUIRE( requests == 1 );
+        }
+    }
+}
+

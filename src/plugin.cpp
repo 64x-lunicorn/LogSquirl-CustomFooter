@@ -387,7 +387,11 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
         // Create footer display widget, and the controller that fills it.
         st.footerWidget = new custom_footer::FooterDisplayWidget();
         api->register_footer_widget( handle, static_cast<void*>( st.footerWidget ) );
-        st.controller = new custom_footer::FooterController( st.footerWidget, dir );
+        st.controller = new custom_footer::FooterController(
+            st.footerWidget, dir, []( const QString& problem ) {
+                custom_footer::hostLog( LOGSQUIRL_LOG_WARNING,
+                                        QStringLiteral( "Custom Footer: %1" ).arg( problem ) );
+            } );
 
         // Register callback for active file changes.
         api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );

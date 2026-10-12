@@ -20,15 +20,15 @@
 #include "footercontroller.h"
 
 #include "footerconfig.h"
-#include "plugin.h"
 
 namespace custom_footer {
 
 FooterController::FooterController( FooterDisplayWidget* widget, const QString& configDir,
-                                    QObject* parent )
+                                    Warn warn, QObject* parent )
     : QObject( parent )
     , widget_( widget )
     , configDir_( configDir )
+    , warn_( std::move( warn ) )
 {
     // Collect the changes of a busy log, without postponing the scan for as
     // long as it keeps changing.
@@ -69,8 +69,10 @@ void FooterController::loadConfig()
     scanner_ = std::make_shared<const FooterScanner>( FooterConfig::loadEntries( configDir_ ) );
     maxLines_ = FooterConfig::loadMaxLines( configDir_ );
 
-    for ( const auto& problem : scanner_->problems() ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, QStringLiteral( "Custom Footer: %1" ).arg( problem ) );
+    if ( warn_ ) {
+        for ( const auto& problem : scanner_->problems() ) {
+            warn_( problem );
+        }
     }
 }
 

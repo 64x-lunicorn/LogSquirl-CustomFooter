@@ -591,17 +591,17 @@ void FooterEditor::lineMarked( qsizetype start, qsizetype length )
     }
     const auto made = ruleFromLine( linePicker_->line(), start, length );
     linePicker_->showRule( made );
-    if ( !made ) {
+    if ( !made.isRule() ) {
         // The rule stays as the last mark made it.
         return;
     }
     panel_->commitPendingEdit();
     auto entry = model_->entry( row );
     if ( entry.key.isEmpty() || entry.key == lineKey_ ) {
-        entry.key = made->key;
+        entry.key = made.key;
     }
-    lineKey_ = made->key;
-    applySimpleRule( made->rule, entry );
+    lineKey_ = made.key;
+    applySimpleRule( made.rule, entry );
     model_->setEntry( row, entry );
     // Shown again, in simple mode, and previewed soon.
     showCurrentRule();

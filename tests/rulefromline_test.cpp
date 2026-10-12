@@ -29,8 +29,11 @@
 #include "rulefromline.h"
 #include "simplerule.h"
 
+#include <QElapsedTimer>
 #include <QFile>
+#include <QStringList>
 #include <QTemporaryDir>
+#include <QtGlobal>
 
 #include <optional>
 
@@ -40,7 +43,7 @@ namespace {
 
 /// The rule made from @p line with @p value marked: its first occurrence
 /// at or after @p from.
-std::optional<RuleFromLine> marking( const QString& line, const QString& value, int from = 0 )
+RuleFromLine marking( const QString& line, const QString& value, int from = 0 )
 {
     const auto start = line.indexOf( value, from );
     REQUIRE( start >= 0 );
@@ -87,19 +90,19 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
             THEN( "the word before it is the text before the value, the value ends at "
                   "whitespace, and the key is that word without its colon" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "VIN:" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::Whitespace );
-                REQUIRE( made->key == "VIN" );
-                REQUIRE( made->value == "WDB1234567" );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "VIN:" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::Whitespace );
+                REQUIRE( made.key == "VIN" );
+                REQUIRE( made.value == "WDB1234567" );
             }
 
             THEN( "the rule finds the VIN in the line, as a simple rule" )
             {
-                REQUIRE( extract( *made, line ) == QString( "WDB1234567" ) );
+                REQUIRE( extract( made, line ) == QString( "WDB1234567" ) );
                 FooterEntry entry;
-                applySimpleRule( made->rule, entry );
-                REQUIRE( simpleRuleOf( entry ) == made->rule );
+                applySimpleRule( made.rule, entry );
+                REQUIRE( simpleRuleOf( entry ) == made.rule );
             }
         }
 
@@ -109,10 +112,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the value is the word starting there" )
             {
-                REQUIRE( made );
-                REQUIRE( made->value == "WDB1234567" );
-                REQUIRE( made->rule.textBefore == "VIN:" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::Whitespace );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.value == "WDB1234567" );
+                REQUIRE( made.rule.textBefore == "VIN:" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::Whitespace );
             }
         }
 
@@ -122,9 +125,9 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the value is the next word" )
             {
-                REQUIRE( made );
-                REQUIRE( made->value == "WDB1234567" );
-                REQUIRE( made->rule.textBefore == "VIN:" );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.value == "WDB1234567" );
+                REQUIRE( made.rule.textBefore == "VIN:" );
             }
         }
 
@@ -134,10 +137,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the spaces are not part of the value" )
             {
-                REQUIRE( made );
-                REQUIRE( made->value == "WDB1234567" );
-                REQUIRE( made->rule.textBefore == "VIN:" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::Whitespace );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.value == "WDB1234567" );
+                REQUIRE( made.rule.textBefore == "VIN:" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::Whitespace );
             }
         }
 
@@ -147,10 +150,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the text before it is speed=, and the key speed" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "speed=" );
-                REQUIRE( made->key == "speed" );
-                REQUIRE( extract( *made, line ) == QString( "5" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "speed=" );
+                REQUIRE( made.key == "speed" );
+                REQUIRE( extract( made, line ) == QString( "5" ) );
             }
         }
     }
@@ -165,10 +168,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "they are matched literally, and the key is the longest word in them" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "[sensor.temp](°C)*+?^$|{2}\\:" );
-                REQUIRE( made->key == "sensor.temp" );
-                REQUIRE( extract( *made, line ) == QString( "21.5" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "[sensor.temp](°C)*+?^$|{2}\\:" );
+                REQUIRE( made.key == "sensor.temp" );
+                REQUIRE( extract( made, line ) == QString( "21.5" ) );
             }
         }
     }
@@ -183,10 +186,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the word before the separator belongs to the text, and is the key" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "id =" );
-                REQUIRE( made->key == "id" );
-                REQUIRE( extract( *made, line ) == QString( "42" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "id =" );
+                REQUIRE( made.key == "id" );
+                REQUIRE( extract( made, line ) == QString( "42" ) );
             }
         }
     }
@@ -201,11 +204,11 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the value ends at the end of the line, and the key keeps its letters" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "Wert:" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::EndOfLine );
-                REQUIRE( made->key == "Wert" );
-                REQUIRE( extract( *made, line ) == QString::fromUtf8( "12 m²" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "Wert:" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::EndOfLine );
+                REQUIRE( made.key == "Wert" );
+                REQUIRE( extract( made, line ) == QString::fromUtf8( "12 m²" ) );
             }
         }
 
@@ -216,8 +219,8 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "it is the key" )
             {
-                REQUIRE( made );
-                REQUIRE( made->key == QString::fromUtf8( "Größe" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.key == QString::fromUtf8( "Größe" ) );
             }
         }
     }
@@ -232,10 +235,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the tab after the text is the whitespace that is ignored" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "VIN:" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::Whitespace );
-                REQUIRE( extract( *made, line ) == QString( "WDB1" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "VIN:" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::Whitespace );
+                REQUIRE( extract( made, line ) == QString( "WDB1" ) );
             }
         }
     }
@@ -250,11 +253,11 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the value is the name, up to the end of the line" )
             {
-                REQUIRE( made );
-                REQUIRE( made->value == "John Smith" );
-                REQUIRE( made->rule.textBefore == "Owner:" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::EndOfLine );
-                REQUIRE( extract( *made, line ) == QString( "John Smith" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.value == "John Smith" );
+                REQUIRE( made.rule.textBefore == "Owner:" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::EndOfLine );
+                REQUIRE( extract( made, line ) == QString( "John Smith" ) );
             }
         }
     }
@@ -268,10 +271,10 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the value ends at the comma" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.valueEnd == ValueEnd::Character );
-                REQUIRE( made->rule.endCharacter == "," );
-                REQUIRE( extract( *made, line ) == QString( "5" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.valueEnd == ValueEnd::Character );
+                REQUIRE( made.rule.endCharacter == "," );
+                REQUIRE( extract( made, line ) == QString( "5" ) );
             }
         }
 
@@ -282,29 +285,41 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
 
             THEN( "the value ends at the semicolon" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "msg=" );
-                REQUIRE( made->rule.valueEnd == ValueEnd::Character );
-                REQUIRE( made->rule.endCharacter == ";" );
-                REQUIRE( extract( *made, line ) == QString( "hello world" ) );
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "msg=" );
+                REQUIRE( made.rule.valueEnd == ValueEnd::Character );
+                REQUIRE( made.rule.endCharacter == ";" );
+                REQUIRE( extract( made, line ) == QString( "hello world" ) );
             }
         }
     }
 
     GIVEN( "the text before the value also earlier in the line" )
     {
-        const QString line = "a: 1\ta: 2";
+        const QString line = "08:15 a: 1 a: 2 a: 3";
 
-        WHEN( "the second value is marked" )
+        WHEN( "the last value is marked" )
         {
-            const auto made = marking( line, "2" );
+            const auto made = marking( line, "3" );
 
-            THEN( "the text reaches back until the rule finds the marked value, not the first" )
+            THEN( "no rule is made, as it would find the first value; the problem says so" )
             {
-                REQUIRE( made );
-                REQUIRE( made->rule.textBefore == "1\ta:" );
-                REQUIRE( made->key == "a" );
-                REQUIRE( extract( *made, line ) == QString( "2" ) );
+                REQUIRE_FALSE( made.isRule() );
+                REQUIRE( made.problem == MarkProblem::TextBeforeEarlier );
+                REQUIRE( made.rule.textBefore == "a:" );
+                REQUIRE( made.value == "3" );
+            }
+        }
+
+        WHEN( "the first value is marked" )
+        {
+            const auto made = marking( line, "1", line.indexOf( "a:" ) );
+
+            THEN( "the rule finds it" )
+            {
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "a:" );
+                REQUIRE( extract( made, line ) == QString( "1" ) );
             }
         }
     }
@@ -312,69 +327,222 @@ SCENARIO( "A rule is made from the value marked in a sample line", "[rulefromlin
     GIVEN( "marks that make no rule" )
     {
         const QString line = "WDB123 is the VIN  ";
+        struct Mark {
+            const char* what;
+            qsizetype start;
+            qsizetype length;
+            MarkProblem problem;
+        };
+        const QList<Mark> marks{
+            { "a value at the start of the line", 0, 6, MarkProblem::NoTextBefore },
+            { "a click into the whitespace at the end", line.size() - 1, 0,
+              MarkProblem::NothingMarked },
+            { "a click after the end", line.size(), 0, MarkProblem::NothingMarked },
+            { "whitespace only", line.size() - 2, 2, MarkProblem::NothingMarked },
+            { "a mark starting before the line", -1, 3, MarkProblem::NothingMarked },
+            { "a mark reaching past the line", 4, 100, MarkProblem::NothingMarked },
+        };
 
-        THEN( "a value at the start of the line has no text before it" )
+        WHEN( "each is made into a rule" )
         {
-            REQUIRE_FALSE( marking( line, "WDB123" ) );
+            QList<RuleFromLine> made;
+            for ( const auto& mark : marks ) {
+                made.append( ruleFromLine( line, mark.start, mark.length ) );
+            }
+            const auto empty = ruleFromLine( QString(), 0, 0 );
+
+            THEN( "none makes a rule, and each says why" )
+            {
+                for ( qsizetype i = 0; i < marks.size(); ++i ) {
+                    INFO( marks.at( i ).what );
+                    REQUIRE_FALSE( made.at( i ).isRule() );
+                    REQUIRE( made.at( i ).problem == marks.at( i ).problem );
+                }
+                REQUIRE( empty.problem == MarkProblem::NothingMarked );
+            }
         }
+    }
 
-        THEN( "a click into the whitespace at the end marks nothing" )
+    GIVEN( "a mark starting on a combining mark or inside a surrogate pair" )
+    {
+        // "e" and a combining acute accent; an emoji of two UTF-16 units.
+        const QString line = QString::fromUtf8( "k: e\xCC\x81t\xF0\x9F\x98\x80 x" );
+
+        WHEN( "the mark starts on the accent, and on the emoji's second unit" )
         {
-            REQUIRE_FALSE( ruleFromLine( line, line.size() - 1, 0 ) );
-            REQUIRE_FALSE( ruleFromLine( line, line.size(), 0 ) );
+            const auto onAccent = ruleFromLine( line, line.indexOf( "e" ) + 1, 0 );
+            const auto inEmoji = ruleFromLine( line, line.indexOf( "t" ) + 2, 0 );
+
+            THEN( "it starts at the character the accent belongs to, and at the emoji" )
+            {
+                REQUIRE( onAccent.isRule() );
+                REQUIRE( onAccent.value == QString::fromUtf8( "e\xCC\x81t\xF0\x9F\x98\x80" ) );
+                REQUIRE( onAccent.rule.textBefore == "k:" );
+                REQUIRE( inEmoji.isRule() );
+                REQUIRE( inEmoji.value == QString::fromUtf8( "\xF0\x9F\x98\x80" ) );
+                REQUIRE( inEmoji.rule.textBefore == QString::fromUtf8( "e\xCC\x81t" ) );
+            }
         }
+    }
+}
 
-        THEN( "a mark of whitespace only marks nothing" )
-        {
-            REQUIRE_FALSE( ruleFromLine( line, line.size() - 2, 2 ) );
+namespace {
+
+/// Counts the warnings Qt logs while it lives, e.g. of an invalid
+/// QRegularExpression used for matching.
+class WarningCounter {
+public:
+    WarningCounter()
+    {
+        counter() = 0;
+        previous_ = qInstallMessageHandler( &count );
+    }
+    ~WarningCounter()
+    {
+        qInstallMessageHandler( previous_ );
+    }
+    WarningCounter( const WarningCounter& ) = delete;
+    WarningCounter& operator=( const WarningCounter& ) = delete;
+
+    int warnings() const
+    {
+        return counter();
+    }
+
+private:
+    static int& counter()
+    {
+        static int warnings = 0;
+        return warnings;
+    }
+    static void count( QtMsgType type, const QMessageLogContext&, const QString& )
+    {
+        if ( type != QtDebugMsg && type != QtInfoMsg ) {
+            ++counter();
         }
+    }
 
-        THEN( "an empty line marks nothing" )
+    QtMessageHandler previous_ = nullptr;
+};
+
+/// A line of about 1 MiB, as long as the host hands over.
+constexpr qsizetype kMiB = 1024 * 1024;
+
+} // namespace
+
+SCENARIO( "A rule is made from a mark in a very long line in bounded time", "[rulefromline][long]" )
+{
+    GIVEN( "a 1 MiB line of the same text before many values" )
+    {
+        const QString line = QString( "a: 1 " ).repeated( kMiB / 5 ) + "a: 2";
+
+        WHEN( "the last value is marked, and a value within the footer's line limit clicked" )
         {
-            REQUIRE_FALSE( ruleFromLine( QString(), 0, 0 ) );
+            WarningCounter counter;
+            QElapsedTimer timer;
+            timer.start();
+            const auto marked = marking( line, "2", line.size() - 1 );
+            const auto clicked = ruleFromLine( line, 5 * 1000 + 3, 0 );
+            const auto elapsed = timer.elapsed();
+
+            THEN( "no rule is made, as the footer reads only the start of a long line, and as "
+                  "the text before is not unique, quickly and without warnings" )
+            {
+                REQUIRE( marked.problem == MarkProblem::BeyondLineLimit );
+                REQUIRE( clicked.problem == MarkProblem::TextBeforeEarlier );
+                REQUIRE( clicked.value == "1" );
+                REQUIRE( elapsed < 2000 );
+                REQUIRE( counter.warnings() == 0 );
+            }
         }
+    }
 
-        THEN( "a mark outside the line marks nothing" )
+    GIVEN( "a 1 MiB line of one word, before a value" )
+    {
+        const QString line = QString( kMiB, QLatin1Char( 'x' ) ) + ": 5";
+
+        WHEN( "the value is marked" )
         {
-            REQUIRE_FALSE( ruleFromLine( line, -1, 3 ) );
-            REQUIRE_FALSE( ruleFromLine( line, 4, 100 ) );
+            WarningCounter counter;
+            QElapsedTimer timer;
+            timer.start();
+            const auto made = marking( line, "5", line.size() - 1 );
+            const auto elapsed = timer.elapsed();
+
+            THEN( "the footer would not see it, past its line limit, and that is said, quickly "
+                  "and without warnings" )
+            {
+                REQUIRE( made.problem == MarkProblem::BeyondLineLimit );
+                REQUIRE( elapsed < 2000 );
+                REQUIRE( counter.warnings() == 0 );
+            }
+        }
+    }
+
+    GIVEN( "a value early in a 1 MiB line" )
+    {
+        const QString line = "VIN: WDB1 " + QString( "filler " ).repeated( kMiB / 7 );
+
+        WHEN( "it is marked" )
+        {
+            WarningCounter counter;
+            QElapsedTimer timer;
+            timer.start();
+            const auto made = marking( line, "WDB1" );
+            const auto elapsed = timer.elapsed();
+
+            THEN( "the rule is made, quickly and without warnings" )
+            {
+                REQUIRE( made.isRule() );
+                REQUIRE( made.rule.textBefore == "VIN:" );
+                REQUIRE( elapsed < 2000 );
+                REQUIRE( counter.warnings() == 0 );
+            }
         }
     }
 }
 
 SCENARIO( "A key is suggested from the text before the value", "[rulefromline]" )
 {
-    THEN( "punctuation around a word is dropped" )
+    GIVEN( "texts before values" )
     {
-        REQUIRE( suggestedKey( "VIN:" ) == "VIN" );
-        REQUIRE( suggestedKey( "[VIN]" ) == "VIN" );
-        REQUIRE( suggestedKey( "speed=" ) == "speed" );
-        REQUIRE( suggestedKey( "id =" ) == "id" );
-    }
+        const QList<QPair<QString, QString>> cases{
+            // Punctuation around a word is dropped.
+            { "VIN:", "VIN" },
+            { "[VIN]", "VIN" },
+            { "speed=", "speed" },
+            { "id =", "id" },
+            // Dots, dashes and underscores inside a word are kept.
+            { "app.version:", "app.version" },
+            { "Firmware-Version:", "Firmware-Version" },
+            { "serial_no=", "serial_no" },
+            { "-v.", "v" },
+            // Of several words the longest, the last one of equal length.
+            { QString::fromUtf8( "[sensor.temp](°C):" ), "sensor.temp" },
+            { "1\ta:", "a" },
+            { "ab cd:", "cd" },
+            // Letters of any script, also outside the BMP.
+            { QString::fromUtf8( "Größe:" ), QString::fromUtf8( "Größe" ) },
+            { QString::fromUtf8( "\xF0\x9D\x90\x80x:" ), QString::fromUtf8( "\xF0\x9D\x90\x80x" ) },
+            // Without a word there is no suggestion.
+            { "->", "" },
+            { "", "" },
+        };
 
-    THEN( "dots, dashes and underscores inside a word are kept" )
-    {
-        REQUIRE( suggestedKey( "app.version:" ) == "app.version" );
-        REQUIRE( suggestedKey( "Firmware-Version:" ) == "Firmware-Version" );
-        REQUIRE( suggestedKey( "serial_no=" ) == "serial_no" );
-        REQUIRE( suggestedKey( "-v." ) == "v" );
-    }
+        WHEN( "a key is suggested for each" )
+        {
+            QStringList keys;
+            for ( const auto& [ text, expected ] : cases ) {
+                keys.append( suggestedKey( text ) );
+            }
 
-    THEN( "of several words the longest is taken, the last one of equal length" )
-    {
-        REQUIRE( suggestedKey( "[sensor.temp](°C):" ) == "sensor.temp" );
-        REQUIRE( suggestedKey( "1\ta:" ) == "a" );
-        REQUIRE( suggestedKey( "ab cd:" ) == "cd" );
-    }
-
-    THEN( "letters of any script are kept" )
-    {
-        REQUIRE( suggestedKey( QString::fromUtf8( "Größe:" ) ) == QString::fromUtf8( "Größe" ) );
-    }
-
-    THEN( "without a word there is no suggestion" )
-    {
-        REQUIRE( suggestedKey( "->" ).isEmpty() );
-        REQUIRE( suggestedKey( QString() ).isEmpty() );
+            THEN( "it is the expected one" )
+            {
+                for ( qsizetype i = 0; i < cases.size(); ++i ) {
+                    INFO( cases.at( i ).first.toStdString() );
+                    REQUIRE( keys.at( i ) == cases.at( i ).second );
+                }
+            }
+        }
     }
 }

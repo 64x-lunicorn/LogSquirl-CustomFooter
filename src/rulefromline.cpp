@@ -18,9 +18,11 @@
  */
 
 #include "rulefromline.h"
+#include "footerscanner.h"
 
 #include <QList>
 #include <QRegularExpression>
+#include <QStringView>
 
 namespace custom_footer {
 
@@ -34,47 +36,66 @@ bool isSpace( QChar c )
            || c == QLatin1Char( '\v' ) || c == QLatin1Char( '\f' ) || c == QLatin1Char( '\r' );
 }
 
-/// Whether @p text has a letter or a digit, in any script.
-bool hasLetterOrDigit( const QString& text )
+/// The code point at @p at in @p text, and in @p units how many UTF-16
+/// units it takes: two for a surrogate pair, else one.
+char32_t codePointAt( QStringView text, qsizetype at, qsizetype* units )
 {
-    const auto codePoints = text.toUcs4();
-    for ( const auto codePoint : codePoints ) {
-        if ( QChar::isLetterOrNumber( codePoint ) ) {
+    const auto c = text.at( at );
+    if ( c.isHighSurrogate() && at + 1 < text.size() && text.at( at + 1 ).isLowSurrogate() ) {
+        *units = 2;
+        return QChar::surrogateToUcs4( c, text.at( at + 1 ) );
+    }
+    *units = 1;
+    return c.unicode();
+}
+
+/// Whether @p text has a letter or a digit, in any script.
+bool hasLetterOrDigit( QStringView text )
+{
+    qsizetype units = 1;
+    for ( qsizetype at = 0; at < text.size(); at += units ) {
+        if ( QChar::isLetterOrNumber( codePointAt( text, at, &units ) ) ) {
             return true;
         }
     }
     return false;
 }
 
-/// Whether @p rule, compiled as the scanner compiles it, finds exactly
-/// @p value at @p start of @p line.
-bool findsExactly( const SimpleRule& rule, const QString& line, qsizetype start,
-                   const QString& value )
+/// Whether the unit at @p at belongs to the character before it: a
+/// combining mark, or the second half of a surrogate pair.
+bool continuesCharacter( const QString& line, qsizetype at )
 {
-    const auto pattern = simpleLinePattern( rule );
-    if ( pattern.isEmpty() ) {
+    if ( at <= 0 || at >= line.size() ) {
         return false;
     }
-    const auto match = QRegularExpression( pattern ).match( line );
-    return match.hasMatch() && match.capturedStart( 1 ) == start && match.captured( 1 ) == value;
+    const auto c = line.at( at );
+    return c.isMark() || ( c.isLowSurrogate() && line.at( at - 1 ).isHighSurrogate() );
 }
 
-/// Where each word before @p end starts, the nearest first. Words are
-/// separated by whitespace; @p end is just after a word.
-QList<qsizetype> wordStartsBefore( const QString& line, qsizetype end )
+/// Where the word before @p end starts; @p end is just after the word.
+qsizetype wordStartBefore( const QString& line, qsizetype end )
 {
-    QList<qsizetype> starts;
     auto at = end;
-    while ( at > 0 ) {
-        while ( at > 0 && !isSpace( line.at( at - 1 ) ) ) {
-            --at;
-        }
-        starts.append( at );
-        while ( at > 0 && isSpace( line.at( at - 1 ) ) ) {
-            --at;
+    while ( at > 0 && !isSpace( line.at( at - 1 ) ) ) {
+        --at;
+    }
+    return at;
+}
+
+/// The part of @p line the footer reads: its first kMaxLineBytes in UTF-8,
+/// in UTF-16 units.
+qsizetype readLength( const QString& line )
+{
+    qint64 bytes = 0;
+    for ( qsizetype at = 0; at < line.size(); ++at ) {
+        const auto c = line.at( at ).unicode();
+        // A surrogate pair is four bytes, two for each half.
+        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : ( c >= 0xD800 && c < 0xE000 ) ? 2 : 3;
+        if ( bytes > FooterScanner::kMaxLineBytes ) {
+            return at;
         }
     }
-    return starts;
+    return line.size();
 }
 
 /// The ways the value may end, the most likely first: at whitespace, at the
@@ -82,14 +103,13 @@ QList<qsizetype> wordStartsBefore( const QString& line, qsizetype end )
 QList<SimpleRule> valueEnds( const QString& line, qsizetype valueEnd )
 {
     QList<SimpleRule> ends;
-    SimpleRule atWhitespace;
-    ends.append( atWhitespace );
+    ends.append( SimpleRule() );
     if ( valueEnd < line.size() && !isSpace( line.at( valueEnd ) ) ) {
         SimpleRule atCharacter;
         atCharacter.valueEnd = ValueEnd::Character;
-        const bool pair = line.at( valueEnd ).isHighSurrogate() && valueEnd + 1 < line.size()
-                          && line.at( valueEnd + 1 ).isLowSurrogate();
-        atCharacter.endCharacter = line.mid( valueEnd, pair ? 2 : 1 );
+        qsizetype units = 1;
+        codePointAt( line, valueEnd, &units );
+        atCharacter.endCharacter = line.mid( valueEnd, units );
         if ( endCharacterProblem( atCharacter ).isEmpty() ) {
             ends.append( atCharacter );
         }
@@ -102,16 +122,24 @@ QList<SimpleRule> valueEnds( const QString& line, qsizetype valueEnd )
 
 } // namespace
 
-std::optional<RuleFromLine> ruleFromLine( const QString& line, qsizetype start, qsizetype length )
+RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length )
 {
+    RuleFromLine made;
+    made.problem = MarkProblem::NothingMarked;
     if ( start < 0 || length < 0 || start > line.size() || length > line.size() - start ) {
-        return std::nullopt;
+        return made;
     }
 
     // The value: the mark without the whitespace around it, or for a click
-    // the word starting at or after it.
+    // the word starting at or after it; whole characters only.
     auto valueStart = start;
     auto valueEnd = start + length;
+    while ( continuesCharacter( line, valueStart ) ) {
+        --valueStart;
+    }
+    while ( continuesCharacter( line, valueEnd ) ) {
+        ++valueEnd;
+    }
     while ( valueStart < valueEnd && isSpace( line.at( valueStart ) ) ) {
         ++valueStart;
     }
@@ -128,9 +156,9 @@ std::optional<RuleFromLine> ruleFromLine( const QString& line, qsizetype start, 
         --valueEnd;
     }
     if ( valueEnd == valueStart ) {
-        return std::nullopt;
+        return made;
     }
-    const auto value = line.mid( valueStart, valueEnd - valueStart );
+    made.value = line.mid( valueStart, valueEnd - valueStart );
 
     // The text before it ends at its last non-whitespace, as the rule
     // ignores whitespace between the text and the value.
@@ -139,27 +167,63 @@ std::optional<RuleFromLine> ruleFromLine( const QString& line, qsizetype start, 
         --textEnd;
     }
     if ( textEnd == 0 ) {
-        return std::nullopt;
+        made.problem = MarkProblem::NoTextBefore;
+        return made;
     }
 
-    auto starts = wordStartsBefore( line, textEnd );
-    // A separator on its own, such as `=`, says little: the word before it
-    // belongs to the text.
-    if ( starts.size() > 1
-         && !hasLetterOrDigit( line.mid( starts.first(), textEnd - starts.first() ) ) ) {
-        starts.removeFirst();
+    // The footer matches a long line's start only.
+    const auto read = readLength( line );
+    if ( valueEnd > read ) {
+        made.problem = MarkProblem::BeyondLineLimit;
+        return made;
     }
-    const auto ends = valueEnds( line, valueEnd );
-    for ( const auto textStart : std::as_const( starts ) ) {
-        const auto textBefore = line.mid( textStart, textEnd - textStart );
-        for ( auto rule : ends ) {
-            rule.textBefore = textBefore;
-            if ( findsExactly( rule, line, valueStart, value ) ) {
-                return RuleFromLine{ suggestedKey( textBefore ), rule, value };
-            }
+
+    auto textStart = wordStartBefore( line, textEnd );
+    if ( !hasLetterOrDigit( QStringView( line ).mid( textStart, textEnd - textStart ) ) ) {
+        // A separator on its own, such as `=`, says little: the word before
+        // it belongs to the text.
+        auto before = textStart;
+        while ( before > 0 && isSpace( line.at( before - 1 ) ) ) {
+            --before;
+        }
+        if ( before > 0 ) {
+            textStart = wordStartBefore( line, before );
         }
     }
-    return std::nullopt;
+    // Short enough to keep matching cheap; whole characters only.
+    textStart = qMax( textStart, textEnd - kMaxTextBefore );
+    while ( continuesCharacter( line, textStart ) ) {
+        ++textStart;
+    }
+    made.rule.textBefore = line.mid( textStart, textEnd - textStart );
+
+    const QString readPart = line.left( read );
+    bool earlier = false;
+    for ( auto rule : valueEnds( line, valueEnd ) ) {
+        rule.textBefore = made.rule.textBefore;
+        const QRegularExpression regex( simpleLinePattern( rule ) );
+        if ( regex.pattern().isEmpty() || !regex.isValid() ) {
+            continue;
+        }
+        // As the scanner matches: the first match in what it reads.
+        const auto match = regex.match( readPart );
+        if ( !match.hasMatch() ) {
+            continue;
+        }
+        if ( match.capturedStart( 0 ) < textStart ) {
+            // The same text before an earlier value.
+            earlier = true;
+            continue;
+        }
+        if ( match.capturedStart( 1 ) == valueStart && match.captured( 1 ) == made.value ) {
+            made.problem = MarkProblem::None;
+            made.rule = rule;
+            made.key = suggestedKey( rule.textBefore );
+            return made;
+        }
+    }
+    made.problem = earlier ? MarkProblem::TextBeforeEarlier : MarkProblem::NoSimpleRule;
+    return made;
 }
 
 QString suggestedKey( const QString& textBefore )
@@ -167,35 +231,35 @@ QString suggestedKey( const QString& textBefore )
     const auto isWordPart = []( char32_t c ) {
         return QChar::isLetterOrNumber( c ) || c == U'_' || c == U'.' || c == U'-';
     };
-    const auto isInnerOnly = []( char32_t c ) { return c == U'.' || c == U'-'; };
+    const auto isInnerOnly
+        = []( QChar c ) { return c == QLatin1Char( '.' ) || c == QLatin1Char( '-' ); };
 
-    QString best;
-    const auto codePoints = textBefore.toUcs4();
-    for ( qsizetype at = 0; at < codePoints.size(); ) {
-        if ( !isWordPart( codePoints.at( at ) ) ) {
-            ++at;
+    QStringView best;
+    qsizetype units = 1;
+    for ( qsizetype at = 0; at < textBefore.size(); ) {
+        if ( !isWordPart( codePointAt( textBefore, at, &units ) ) ) {
+            at += units;
             continue;
         }
         auto first = at;
         auto end = at;
-        while ( end < codePoints.size() && isWordPart( codePoints.at( end ) ) ) {
-            ++end;
+        while ( end < textBefore.size() && isWordPart( codePointAt( textBefore, end, &units ) ) ) {
+            end += units;
         }
         at = end;
         // `.` and `-` only inside a word.
-        while ( first < end && isInnerOnly( codePoints.at( first ) ) ) {
+        while ( first < end && isInnerOnly( textBefore.at( first ) ) ) {
             ++first;
         }
-        while ( end > first && isInnerOnly( codePoints.at( end - 1 ) ) ) {
+        while ( end > first && isInnerOnly( textBefore.at( end - 1 ) ) ) {
             --end;
         }
-        const auto word = QString::fromUcs4(
-            reinterpret_cast<const char32_t*>( codePoints.constData() ) + first, end - first );
+        const auto word = QStringView( textBefore ).mid( first, end - first );
         if ( hasLetterOrDigit( word ) && word.size() >= best.size() ) {
             best = word;
         }
     }
-    return best;
+    return best.toString();
 }
 
 } // namespace custom_footer

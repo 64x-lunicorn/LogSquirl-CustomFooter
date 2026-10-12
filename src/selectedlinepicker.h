@@ -24,8 +24,6 @@
 #include <QGroupBox>
 #include <QString>
 
-#include <optional>
-
 class QLabel;
 class QLineEdit;
 
@@ -54,8 +52,8 @@ public:
     QString line() const;
 
     /// Show what the last mark made: the value and the text before it, or
-    /// that no simple rule finds the marked value.
-    void showRule( const std::optional<RuleFromLine>& rule );
+    /// why it makes no rule.
+    void showRule( const RuleFromLine& rule );
 
     /// Put the focus into the line, to click or mark the value.
     void focusLine();

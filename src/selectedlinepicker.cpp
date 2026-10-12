@@ -80,15 +80,35 @@ QString SelectedLinePicker::line() const
     return line_->text();
 }
 
-void SelectedLinePicker::showRule( const std::optional<RuleFromLine>& rule )
+void SelectedLinePicker::showRule( const RuleFromLine& rule )
 {
-    if ( !rule ) {
-        hint_->setText( tr( "No simple rule finds this value. Mark a value that has text before "
-                            "it, or edit the patterns under Advanced." ) );
+    switch ( rule.problem ) {
+    case MarkProblem::None:
+        hint_->setText( tr( "Value: “%1”, after “%2”. Click or mark again to change it." )
+                            .arg( rule.value, rule.rule.textBefore ) );
+        return;
+    case MarkProblem::NothingMarked:
+        hint_->setText( tr( "Click where the value starts in this Log Line, or mark the value." ) );
+        return;
+    case MarkProblem::NoTextBefore:
+        hint_->setText( tr( "This value starts the line, but a simple rule needs text before "
+                            "the value. Mark another value, or write an advanced rule." ) );
+        return;
+    case MarkProblem::BeyondLineLimit:
+        hint_->setText( tr( "The footer reads only the first 64 KiB of a line, and this value "
+                            "lies beyond them. Mark a value nearer the start of the line." ) );
+        return;
+    case MarkProblem::TextBeforeEarlier:
+        hint_->setText( tr( "The text before this value, “%1”, also appears earlier in the "
+                            "line, so the rule would find the earlier value. Mark a value whose "
+                            "text before it is unique, or write an advanced rule." )
+                            .arg( rule.rule.textBefore ) );
+        return;
+    case MarkProblem::NoSimpleRule:
+        hint_->setText( tr( "No simple rule finds exactly this value. Mark another value, or "
+                            "write an advanced rule." ) );
         return;
     }
-    hint_->setText( tr( "Value: “%1”, after “%2”. Click or mark again to change it." )
-                        .arg( rule->value, rule->rule.textBefore ) );
 }
 
 void SelectedLinePicker::focusLine()

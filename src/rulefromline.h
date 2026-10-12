@@ -23,15 +23,35 @@
 
 #include <QString>
 
-#include <optional>
-
 namespace custom_footer {
+
+/// Why a mark in a sample line makes no rule.
+enum class MarkProblem {
+    None,              ///< It makes a rule.
+    NothingMarked,     ///< Only whitespace, nothing, or not inside the line.
+    NoTextBefore,      ///< The value starts the line: nothing comes before it.
+    BeyondLineLimit,   ///< The value ends past the part of a long line the footer reads.
+    TextBeforeEarlier, ///< The text before the value occurs earlier in the line.
+    NoSimpleRule,      ///< No simple rule finds exactly the marked value.
+};
+
+/// The longest text before the value ruleFromLine() makes, in UTF-16 units.
+constexpr qsizetype kMaxTextBefore = 64;
 
 /// A simple rule made from a sample line, with the key suggested for it.
 struct RuleFromLine {
+    MarkProblem problem = MarkProblem::None;
     QString key; ///< Suggested from the text before the value; may be empty.
+    /// The rule; with TextBeforeEarlier or NoSimpleRule only its text before
+    /// the value is set, to tell the user.
     SimpleRule rule;
-    QString value; ///< What the rule finds in the sample line: the marked value.
+    QString value; ///< The marked value, without the whitespace around it.
+
+    /// Whether the mark makes a rule.
+    bool isRule() const
+    {
+        return problem == MarkProblem::None;
+    }
 };
 
 /**
@@ -40,21 +60,29 @@ struct RuleFromLine {
  *
  * The value is the @p length characters (UTF-16 units) at @p start, without
  * the whitespace around them; a @p length of 0 is a click, which marks the
- * word starting at the first non-whitespace at or after @p start.
+ * word starting at the first non-whitespace at or after @p start. A start
+ * on a combining mark or on the second half of a surrogate pair moves back
+ * to the character it belongs to, and an end inside one moves forward.
  * Whitespace is ASCII whitespace, as in simple rules.
  *
- * The text before the value is the word before it, with the word before
- * that when it is only punctuation (`id =`), and as many words more as the
- * rule needs to find the marked value rather than an earlier one. The value
- * ends at whitespace if it is one word followed by whitespace or the end of
- * the line, else at the character after it, else at the end of the line;
- * the first of these that finds exactly the marked value is taken. The key
- * is suggestedKey() of the text.
+ * The text before the value is the word directly before it, with the word
+ * before that when it has no letter or digit (`id =`), and at most its last
+ * kMaxTextBefore characters. The value ends at
+ * whitespace if it is one word followed by whitespace or the end of the
+ * line, else at the character after it, else at the end of the line: the
+ * first of these whose rule finds exactly the marked value is taken. The
+ * key is suggestedKey() of the text.
  *
- * Nothing when nothing is marked, the mark is outside the line, the value
- * has no text before it, or no simple rule finds exactly the marked value.
+ * No rule (see MarkProblem) when nothing is marked, the value starts the
+ * line, it ends past the first FooterScanner::kMaxLineBytes of the line
+ * (the footer reads no further), the text before it occurs earlier in the
+ * line so that the rule would find an earlier value, or no simple rule
+ * finds exactly the marked value. The work is bounded and linear in the
+ * length of the line: at most three matches, within the part of the line
+ * the footer reads, of patterns made of a text of at most kMaxTextBefore
+ * characters.
  */
-std::optional<RuleFromLine> ruleFromLine( const QString& line, qsizetype start, qsizetype length );
+RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length );
 
 /**
  * A key for the value after @p textBefore: its longest word, the last of

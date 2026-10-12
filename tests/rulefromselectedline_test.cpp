@@ -293,7 +293,7 @@ SCENARIO( "The rule editor makes a new simple rule from a Log Line",
                 {
                     REQUIRE( ui.textBefore->text() == "VIN:" );
                     REQUIRE( ui.key->text() == "VIN" );
-                    REQUIRE( ui.hint->text().contains( "No simple rule" ) );
+                    REQUIRE( ui.hint->text().contains( "starts the line" ) );
                 }
             }
         }

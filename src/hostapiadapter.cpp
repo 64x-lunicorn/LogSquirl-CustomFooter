@@ -39,8 +39,11 @@ struct LabRequest {
 };
 
 /// The Regex Labs not answered yet, by the number the host got as
-/// user_data. Never destroyed: an answer during static destruction finds
-/// it still there. Touched on the UI thread only.
+/// user_data. LogSquirl's contract already rules out an answer after the
+/// plugin is shut down (it drops them with the plugin's answer context,
+/// ADR 0017); this table is extra protection, against a second or late
+/// answer all the same. Never destroyed: an answer during static
+/// destruction finds it still there. Touched on the UI thread only.
 std::map<quintptr, LabRequest>& labRequests()
 {
     static auto* requests = new std::map<quintptr, LabRequest>;
@@ -56,30 +59,36 @@ quintptr nextLabNumber()
 }
 
 /// Called by the host, once, on the UI thread, with a Regex Lab's answer.
-void onRegexLabAnswer( void* userData, int result, const char* pattern, int flags )
+/// Nothing may throw out of it: the host is C.
+void onRegexLabAnswer( void* userData, int result, const char* pattern, int flags ) noexcept
 {
-    auto& requests = labRequests();
-    const auto found = requests.find( reinterpret_cast<quintptr>( userData ) );
-    if ( found == requests.end() ) {
-        // Answered before, or its adapter is gone: the plugin was shut down.
-        return;
-    }
-    // Taken out first: done may open another Lab, or shut the plugin down.
-    auto request = std::move( found->second );
-    requests.erase( found );
-
-    HostFunctions host;
-    host.log = request.owner->functions().log;
-    guarded( host, "the Regex Lab's answer", [ & ] {
-        if ( !request.context ) {
+    // Before the answer is taken out, there is no log to report a failure to.
+    static const HostFunctions nobody;
+    guarded( nobody, "the Regex Lab's answer", [ & ] {
+        auto& requests = labRequests();
+        const auto found = requests.find( reinterpret_cast<quintptr>( userData ) );
+        if ( found == requests.end() ) {
+            // Answered before, or its adapter is gone: the plugin was shut down.
             return;
         }
-        std::optional<RegexLabPattern> applied;
-        if ( result == LOGSQUIRL_REGEX_LAB_APPLIED && pattern ) {
-            applied = RegexLabPattern{ QString::fromUtf8( pattern ),
-                                       ( flags & LOGSQUIRL_REGEX_LAB_MATCH_CASE ) != 0 };
-        }
-        request.done( applied );
+        // Taken out first: done may open another Lab, or shut the plugin
+        // down, which destroys the adapter; so its log is copied too.
+        auto request = std::move( found->second );
+        requests.erase( found );
+        HostFunctions host;
+        host.log = request.owner->functions().log;
+
+        guarded( host, "the Regex Lab's answer", [ & ] {
+            if ( !request.context ) {
+                return;
+            }
+            std::optional<RegexLabPattern> applied;
+            if ( result == LOGSQUIRL_REGEX_LAB_APPLIED && pattern ) {
+                applied = RegexLabPattern{ QString::fromUtf8( pattern ),
+                                           ( flags & LOGSQUIRL_REGEX_LAB_MATCH_CASE ) != 0 };
+            }
+            request.done( applied );
+        } );
     } );
 }
 

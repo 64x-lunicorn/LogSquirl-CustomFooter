@@ -107,8 +107,11 @@ struct Jobs {
         };
     }
 
-    /// Wait, without handling events, until @p runs jobs have returned, so
-    /// that their results are on their way to the context's thread.
+    /// Wait, without handling events, until @p runs jobs have returned, and
+    /// a little longer, so that their results are likely, though not
+    /// guaranteed, on their way to the context's thread. The tests that use
+    /// it hold either way: a result that is not yet on its way when the
+    /// test goes on is dropped all the same, only later.
     bool waitReturned( int runs )
     {
         QElapsedTimer timer;

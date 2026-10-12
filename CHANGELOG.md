@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Test a pattern in the Regex Lab** — **Test…** next to a rule's line
+  pattern and value pattern opens it in LogSquirl's Regex Lab. Apply in
+  the Lab writes the pattern into that rule as if typed, so validation and
+  the live preview follow; Cancel or closing the Lab changes nothing. The
+  Lab's Match case is on unless the pattern starts with `(?i)`, and
+  applying with Match case off puts `(?i)` in front. In simple mode the
+  generated line pattern can be tested; applying a changed one switches
+  the rule to Advanced. The pattern goes to the rule the Lab was opened
+  for, even if another rule is selected or the rule moved meanwhile, and
+  is dropped if that rule was removed or the editor closed. One Lab is
+  open at a time. Needs LogSquirl 26.11; on 26.10 the buttons are disabled
+  with the tooltip "Needs LogSquirl 26.11 or later".
+
 ### Changed
 - **Footer session** — one module now owns the rules in the config
   directory, the active file, the footer's controller and the rule

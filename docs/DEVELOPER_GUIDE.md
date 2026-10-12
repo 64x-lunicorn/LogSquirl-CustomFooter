@@ -248,8 +248,12 @@ value. `HostApiAdapter` fills it from the host's function table; tests
 fill it with lambdas. The controller gets its warning sink from the
 session as a plain function, built from `log`. `has( HostFeature )` tells
 whether the host offers `HostFeature::RegexLab`, `GoToLogLine` or
-`SelectedLogLines`, derived from which members are set; the editor
-features of #20–#22 ask it before they show their buttons.
+`SelectedLogLines`, derived from which members are set. The editor gets
+what it needs of them when the session opens it: `openEditor()` hands
+it the Regex Lab with `FooterEditor::setRegexLab()`, wrapped in
+`guarded()` so that a throwing host function is logged and counts as a
+Lab that did not open, or nothing on a host without it (see
+[Regex Lab](#regex-lab)).
 
 ### Host functions
 
@@ -633,6 +637,68 @@ chosen for the selected rule is kept. Tests: `tests/simplerule_test.cpp`,
 
 The editor never changes rules it only shows: a config saved by 0.3.0 is
 saved back byte for byte (`tests/configroundtrip_test.cpp`).
+
+### Regex Lab
+
+**Test…** (`testLinePatternButton`, `testValuePatternButton`) sits next
+to each pattern field of `RuleDetailPanel`. The panel only emits
+`patternTestRequested( PatternField )` and takes an applied pattern back
+with `setPattern( field, pattern )`, which sets the field's text as typing
+does, so `edited()` follows and the editor stores the rule, re-checks it
+and schedules the preview. `setPatternTestUnavailable( reason )` disables
+both buttons with the reason as tooltip; otherwise the panel enables them
+by mode (below).
+
+`FooterEditor` opens the Lab through the `OpenRegexLab` function that
+`setRegexLab()` gave it (`HostFunctions::openRegexLab`, see
+[Host functions](#host-functions)); empty, as by default and on LogSquirl
+26.10, Test… is disabled with "Needs LogSquirl 26.11 or later". The
+editor is the Lab's `context`, so the host never answers once the editor
+is destroyed: closing the plugin or the session with a Lab open needs
+nothing else. Decisions:
+
+- **Which rule gets the answer.** `testPattern()` keeps a
+  `QPersistentModelIndex` of the rule's row. It follows the row through
+  `moveRows()` (↑/↓, drag & drop) and becomes invalid when the row is
+  removed. An Apply for the selected rule goes through
+  `panel_->setPattern()`; for another rule, the editor sets the pattern in
+  the model with `setEntry()` (no longer an unfinished simple rule), then
+  shows the problems and schedules a preview, as an edit does. An answer
+  for a removed rule, a Cancel, or one after `done()` (`closing_`: the
+  rules are saved or dropped already) changes nothing. Edits to the
+  pattern while the Lab is open are overwritten by an Apply, the user's
+  last word.
+- **One Lab at a time.** From opening until the answer (or until
+  `openRegexLab` returns false) both buttons are disabled with "The Regex
+  Lab is open: apply or cancel it there first". The host always answers
+  an open Lab once (Cancel when its window closes), so they come back; a
+  second Lab with a second pending target is never needed.
+- **Match case.** `FooterEntry` has no case flag, and the scanner compiles
+  patterns as they are (case-sensitive). So the Lab gets `matchesCase =
+  true`, except for a pattern starting with `(?i)`, which the Lab gets
+  without the prefix and with `matchesCase = false`. An applied pattern
+  with Match case off gets `(?i)` in front, unless it already starts with
+  it or is empty. The round trip is lossless, and configs need no new
+  field.
+- **Simple mode.** Test… of the line pattern is enabled and opens the
+  generated pattern: the Lab is a good way to see what a simple rule
+  matches. `setPattern()` does nothing for an unchanged pattern, so the
+  rule stays simple; a changed one switches the panel to advanced first,
+  as checking Advanced and typing would, since simple mode's patterns are
+  read-only and only advanced mode edits them. The value pattern's Test…
+  is disabled in simple mode, which has no value pattern ("check Advanced
+  to write one").
+
+Tests: `tests/regexlab_test.cpp` drives the editor with a fake
+`OpenRegexLab` that keeps `done` and, like the host, never answers once
+the context is gone (Apply, Cancel, validation and preview following,
+Match case, simple mode, unavailable or failing Lab, the rule selected
+away, moved, removed or edited, the editor closed or destroyed);
+`tests/footersession_test.cpp` covers the session's wiring, a throwing
+host function, and the session destroyed with a Lab open;
+`tests/pluginlifecycle_test.cpp` goes through `init_ex()` and the
+FakeHost's `open_regex_lab` (flags, Apply, Cancel, an answer after
+shutdown) and checks the disabled buttons after `init()`.
 
 ### Rule templates
 

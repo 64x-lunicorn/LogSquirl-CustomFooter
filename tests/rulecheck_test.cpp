@@ -174,6 +174,20 @@ SCENARIO( "RuleCheck lists why rules cannot be used", "[rulecheck]" )
                 REQUIRE( check.canSave() == c.listing.isEmpty() );
                 REQUIRE( check.keysInUse() == c.keysInUse );
             }
+
+            THEN( "the scanner reports exactly the problems of the rules it would use" )
+            {
+                QList<FooterEntry> entries;
+                QStringList reported;
+                for ( int row = 0; row < c.rules.size(); ++row ) {
+                    const auto& entry = c.rules.at( row ).entry;
+                    entries.append( entry );
+                    if ( RuleCheck::isUsed( entry ) ) {
+                        reported += RuleCheck::listing( row, RuleCheck::problemsOf( entry ) );
+                    }
+                }
+                REQUIRE( FooterScanner( entries ).problems() == reported );
+            }
         }
     }
 }

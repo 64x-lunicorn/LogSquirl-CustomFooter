@@ -137,9 +137,7 @@ void RulePreviewView::showPreview( const FooterScanner::Preview& preview )
         showMessage( tr( "Enter a line pattern to preview what this rule finds." ) );
         return;
     case Status::InvalidPattern:
-        showMessage( tr( "This rule cannot match anything until its %1 is fixed: %2" )
-                         .arg( preview.error.section( QStringLiteral( ": " ), 0, 0 ),
-                               preview.error.section( QStringLiteral( ": " ), 1 ) ) );
+        showRuleProblem( preview.error );
         return;
     case Status::Unreadable:
         showMessage( tr( "The active file %1 cannot be read." )

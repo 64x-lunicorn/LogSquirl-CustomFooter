@@ -42,9 +42,10 @@ namespace custom_footer {
  * The rules are compiled once on construction. Rules sharing a key are
  * alternatives: the key's value comes from the first line that any of its
  * rules matches; if several of them match that line, the first rule in list
- * order wins. An enabled rule without a line pattern is incomplete and
- * skipped; one with a line pattern but without a key, or with an invalid
- * pattern, is skipped and reported in problems().
+ * order wins. Which rules are used is the RuleCheck's decision, as in the
+ * editor: an enabled rule without a line pattern is incomplete and
+ * skipped; one with a line pattern but a problem, such as no key or an
+ * invalid pattern, is skipped and reported in problems().
  */
 class FooterScanner {
 public:
@@ -96,7 +97,7 @@ public:
             Cancelled,      ///< The preview was cancelled; nothing else is set.
         };
         Status status = Status::NoFile;
-        QString error;       ///< Why a pattern is invalid.
+        QString error;       ///< Why a pattern is invalid, in the RuleCheck's words.
         QString filePath;    ///< The file previewed.
         QString key;         ///< The rule's key.
         bool enabled = true; ///< Whether the rule is enabled; a disabled one supplies nothing.
@@ -144,7 +145,8 @@ public:
 
     explicit FooterScanner( const QList<FooterEntry>& entries );
 
-    /// One message per skipped rule, in rule order.
+    /// The RuleCheck's listing of the skipped rules' problems ("Rule N: …"),
+    /// in rule order.
     const QStringList& problems() const
     {
         return problems_;
@@ -244,8 +246,8 @@ private:
     /// the one extraction valueOf() and matchOf() share.
     static std::optional<Matches> matchesOf( const Rule& rule, const QString& line );
 
-    /// Compile a rule; empty and with @p problem set if it cannot be used.
-    static std::optional<Rule> compile( const FooterEntry& entry, int index, QString* problem );
+    /// Compile a rule that has no problems (RuleCheck).
+    static Rule compile( const FooterEntry& entry, int index );
 
     /// The value a rule extracts from a line, if it matches, and where. Only
     /// the preview needs where, once per preview.

@@ -70,7 +70,8 @@ struct FakeHost {
     QWidget* unregisteredWidget = nullptr;
     void ( *activeFileCallback )( void*, const char* ) = nullptr;
     void* activeFileUserData = nullptr;
-    /// The "Custom Footer…" action, which opens the rule editor.
+    /// The action that opens the rule editor: "Custom Footer…", or "Edit
+    /// Rules…" in the Custom Footer submenu.
     void ( *menuAction )( void* ) = nullptr;
     void* menuActionUserData = nullptr;
     /// Every menu action registered, in order.
@@ -135,7 +136,8 @@ LogSquirlHostApi fakeApi()
         host().calls.append( "register_menu_action" );
         host().menuItems.append(
             { QString::fromUtf8( path ), QString::fromUtf8( label ), callback, userData } );
-        if ( QString::fromUtf8( label ) == "Custom Footer…" ) {
+        const auto name = QString::fromUtf8( label );
+        if ( name == "Custom Footer…" || name == "Edit Rules…" ) {
             host().menuAction = callback;
             host().menuActionUserData = userData;
         }
@@ -753,19 +755,30 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
             REQUIRE_FALSE( host().calls.contains( "get_selected_log_lines" ) );
         }
 
-        THEN( "it also registers Rule from selected line… in its own submenu, once the session "
-              "knows the host offers the selected Log Lines" )
+        THEN( "it registers Edit Rules… and Rule from Selected Line… in a Custom Footer "
+              "submenu instead of Custom Footer…, once the session knows the host offers the "
+              "selected Log Lines" )
         {
             REQUIRE( host().menuItems.size() == 2 );
-            REQUIRE( host().menuItems.at( 0 ).path == "Plugins" );
-            REQUIRE( host().menuItems.at( 0 ).label == "Custom Footer…" );
+            REQUIRE( host().menuItems.at( 0 ).path == "Custom Footer" );
+            REQUIRE( host().menuItems.at( 0 ).label == "Edit Rules…" );
             REQUIRE( host().menuItems.at( 1 ).path == "Custom Footer" );
-            REQUIRE( host().menuItems.at( 1 ).label == "Rule from selected line…" );
+            REQUIRE( host().menuItems.at( 1 ).label == "Rule from Selected Line…" );
             REQUIRE( host().calls
-                     == QStringList{ "log info", "get_config_dir", "register_menu_action",
-                                     "register_footer_widget", "register_menu_action",
+                     == QStringList{ "log info", "get_config_dir", "register_footer_widget",
+                                     "register_menu_action", "register_menu_action",
                                      "register_active_file_callback", "get_active_file_path",
                                      "log info" } );
+        }
+
+        AND_WHEN( "Edit Rules… is clicked" )
+        {
+            host().menuItems.at( 0 ).callback( host().menuItems.at( 0 ).userData );
+
+            THEN( "the rule editor opens" )
+            {
+                REQUIRE( openEditorWindow() );
+            }
         }
     }
 
@@ -781,7 +794,7 @@ SCENARIO( "The plugin learns from the host's table which host functions it offer
                 "Custom Footer plugin ready. Host functions: Regex Lab, Go to line." ) );
         }
 
-        THEN( "it does not offer Rule from selected line…" )
+        THEN( "it does not offer Rule from Selected Line…" )
         {
             REQUIRE( host().menuItems.size() == 1 );
             REQUIRE( host().menuItems.at( 0 ).label == "Custom Footer…" );
@@ -1040,7 +1053,7 @@ SCENARIO( "The plugin makes a rule from the Log Line selected in LogSquirl 26.11
     {
         host().selectedLines = "VIN: WDB1234567\nsecond line";
 
-        WHEN( "Rule from selected line… is clicked" )
+        WHEN( "Rule from Selected Line… is clicked" )
         {
             host().calls.clear();
             ruleFromLine.callback( ruleFromLine.userData );
@@ -1077,7 +1090,7 @@ SCENARIO( "The plugin makes a rule from the Log Line selected in LogSquirl 26.11
 
     GIVEN( "no Log Line selected in the host" )
     {
-        WHEN( "Rule from selected line… is clicked" )
+        WHEN( "Rule from Selected Line… is clicked" )
         {
             ruleFromLine.callback( ruleFromLine.userData );
 

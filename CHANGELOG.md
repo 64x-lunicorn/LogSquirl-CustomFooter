@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Footer session** — one module now owns the rules in the config
+  directory, the active file, the footer's controller and the rule
+  editor's lifetime, and its destructor defines the shutdown order: the
+  editor with its dialogs and preview first, then the footer's scan. The
+  plugin's C entry points only translate between LogSquirl and it. Nothing
+  changes for users.
+
 ### Fixed
 - **The live preview kept an old value** — once the rule editor's preview
   had skipped a change of the active file that could not alter it (e.g.

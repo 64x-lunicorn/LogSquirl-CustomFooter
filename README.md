@@ -203,14 +203,14 @@ starts, or mark the value with the mouse:
   `VIN`, `app.version=` → `app.version`). A key you type yourself is kept
   when you mark another value.
 
-The preview shows the extracted value at once. A click marks the word that
-starts there; spaces around a mark are not part of the value. Some marks
-make no rule, and the editor says why: a value at the very start of the
-line has no text before it; a value whose text before it also appears
-earlier in the line would never be found, as a rule takes the first match
-(`a: 1 a: 2` marking `2`); and a value beyond the first 64 KiB of a very
-long line is past what the footer reads. Mark another value then, or write
-an advanced rule.
+The preview shows the extracted value at once. A click marks the whole
+word it lands in; spaces around a mark are not part of the value. Of a very
+long line only the first 64 KiB are shown, as the footer reads no further.
+Some marks make no rule, and the editor says why: a value at the very
+start of the line has no text before it, and a value whose text before it
+also appears earlier in the line would never be found, as a rule takes the
+first match (`a: 1 a: 2` marking `2`). Mark another value then, or write an
+advanced rule.
 
 Like every rule, the new one gives its key the value of the **first** Log
 Line in the file it matches, not necessarily the selected one. If an

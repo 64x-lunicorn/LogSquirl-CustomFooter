@@ -19,31 +19,30 @@
 
 #include "rulepreviewer.h"
 
-#include <QElapsedTimer>
 #include <QTimer>
-
-#include <memory>
 
 #include <utility>
 
 namespace custom_footer {
 
-RulePreviewer::RulePreviewer( QObject* parent )
+RulePreviewer::RulePreviewer( QObject* parent, FollowerParts parts )
     : QObject( parent )
     , previewFunction_( &FooterScanner::preview )
     , startTimer_( new QTimer( this ) )
-    , fileWatcher_( new ActiveFileWatcher( kRescanDelayMs, this ) )
+    , follower_(
+          this,
+          [ this ]( const Preview& preview ) {
+              if ( preview.status != Preview::Status::Cancelled ) {
+                  Q_EMIT previewed( preview );
+              }
+          },
+          std::move( parts ) )
 {
     setObjectName( "rulePreviewer" );
 
     startTimer_->setSingleShot( true );
     startTimer_->setInterval( kDelayMs );
     connect( startTimer_, &QTimer::timeout, this, &RulePreviewer::startScheduled );
-
-    auto elapsed = std::make_shared<QElapsedTimer>();
-    elapsed->start();
-    clock_ = [ elapsed ] { return elapsed->elapsed(); };
-    connect( fileWatcher_, &ActiveFileWatcher::changed, this, &RulePreviewer::previewChangedFile );
 }
 
 RulePreviewer::~RulePreviewer()
@@ -53,12 +52,13 @@ RulePreviewer::~RulePreviewer()
 
 void RulePreviewer::setActiveFile( const QString& filePath )
 {
-    if ( filePath == fileWatcher_->file() ) {
-        noteChange();
+    if ( filePath == activeFile_ ) {
+        // A change of the file: followed only while its preview is.
+        follower_.nudge();
         return;
     }
 
-    fileWatcher_->setFile( filePath );
+    activeFile_ = filePath;
     if ( request_ ) {
         auto request = *request_;
         schedule( request.entries, request.rule, Start::Soon );
@@ -77,20 +77,15 @@ void RulePreviewer::setMaxLines( int maxLines )
     }
 }
 
-void RulePreviewer::setDelays( int editMs, int fileChangeMs )
+void RulePreviewer::setEditDelay( int ms )
 {
-    editDelayMs_ = editMs;
-    fileChangeDelayMs_ = fileChangeMs;
-    fileWatcher_->setDelay( fileChangeMs );
+    editDelayMs_ = ms;
 }
 
 void RulePreviewer::schedule( const QList<FooterEntry>& entries, int rule, Start start )
 {
-    previews_.drop();
-    fileWatcher_->cancelPending();
-    rerun_ = false;
-    lastFinished_.reset();
-    lastPreview_.reset();
+    // The shown preview is outdated: nothing of it runs or is followed on.
+    follower_.follow( QString(), nullptr );
 
     request_ = Request{ entries, rule };
     // Coalesced with an earlier request that was to start soon, e.g. the
@@ -117,34 +112,25 @@ void RulePreviewer::startScheduled()
 void RulePreviewer::clear()
 {
     startTimer_->stop();
-    fileWatcher_->cancelPending();
     request_.reset();
     startSoon_ = false;
-    rerun_ = false;
-    lastFinished_.reset();
-    lastPreview_.reset();
-    previews_.drop();
+    follower_.follow( QString(), nullptr );
 }
 
 void RulePreviewer::stop()
 {
     clear();
-    previews_.stop();
+    follower_.stop();
 }
 
 bool RulePreviewer::isBusy() const
 {
-    return startTimer_->isActive() || previews_.isRunning() || rerun_ || fileWatcher_->isPending();
+    return startTimer_->isActive() || follower_.status().busy;
 }
 
 void RulePreviewer::setPreviewFunction( PreviewFunction function )
 {
     previewFunction_ = std::move( function );
-}
-
-void RulePreviewer::setClock( std::function<qint64()> clock )
-{
-    clock_ = std::move( clock );
 }
 
 void RulePreviewer::start()
@@ -153,22 +139,20 @@ void RulePreviewer::start()
         return;
     }
     const auto& request = *request_;
-    const auto& filePath = fileWatcher_->file();
 
-    if ( filePath.isEmpty() ) {
+    if ( activeFile_.isEmpty() ) {
         // Nothing to read: only the patterns are checked.
         Q_EMIT previewed(
             FooterScanner::preview( QString(), request.entries, request.rule, maxLines_ ) );
         return;
     }
-    // Reading the file now: watch it again, or its directory while it is missing.
-    fileWatcher_->watch();
 
-    previews_.run(
-        [ function = previewFunction_, filePath, request,
-          maxLines = maxLines_ ]( const std::atomic_bool* cancelled ) -> Preview {
+    follower_.follow(
+        activeFile_,
+        [ function = previewFunction_, request, maxLines = maxLines_ ](
+            const QString& filePath, const Preview*, const std::atomic_bool& cancelled ) {
             try {
-                return function( filePath, request.entries, request.rule, maxLines, cancelled );
+                return function( filePath, request.entries, request.rule, maxLines, &cancelled );
             } catch ( ... ) {
                 // E.g. out of memory: better no preview than a dead host.
                 Preview failed;
@@ -177,67 +161,11 @@ void RulePreviewer::start()
                 return failed;
             }
         },
-        [ this ]( const Preview& preview ) {
-            lastFinished_ = clock_();
-            lastPreview_ = preview;
-            if ( preview.status != Preview::Status::Cancelled ) {
-                Q_EMIT previewed( preview );
-            }
-            if ( rerun_ ) {
-                // The file changed meanwhile: again, but not back to back.
-                rerun_ = false;
-                fileWatcher_->schedule();
-            }
+        // Lines appended beyond the limits, or a change that left the file
+        // as it was, cannot alter the preview.
+        []( const QString& filePath, const Preview& last ) {
+            return !FooterScanner::fileUnchangedFor( filePath, last );
         } );
-}
-
-bool RulePreviewer::followsFileChanges() const
-{
-    // Without a request or a file there is nothing to preview again, and a
-    // scheduled preview reads the file anyway.
-    return request_ && !fileWatcher_->file().isEmpty() && !startTimer_->isActive();
-}
-
-void RulePreviewer::noteChange()
-{
-    if ( !followsFileChanges() ) {
-        return;
-    }
-    if ( previews_.isRunning() ) {
-        // Let it finish, or on a busy log no preview would ever finish.
-        rerun_ = true;
-        return;
-    }
-    fileWatcher_->schedule();
-}
-
-void RulePreviewer::previewChangedFile()
-{
-    if ( !followsFileChanges() ) {
-        return;
-    }
-    if ( previews_.isRunning() ) {
-        rerun_ = true;
-        return;
-    }
-    // Never back to back: a full pause after the last preview finished,
-    // even if the change's pause ends just after it.
-    if ( lastFinished_ ) {
-        const auto since = clock_() - *lastFinished_;
-        if ( since < fileChangeDelayMs_ ) {
-            fileWatcher_->scheduleIn( static_cast<int>( fileChangeDelayMs_ - since ) );
-            return;
-        }
-    }
-    // Reading the file now: watch it again first, as start() does, so that a
-    // later change, even one made during the check below, is noticed.
-    fileWatcher_->watch();
-    // Lines appended beyond the limits, or a change that left the file as
-    // it was, cannot alter the preview.
-    if ( lastPreview_ && FooterScanner::fileUnchangedFor( fileWatcher_->file(), *lastPreview_ ) ) {
-        return;
-    }
-    start();
 }
 
 } // namespace custom_footer

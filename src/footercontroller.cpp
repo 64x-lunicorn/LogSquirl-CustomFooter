@@ -21,6 +21,8 @@
 
 #include "footerconfig.h"
 
+#include <utility>
+
 namespace custom_footer {
 
 FooterController::FooterController( FooterDisplayWidget* widget, const QString& configDir,

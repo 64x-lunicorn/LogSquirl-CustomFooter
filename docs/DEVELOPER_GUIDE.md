@@ -238,7 +238,7 @@ the C details, and sets it only when `LOGSQUIRL_HOST_API_HAS( api_size,
 
 | Member | Host function | Behaviour |
 |--------|---------------|-----------|
-| `bool openRegexLab( RegexLabPattern, const QObject* context, RegexLabDone done )` | `open_regex_lab` | Opens the Regex Lab with the pattern and its Match case flag and returns at once: true when it opened. `done` is called later, at most once: with the applied pattern on Apply, with `std::nullopt` on Cancel or when the Lab's window closes. Never once `context` (the editor that asked) is destroyed, nor after shutdown. |
+| `bool openRegexLab( const RegexLabPattern& pattern, const QObject* context, RegexLabDone done )` | `open_regex_lab` | Opens the Regex Lab with the pattern and its Match case flag and returns at once: true when it opened. `done` is called later, at most once: with the applied pattern on Apply, with `std::nullopt` on Cancel or when the Lab's window closes. Never once `context` (the editor that asked) is destroyed, nor after shutdown. |
 | `bool goToLogLine( std::uint64_t lineNumber )` | `go_to_log_line` | Selects the line in the tab in front and scrolls it into view, as Go to line does. Lines count from 1, as LogSquirl shows them. False without a Log File, or for a line it does not have (yet). |
 | `std::optional<SelectedLogLines> selectedLogLines()` | `get_selected_log_lines` | The selected Log Lines, copied at once (the host's buffer lasts only until the next call), split at `'\n'`, `truncated` when the host handed over only the first ones (1000 lines, 1 MiB). `std::nullopt` without a selection or a Log File. |
 
@@ -256,7 +256,7 @@ answers after shutdown and closes a Lab still open then (LogSquirl ADR
 0017, #662). An editor feature only has to call
 `host.openRegexLab( { pattern, matchesCase }, this, [this]( auto applied ) { … } )`.
 
-At the end of `init()` the plugin logs which host functions the session
+At the end of `init_ex()` the plugin logs which host functions the session
 has: `Custom Footer plugin ready. Host functions: Regex Lab, Go to line,
 selected Log Lines.` on LogSquirl 26.11, `… Host functions: none.` on
 26.10. Users see no change. `tests/hostapiadapter_test.cpp` drives the
@@ -291,7 +291,7 @@ order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
 the active-file callback, and pushes `get_active_file_path()` into the
-session. If any step throws, `init()` logs it, shuts down and fails. The
+session. If any step throws, `init_ex()` logs it, shuts down and fails. The
 active file is read only there and in the host's active-file callback,
 both on the UI thread, which LogSquirl 26.11 requires; the session never
 asks the host. `shutdown()` destroys the session, then

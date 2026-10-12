@@ -647,7 +647,13 @@ SCENARIO( "A footer value offers to go to its Log Line", "[footerdisplaywidget][
 
         WHEN( "a value is double-clicked" )
         {
+            int clicks = 0;
+            int copies = 0;
+            QObject::connect( shown[ 1 ], &QToolButton::clicked, [ &clicks ] { ++clicks; } );
+            const auto copied = QObject::connect(
+                QApplication::clipboard(), &QClipboard::dataChanged, [ &copies ] { ++copies; } );
             doubleClick( shown[ 1 ] );
+            QObject::disconnect( copied );
 
             THEN( "going to its Log Line is asked for, once, with the value and its line" )
             {
@@ -656,9 +662,11 @@ SCENARIO( "A footer value offers to go to its Log Line", "[footerdisplaywidget][
                 REQUIRE( requested[ 0 ].lineNumber == 7 );
             }
 
-            THEN( "its first click copied the value, as a click does" )
+            THEN( "its first click copied the value, as a click does, and only that click" )
             {
                 REQUIRE( clipboardText() == "Production" );
+                REQUIRE( clicks == 1 );
+                REQUIRE( copies == 1 );
             }
         }
 
@@ -724,8 +732,8 @@ SCENARIO( "A footer value offers to go to its Log Line", "[footerdisplaywidget][
         WHEN( "a value without a known line is shown" )
         {
             widget.updateValues( { { "VIN", "ABC123", "ABC123", 0, 0 } } );
-            const auto* item = items( widget ).value( 0 );
-            doubleClick( items( widget ).value( 0 ) );
+            auto* item = items( widget ).value( 0 );
+            doubleClick( item );
 
             THEN( "it does not offer it" )
             {

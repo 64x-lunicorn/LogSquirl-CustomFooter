@@ -159,7 +159,7 @@ struct Rig {
     std::unique_ptr<Follower> follower;
 };
 
-constexpr int kGap = Follower::kGapMs;
+constexpr int kGap = FollowerParts::kGapMs;
 
 } // namespace
 
@@ -359,10 +359,12 @@ SCENARIO( "FileFollower skips a change that cannot matter, and watches the file 
         bool matters = false;
         QString askedFile;
         std::optional<int> askedLast;
+        int rearmsWhenAsked = -1;
         rig.follower->follow( "/logs/a.log", jobs.job(),
                               [ & ]( const QString& file, const int& last ) {
                                   askedFile = file;
                                   askedLast = last;
+                                  rearmsWhenAsked = rig.changes->rearms;
                                   return matters;
                               } );
         rig.settle();
@@ -380,8 +382,10 @@ SCENARIO( "FileFollower skips a change that cannot matter, and watches the file 
                 REQUIRE( rig.started() == 1 );
                 REQUIRE_FALSE( rig.follower->status().busy );
             }
-            THEN( "the file is watched again" )
+            THEN( "the file was watched again before the predicate read it" )
             {
+                // A write during the predicate's read is then reported.
+                REQUIRE( rearmsWhenAsked == 2 );
                 REQUIRE( rig.changes->rearms == 2 );
             }
 
@@ -391,8 +395,10 @@ SCENARIO( "FileFollower skips a change that cannot matter, and watches the file 
                 rig.changes->fire();
                 rig.clock->advance( kGap );
 
-                THEN( "it is read" )
+                THEN( "it is read, watched from before the predicate, not again after it" )
                 {
+                    REQUIRE( rearmsWhenAsked == 3 );
+                    REQUIRE( rig.changes->rearms == 3 );
                     REQUIRE( rig.started() == 2 );
                     rig.settle();
                     REQUIRE( rig.delivered == std::vector<int>{ 1, 2 } );

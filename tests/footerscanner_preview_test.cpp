@@ -189,12 +189,13 @@ SCENARIO( "FooterScanner previews what a rule finds in a file", "[footerscanner]
         {
             const auto line = FooterScanner::preview( path, entries, 0 );
             REQUIRE( line.status == Status::InvalidPattern );
-            REQUIRE( line.error.startsWith( "line pattern: " ) );
-            REQUIRE( line.error.size() > QString( "line pattern: " ).size() );
+            REQUIRE( line.error
+                     == "invalid line pattern: " + FooterScanner::patternError( "mode=(" ) );
 
             const auto value = FooterScanner::preview( path, entries, 1 );
             REQUIRE( value.status == Status::InvalidPattern );
-            REQUIRE( value.error.startsWith( "value pattern: " ) );
+            REQUIRE( value.error
+                     == "invalid value pattern: " + FooterScanner::patternError( "(unclosed" ) );
         }
         THEN( "an invalid pattern is reported even without a file" )
         {

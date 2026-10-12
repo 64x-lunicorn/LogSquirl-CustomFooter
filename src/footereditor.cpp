@@ -19,14 +19,12 @@
 
 #include "footereditor.h"
 #include "footerconfig.h"
-#include "footerscanner.h"
 #include "ruledetailpanel.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
 #include "rulepreviewer.h"
 #include "rulepreviewview.h"
 #include "ruletemplatedialog.h"
-#include "simplerule.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -40,9 +38,6 @@
 #include <QTableView>
 #include <QToolButton>
 #include <QVBoxLayout>
-
-#include <algorithm>
-#include <utility>
 
 namespace custom_footer {
 
@@ -167,15 +162,14 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
              &FooterEditor::showCurrentRule );
     connect( panel_, &RuleDetailPanel::edited, this, &FooterEditor::storePanelInCurrentRule );
 
-    // Validation marks and row numbers follow every change of the rules.
-    // Moved rules keep their marks; validating again only renumbers them.
+    // The model's rule check is up to date with every signal of the model;
+    // after a change of the rows, only the listing is shown again, with the
+    // new rule numbers. Moved rules keep their marks.
     connect( model_, &RuleListModel::ruleChanged, this, &FooterEditor::ruleChanged );
-    connect( model_, &RuleListModel::rowsInserted, this,
-             [ this ]( const QModelIndex&, int first, int last ) { validateRows( first, last ); } );
-    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::listProblems );
-    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::listProblems );
-    connect( model_, &RuleListModel::modelReset, this,
-             [ this ] { validateRows( 0, model_->rowCount() - 1 ); } );
+    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::showProblems );
     connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::updateButtons );
@@ -292,13 +286,7 @@ void FooterEditor::addFromTemplate()
         connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRule );
     }
     // Only rules the scanner uses make the new one an alternative.
-    QStringList keys;
-    for ( const auto& entry : model_->entries() ) {
-        if ( entry.enabled && !entry.linePattern.isEmpty() ) {
-            keys.append( entry.key );
-        }
-    }
-    templateDialog_->reset( keys );
+    templateDialog_->reset( model_->check().keysInUse() );
     // Not exec(): the dialog stays window-modal, and tests can drive it.
     templateDialog_->open();
 }
@@ -441,9 +429,7 @@ void FooterEditor::storePanelInCurrentRule()
     if ( row < 0 ) {
         return;
     }
-    model_->setEntry( row, panel_->entry() );
-    model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
-    validateRow( row );
+    model_->setEntry( row, panel_->entry(), panel_->unfinishedSimpleRule() );
     showProblems();
     schedulePreview();
 }
@@ -455,7 +441,6 @@ void FooterEditor::ruleChanged( int row )
     if ( row == currentRow() ) {
         panel_->showEnabled( model_->entry( row ).enabled );
     }
-    validateRow( row );
     showProblems();
     // Another rule of the key may supply its value now.
     schedulePreview();
@@ -492,83 +477,12 @@ void FooterEditor::moveEntry( int from, int to )
     list_->scrollTo( model_->index( to, RuleListModel::KeyColumn ) );
 }
 
-void FooterEditor::validateRow( int row )
-{
-    ++ruleValidations_;
-    const auto& entry = model_->entry( row );
-
-    // Rules sharing a key are alternatives. A rule without a line pattern
-    // is incomplete and ignored, but one with a pattern needs a key.
-    RuleProblems problems;
-    if ( entry.enabled && !entry.linePattern.isEmpty() && entry.key.trimmed().isEmpty() ) {
-        problems.key = tr( "a rule with a line pattern needs a key" );
-    }
-    const auto patternProblem = [ this ]( const QString& pattern, const QString& what ) {
-        const auto error = patternError( pattern );
-        return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
-    };
-    // A simple rule without a usable end character has no patterns yet.
-    if ( const auto unfinished = model_->unfinishedSimpleRule( row ) ) {
-        problems.endCharacter = endCharacterProblem( *unfinished );
-    }
-    problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
-    problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
-    model_->setProblems( row, problems );
-
-    QStringList lines;
-    for ( const auto& problem :
-          { problems.key, problems.endCharacter, problems.linePattern, problems.valuePattern } ) {
-        if ( !problem.isEmpty() ) {
-            lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
-        }
-    }
-    if ( lines.isEmpty() ) {
-        problemLines_.remove( row );
-    }
-    else {
-        problemLines_.insert( row, lines );
-    }
-}
-
-void FooterEditor::validateRows( int first, int last )
-{
-    for ( int row = first; row <= last; ++row ) {
-        validateRow( row );
-    }
-    // Rows after the new ones moved down.
-    listProblems();
-}
-
-void FooterEditor::listProblems()
-{
-    problemLines_.clear();
-    for ( int row = 0; row < model_->rowCount(); ++row ) {
-        const auto problems = model_->problems( row );
-        if ( problems.isEmpty() ) {
-            continue;
-        }
-        QStringList lines;
-        for ( const auto& problem : { problems.key, problems.endCharacter, problems.linePattern,
-                                      problems.valuePattern } ) {
-            if ( !problem.isEmpty() ) {
-                lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
-            }
-        }
-        problemLines_.insert( row, lines );
-    }
-    showProblems();
-}
-
 void FooterEditor::showProblems()
 {
-    QStringList lines;
-    for ( const auto& ruleLines : std::as_const( problemLines_ ) ) {
-        lines += ruleLines;
-    }
-    const bool valid = problemLines_.isEmpty();
-
+    const auto& check = model_->check();
+    const bool valid = check.canSave();
     panel_->setProblems( model_->problems( currentRow() ) );
-    problemLabel_->setText( lines.join( '\n' ) );
+    problemLabel_->setText( check.listing().join( '\n' ) );
     problemLabel_->setVisible( !valid );
     buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
     buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
@@ -585,31 +499,16 @@ void FooterEditor::schedulePreview( RulePreviewer::Start start )
         panel_->previewView()->showNoRule();
         return;
     }
-    // A rule without a pattern because of a problem, e.g. an unfinished
-    // simple rule: the problem says more than "no line pattern".
-    const auto problems = model_->problems( row );
-    if ( model_->entry( row ).linePattern.isEmpty() && !problems.isEmpty() ) {
+    // A rule that cannot match anything, e.g. with an invalid pattern or
+    // as an unfinished simple rule: the check's problem says why, and
+    // nothing is scanned.
+    const auto problem = model_->problems( row ).preventingMatches();
+    if ( !problem.isEmpty() ) {
         previewer_->clear();
-        for ( const auto& problem : { problems.endCharacter, problems.key, problems.linePattern,
-                                      problems.valuePattern } ) {
-            if ( !problem.isEmpty() ) {
-                panel_->previewView()->showRuleProblem( problem );
-                break;
-            }
-        }
+        panel_->previewView()->showRuleProblem( problem );
         return;
     }
     previewer_->schedule( model_->entries(), row, start );
-}
-
-QString FooterEditor::patternError( const QString& pattern )
-{
-    auto known = patternErrors_.constFind( pattern );
-    if ( known == patternErrors_.constEnd() ) {
-        ++patternCompilations_;
-        known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
-    }
-    return known.value();
 }
 
 } // namespace custom_footer

@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It behaves as before: it follows a growing, rotated or truncated file,
   leaves half a second between two previews of a changing file, and
   ignores notifications that are only the file being read.
+- **One rule check** decides whether a rule is usable, for the footer and
+  the rule editor alike. The footer skips exactly the rules the editor
+  marks, and reports them in the LogSquirl log in the editor's words, e.g.
+  `Rule 2: a rule with a line pattern needs a key` instead of
+  `Rule 2 (): no key`. Problems are listed in one order everywhere: key,
+  line pattern, value pattern, end character. The preview of a rule with
+  an invalid pattern says so in the same words, and the template dialog's
+  note about an alternative no longer counts rules the footer skips.
 
 ### Fixed
 - **The live preview kept an old value** — once the rule editor's preview

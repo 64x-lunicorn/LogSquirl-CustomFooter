@@ -27,6 +27,7 @@
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
+#include "footerscanner.h"
 #include "logsquirl_plugin_api.h"
 #include "plugin.h"
 
@@ -546,7 +547,9 @@ SCENARIO( "The plugin logs what is wrong through the host", "[plugin]" )
             THEN( "the rule's problem is logged as a warning" )
             {
                 REQUIRE( host().warnings.size() == 1 );
-                REQUIRE( host().warnings.at( 0 ).startsWith( "Custom Footer: Rule 1 (Broken): " ) );
+                REQUIRE( host().warnings.at( 0 )
+                         == "Custom Footer: Rule 1: invalid line pattern: "
+                                + FooterScanner::patternError( "broken=(" ) );
             }
 
             THEN( "when the rules are loaded, after the footer widget is registered" )

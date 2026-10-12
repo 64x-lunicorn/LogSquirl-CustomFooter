@@ -18,6 +18,7 @@
  */
 
 #include "footerscanner.h"
+#include "rulecheck.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -184,47 +185,28 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
 {
     for ( int i = 0; i < entries.size(); ++i ) {
         const auto& entry = entries[ i ];
-        if ( !entry.enabled || entry.linePattern.isEmpty() ) {
+        if ( !RuleCheck::isUsed( entry ) ) {
             continue;
         }
 
-        const auto describe = [ &entry, i ]( const QString& problem ) {
-            return QStringLiteral( "Rule %1 (%2): %3" ).arg( i + 1 ).arg( entry.key, problem );
-        };
-
-        if ( entry.key.trimmed().isEmpty() ) {
-            problems_.append( describe( QStringLiteral( "no key" ) ) );
-            continue;
-        }
-
-        QString problem;
-        auto rule = compile( entry, i, &problem );
-        if ( !rule ) {
-            problems_.append( describe( problem ) );
+        // Skipped for the problems the editor shows, in its words.
+        auto rule = compile( entry, i );
+        const auto problems
+            = RuleCheck::problemsOf( RuleCheck::Rule( entry ), rule.lineRegex, rule.valueRegex );
+        if ( !problems.isEmpty() ) {
+            problems_ += RuleCheck::listing( i, problems );
             continue;
         }
 
         if ( !keys_.contains( entry.key ) ) {
             keys_.append( entry.key );
         }
-        rules_.append( std::move( *rule ) );
+        rules_.append( std::move( rule ) );
     }
 }
 
-std::optional<FooterScanner::Rule> FooterScanner::compile( const FooterEntry& entry, int index,
-                                                           QString* problem )
+FooterScanner::Rule FooterScanner::compile( const FooterEntry& entry, int index )
 {
-    const auto lineError = patternError( entry.linePattern );
-    if ( !lineError.isEmpty() ) {
-        *problem = QStringLiteral( "line pattern: %1" ).arg( lineError );
-        return std::nullopt;
-    }
-    const auto valueError = patternError( entry.valuePattern );
-    if ( !valueError.isEmpty() ) {
-        *problem = QStringLiteral( "value pattern: %1" ).arg( valueError );
-        return std::nullopt;
-    }
-
     Rule rule;
     rule.index = index;
     rule.key = entry.key;
@@ -402,9 +384,13 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         preview.status = Preview::Status::NoLinePattern;
         return preview;
     }
-    QString problem;
-    const auto selected = compile( entry, rule, &problem );
-    if ( !selected ) {
+    // A rule without a key still matches; only its patterns can keep it
+    // from matching.
+    const auto selected = compile( entry, rule );
+    const auto problem
+        = RuleCheck::problemsOf( RuleCheck::Rule( entry ), selected.lineRegex, selected.valueRegex )
+              .preventingMatches();
+    if ( !problem.isEmpty() ) {
         preview.status = Preview::Status::InvalidPattern;
         preview.error = problem;
         return preview;
@@ -414,18 +400,16 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         return preview;
     }
 
-    // The rules the footer would take the key's value from: the enabled and
-    // valid ones with this key, in list order, as the constructor keeps them.
-    QList<Rule> keyRules;
-    if ( !entry.key.trimmed().isEmpty() ) {
-        QList<FooterEntry> sameKey = entries;
-        for ( auto& other : sameKey ) {
-            other.enabled = other.enabled && other.key == entry.key;
-        }
-        keyRules = FooterScanner( sameKey ).rules_;
-        preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
-                                         [ rule ]( const Rule& r ) { return r.index != rule; } );
+    // The rules the footer would take the key's value from: the enabled
+    // ones with this key that the rule check accepts, in list order, as the
+    // constructor keeps them. None for a rule without a key.
+    QList<FooterEntry> sameKey = entries;
+    for ( auto& other : sameKey ) {
+        other.enabled = other.enabled && other.key == entry.key;
     }
+    const QList<Rule> keyRules = FooterScanner( sameKey ).rules_;
+    preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
+                                     [ rule ]( const Rule& r ) { return r.index != rule; } );
 
     QFile file( filePath );
     if ( !file.open( QIODevice::ReadOnly ) ) {
@@ -451,7 +435,7 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
                            // Where the first match is, is only needed once.
                            std::optional<FooterValue> own;
                            if ( preview.matches == 0 ) {
-                               if ( auto match = matchOf( *selected, line ) ) {
+                               if ( auto match = matchOf( selected, line ) ) {
                                    own = match->value;
                                    preview.value = std::move( match->value );
                                    preview.lineNumber = lineNumber;
@@ -463,7 +447,7 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
                                }
                            }
                            else {
-                               own = valueOf( *selected, line );
+                               own = valueOf( selected, line );
                            }
                            if ( own ) {
                                ++preview.matches;

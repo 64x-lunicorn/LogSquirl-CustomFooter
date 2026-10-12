@@ -167,8 +167,9 @@ so: the new rule becomes an alternative for that key.
   patterns, and enabled rules with a line pattern but no key, at the field
   with the reason and in the rule list, and won't save until they are fixed.
 - The file is scanned in the background whenever it becomes the active file
-  and when rules are applied. A rule with an invalid pattern is skipped and
-  reported in the LogSquirl log.
+  and when rules are applied. A rule the editor would mark, e.g. with an
+  invalid pattern, is skipped and reported in the LogSquirl log in the
+  editor's words, such as `Rule 2: invalid line pattern: …`.
 - The active file is **watched**: when it changes, e.g. while following a
   growing log, it is scanned again within about half a second, so values
   that show up later in the file appear in the footer. Only the lines

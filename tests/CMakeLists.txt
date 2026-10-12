@@ -41,6 +41,7 @@ add_executable(logsquirl_custom_footer_tests
     simplemode_test.cpp
     ruletemplate_test.cpp
     latestjob_test.cpp
+    rulecheck_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES
@@ -75,6 +76,7 @@ target_sources(logsquirl_custom_footer_tests
         "${CMAKE_SOURCE_DIR}/src/ruletemplatedialog.cpp"
         "${CMAKE_SOURCE_DIR}/src/rulepreviewer.cpp"
         "${CMAKE_SOURCE_DIR}/src/rulepreviewview.cpp"
+        "${CMAKE_SOURCE_DIR}/src/rulecheck.cpp"
 )
 
 target_link_libraries(logsquirl_custom_footer_tests

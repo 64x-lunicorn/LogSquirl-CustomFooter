@@ -201,7 +201,7 @@ SCENARIO( "A footer session shows the values of the active file", "[footersessio
             {
                 REQUIRE( log.warnings.size() == 1 );
                 REQUIRE( log.warnings.at( 0 ).startsWith( "Custom Footer: " ) );
-                REQUIRE( log.warnings.at( 0 ).contains( "Broken" ) );
+                REQUIRE( log.warnings.at( 0 ).contains( "Rule 1: invalid line pattern: " ) );
             }
         }
 

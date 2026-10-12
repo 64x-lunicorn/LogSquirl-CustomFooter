@@ -721,10 +721,11 @@ SCENARIO( "The editor previews the selected rule against the active file",
             linePattern->setText( "mode=(" );
             settle();
 
-            THEN( "the preview explains why instead of showing a result" )
+            THEN( "the preview explains why instead of showing a result, as the editor lists it" )
             {
-                REQUIRE( message->text().startsWith(
-                    "This rule cannot match anything until its line pattern is fixed: " ) );
+                REQUIRE( message->text()
+                         == "This rule cannot match anything yet: invalid line pattern: "
+                                + FooterScanner::patternError( "mode=(" ) );
                 REQUIRE( line->isHidden() );
                 REQUIRE( value->isHidden() );
                 REQUIRE( count->isHidden() );

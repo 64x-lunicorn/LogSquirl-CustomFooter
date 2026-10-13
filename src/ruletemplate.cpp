@@ -590,6 +590,58 @@ QList<RuleTemplate> javaTemplates()
     return templates;
 }
 
+/**
+ * The shape of a VIN (ISO 3779), without a capturing group: 17 characters
+ * from `A-Z` and `0-9` without `I`, `O` and `Q`, at least one of them a
+ * letter and one a digit, not after or before another letter or digit.
+ * `_` and punctuation may border it, as in `vin_WVWZZZ1JZXW000001`. No
+ * check digit test, as only North American VINs have one. The letter and
+ * digit lookaheads may look past the 17 characters, but then the closing
+ * lookahead fails anyway.
+ *
+ * A template taking part of a VIN puts the shape in a lookahead and
+ * captures the part, e.g. `(?=` kVin `)([A-HJ-NPR-Z0-9]{3})` for the first
+ * three characters.
+ */
+const QString kVin = QStringLiteral( "(?<![A-Za-z0-9])"
+                                     "(?=[A-HJ-NPR-Z0-9]{0,16}[A-HJ-NPR-Z])"
+                                     "(?=[A-HJ-NPR-Z0-9]{0,16}[0-9])"
+                                     "[A-HJ-NPR-Z0-9]{17}(?![A-Za-z0-9])" );
+
+/// Automotive: the vehicle and its telematics unit.
+QList<RuleTemplate> automotiveTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // A VIN identifies one vehicle and is unique by nature, so it is found
+    // by its shape alone, with or without text before it: kVin as the
+    // value.
+    templates.append( { tr( "VIN" ),
+                        tr( "A vehicle identification number by its shape: 17 letters and "
+                            "digits without I, O and Q, e.g. WVWZZZ1JZXW000001" ),
+                        QStringLiteral( "VIN" ),
+                        {},
+                        QStringLiteral( "(%1)" ).arg( kVin ) } );
+
+    // The IMEI of the modem and the ICCID of the SIM card are 15 and 18 to
+    // 22 digits, a shape far too many other numbers have: the word after a
+    // text that says which number is meant, to adjust to the log.
+    templates.append(
+        { tr( "IMEI" ),
+          tr( "The word after IMEI:, e.g. IMEI: 490154203237518; adjust the text to your log" ),
+          QStringLiteral( "IMEI" ),
+          simple( QStringLiteral( "IMEI:" ) ),
+          {} } );
+    templates.append(
+        { tr( "ICCID" ),
+          tr( "The word after ICCID:, e.g. ICCID: 89014103211118510720; adjust the text" ),
+          QStringLiteral( "ICCID" ),
+          simple( QStringLiteral( "ICCID:" ) ),
+          {} } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -613,6 +665,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "CI" ), ciTemplates() );
     appendGroup( templates, tr( "iOS crash log" ), iosCrashTemplates() );
     appendGroup( templates, tr( "Java and Spring Boot" ), javaTemplates() );
+    appendGroup( templates, tr( "Automotive" ), automotiveTemplates() );
 
     return templates;
 }

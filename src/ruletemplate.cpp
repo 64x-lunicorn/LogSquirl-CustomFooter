@@ -773,7 +773,9 @@ QList<RuleTemplate> databaseTemplates()
     // version is the word after it, also a beta's (`17beta1`). The lower
     // case `starting` keeps out the `Starting PostgreSQL 13 database
     // server` of Debian's init script, which names the cluster's major
-    // version. With several starts in the file, such as the Docker image's
+    // version; its `Restarting PostgreSQL 13 database server` is taken, as
+    // a simple text may end a longer word, and gives that major version,
+    // still the server's. With several starts in the file, such as the Docker image's
     // init server before the real one, the first counts.
     templates.append(
         { tr( "PostgreSQL version" ),

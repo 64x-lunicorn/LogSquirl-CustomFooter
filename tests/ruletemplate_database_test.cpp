@@ -147,7 +147,10 @@ SCENARIO( "The PostgreSQL version template finds the version in the start line",
     {
         requireFinds(
             "PostgreSQL version",
-            { // Docker image postgres:16.1 (Debian bookworm).
+            { // Debian's init script, postgresql-common 238, restarting: the
+              // cluster's major version, still the server's.
+              { "Restarting PostgreSQL 13 database server: main.", "13" },
+              // Docker image postgres:16.1 (Debian bookworm).
               { "2024-01-15 10:30:00.123 UTC [1] LOG:  starting PostgreSQL 16.1 (Debian "
                 "16.1-1.pgdg120+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) "
                 "12.2.0, 64-bit",

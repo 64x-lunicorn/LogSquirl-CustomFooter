@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in full, shortened with `::` or with an IPv4 address as its last part
   (`::ffff:192.0.2.10`). Their pattern starts with the text, which you
   adjust to your log (`link/ether`, `inet6`).
+- **Test run template group** — for pytest output, meant for one run per
+  file: Python version and pytest version from the header
+  (`platform linux -- Python 3.12.3, pytest-8.3.2, …`), in simple mode,
+  and Test result, the summary at the end (`3 failed, 120 passed in
+  12.30s`) without the `=` around it, in advanced mode.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

@@ -192,6 +192,12 @@ keeps its patterns and key when the template changes.
 | Android | Device serial number | `Serial number` | The value of `ro.serialno` in getprop output (`[ro.serialno]: [28031FDH2004VT]`) | Simple |
 | Network | MAC address | `MAC address` | The address after `MAC:`: six pairs of hex digits separated by `:` or `-`, the same separator throughout (`52:54:00:12:34:56`, `00-1A-2B-3C-4D-5E`), or three groups of four separated by `.` (`0050.56a1.b2c3`), in either case. A longer address or mixed separators are not matched. | Advanced |
 | Network | IPv6 address | `IPv6 address` | The address after `IPv6:`, in full or shortened with `::` (`2001:db8::1`, `::1`), also with an IPv4 address as its last part (`::ffff:192.0.2.10`). A prefix length (`/64`) or zone (`%eth0`) after it is not part of the value. | Advanced |
+| Test run | Python version | `Python` | The Python version in the pytest header, after `-- Python` up to the comma (`platform linux -- Python 3.12.3, pytest-8.3.2, pluggy-1.5.0` → `3.12.3`); on PyPy with the PyPy version (`3.9.10[pypy-7.3.8-final]`) | Simple |
+| Test run | pytest version | `pytest` | The pytest version in the pytest header, after `, pytest-` up to the comma (`8.3.2`), not in a temporary path like `/tmp/pytest-of-user/pytest-3` | Simple |
+| Test run | Test result | `Test result` | The summary at the end of a pytest run, without the `=` around it: `=== 3 failed, 120 passed in 12.30s ===` → `3 failed, 120 passed in 12.30s`, also `no tests ran in 0.01s`, a duration after a long run (`in 336.42s (0:05:36)`), `in 0.03 seconds` from pytest before 5.1, and the line `pytest -q` writes without `=` | Advanced |
+
+The Test run templates are meant for one pytest run per file: with
+several runs, the footer shows the versions and the result of the first.
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also

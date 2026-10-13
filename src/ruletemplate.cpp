@@ -507,6 +507,89 @@ QList<RuleTemplate> iosCrashTemplates()
     return templates;
 }
 
+/// Java and Spring Boot: the Spring Boot start line, the active profiles,
+/// and the JRE of a JVM crash log.
+QList<RuleTemplate> javaTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // Spring Boot logs one start line per run, e.g. `Starting MyApp v1.2.0
+    // using Java 17.0.8 with PID 4242 (...)`. Spring Boot 3 and later word
+    // it so; Spring Boot 2.4 to 2.7 add `on <host>` before `with PID`, and
+    // 2.0 to 2.3 have no `using Java`. A native image says `Starting
+    // AOT-processed MyApp`. The application, its version, the Java version
+    // and the host are single words in it. The application and its version
+    // are only taken from a `Starting` that ends in this shape, up to `with
+    // PID` and a digit, so `Starting service [Tomcat]` and `Starting Servlet
+    // engine:` in the same log are not.
+    const QString startTail = QStringLiteral( "(?:using Java \\S+ )?(?:on \\S+ )?with PID \\d" );
+    templates.append(
+        { tr( "Application" ),
+          tr( "The application of the Spring Boot start line, e.g. Starting MyApp v1.2.0 using "
+              "Java 17 with PID 42" ),
+          QStringLiteral( "Application" ),
+          {},
+          QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?(\\S+) (?=(?:v\\S+ )?" ) + startTail
+              + QStringLiteral( ")" ) } );
+    templates.append(
+        { tr( "Application version" ),
+          tr( "The version after v in the Spring Boot start line, e.g. Starting MyApp v1.2.0" ),
+          QStringLiteral( "Application version" ),
+          {},
+          QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?\\S+ v(\\S+) (?=" ) + startTail
+              + QStringLiteral( ")" ) } );
+
+    // The Java version follows a fixed text, also in Spring Boot 3, which
+    // has no host.
+    templates.append(
+        { tr( "Java version" ),
+          tr( "The word after using Java in the Spring Boot start line, e.g. using Java 17.0.8" ),
+          QStringLiteral( "Java version" ),
+          simple( QStringLiteral( "using Java" ) ),
+          {} } );
+
+    // The host is between `on` and `with PID` of the start line of Spring
+    // Boot 2; Spring Boot 3 no longer logs it.
+    templates.append(
+        { tr( "Host" ),
+          tr( "The host of the Spring Boot 2 start line, e.g. Starting MyApp on myhost with PID "
+              "42" ),
+          QStringLiteral( "Host" ),
+          {},
+          QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?\\S+ (?:v\\S+ )?"
+                          "(?:using Java \\S+ )?on (\\S+) with PID \\d" ) } );
+
+    // Since Spring Boot 2.7: `The following 1 profile is active: "prod"` or
+    // `The following 2 profiles are active: "dev", "local"`; before that
+    // `The following profiles are active: dev,local`. A single quoted
+    // profile is taken without its quotes (the branch reset `(?|...)` makes
+    // both alternatives group 1), anything else up to the end of the line
+    // as listed. `No active profile set, falling back to ... default
+    // profile` is not an active profile.
+    templates.append(
+        { tr( "Active profile" ),
+          tr( "The active Spring profiles, e.g. The following 1 profile is active: \"prod\"" ),
+          QStringLiteral( "Active profile" ),
+          {},
+          QStringLiteral( "The following (?:\\d+ )?profiles? (?:is|are) active: "
+                          "(?|\"([^\"]*)\"\\s*$|(.*\\S))" ) } );
+
+    // A JVM crash log (hs_err_pid*.log) has `# JRE version: <runtime name>
+    // (<version>) (build <runtime version>)`, e.g. `(build 17.0.8+7)` or
+    // `(build 1.8.0_201-b09)`; a debug JVM writes `(fastdebug build ...)`.
+    // The value is the runtime version, as `java -version` shows it. A JVM
+    // crashing while it starts leaves it empty, `(build )`, and the template
+    // finds nothing.
+    templates.append(
+        { tr( "JRE version" ),
+          tr( "The JRE build in a JVM crash log, e.g. # JRE version: ... (build 17.0.8+7)" ),
+          QStringLiteral( "JRE version" ),
+          {},
+          QStringLiteral( "JRE version:.*\\((?:\\S+ )?build ([^\\s)]+)\\)" ) } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -529,6 +612,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "Test run" ), testRunTemplates() );
     appendGroup( templates, tr( "CI" ), ciTemplates() );
     appendGroup( templates, tr( "iOS crash log" ), iosCrashTemplates() );
+    appendGroup( templates, tr( "Java and Spring Boot" ), javaTemplates() );
 
     return templates;
 }

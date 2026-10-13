@@ -157,6 +157,78 @@ QList<RuleTemplate> networkTemplates()
     return templates;
 }
 
+/// Linux and boot: values of dmesg, boot and syslog output.
+QList<RuleTemplate> linuxTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // The kernel names its release once, as the first line of dmesg:
+    // `Linux version 6.8.0-45-generic (buildd@…) (gcc …) #45-Ubuntu …`. The
+    // release is the word after the text.
+    templates.append( { tr( "Kernel version" ),
+                        tr( "The kernel release after Linux version, e.g. Linux version "
+                            "6.8.0-45-generic" ),
+                        QStringLiteral( "Kernel" ),
+                        simple( QStringLiteral( "Linux version" ) ),
+                        {} } );
+
+    // The DMI line, `DMI: <vendor> <product>/<board>, BIOS <version> <date>`
+    // on x86, names the hardware. The value is what comes before `, BIOS`,
+    // which a simple rule cannot end at; the product itself may hold a comma
+    // (`QEMU Standard PC (i440FX + PIIX, 1996)`), so it is the shortest text
+    // up to `, BIOS `. Without `, BIOS` there is no match, so the lines
+    // `DMI: not present or invalid.` and `DMI: Memory slots populated: 2/2`
+    // are not taken for the hardware. `DMI:` must not end a longer word.
+    templates.append( { tr( "Hardware (DMI)" ),
+                        tr( "Vendor and product before , BIOS in the DMI: line, e.g. "
+                            "LENOVO 20XW0055GE/20XW0055GE" ),
+                        QStringLiteral( "Hardware" ),
+                        {},
+                        QStringLiteral( "(?<![\\w-])DMI:\\s*(\\S.*?), BIOS " ) } );
+
+    // The kernel command line, logged once at boot, is everything after
+    // `Command line:`, spaces included. On x86 it comes first; ARM kernels
+    // write only `Kernel command line:`, with a lower-case `c`, which the
+    // text as written does not match.
+    templates.append( { tr( "Kernel command line" ),
+                        tr( "The rest of the line after Command line:, e.g. "
+                            "BOOT_IMAGE=/boot/vmlinuz root=UUID=… ro quiet" ),
+                        QStringLiteral( "Command line" ),
+                        simple( QStringLiteral( "Command line:" ), ValueEnd::EndOfLine ),
+                        {} } );
+
+    // The U-Boot banner, `U-Boot 2024.01 (Mar 11 2024 - 18:45:23 +0000)`:
+    // the version is the word between `U-Boot ` and the build date in
+    // parentheses, and starts with a dotted number. The SPL and TPL banners
+    // (`U-Boot SPL 2024.01 (…)`) are of the stages before U-Boot proper and
+    // are skipped, as is `U-Boot` in other lines or ending a longer word.
+    templates.append( { tr( "U-Boot version" ),
+                        tr( "The version in the U-Boot banner, e.g. U-Boot 2024.01 "
+                            "(Mar 11 2024 - 18:45:23 +0000)" ),
+                        QStringLiteral( "U-Boot" ),
+                        {},
+                        QStringLiteral( "(?<![\\w-])U-Boot (\\d+\\.\\d+\\S*) \\(" ) } );
+
+    // An RFC 3164 syslog line starts with an optional `<PRI>`, the time as
+    // `Mmm dd hh:mm:ss` (the day padded with a space, as `Oct  3`, and a
+    // fraction as journalctl's short-precise writes it), and then the host,
+    // followed by a space. The host has no text before it, only its place:
+    // anchored at the start of the line, so a timestamp later in a line is
+    // not taken. A word ending in `:` there is the tag of a line without a
+    // host (`kernel[0]:`), not a host. The first line counts, so this fits a
+    // log of one host, not one merged from several.
+    templates.append(
+        { tr( "Syslog host" ),
+          tr( "The host after the time of an RFC 3164 syslog line, e.g. Oct 13 08:12:01 "
+              "webserver01 sshd[1234]: …; fits the log of one host, not merged ones" ),
+          QStringLiteral( "Host" ),
+          {},
+          QStringLiteral( "^(?:<\\d{1,3}>)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+                          " [ \\d]\\d \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)? (\\S+)(?<!:) " ) } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -174,6 +246,7 @@ QList<RuleTemplate> makeTemplates()
     // new group is a function above and a line here.
     appendGroup( templates, tr( "General" ), generalTemplates() );
     appendGroup( templates, tr( "Network" ), networkTemplates() );
+    appendGroup( templates, tr( "Linux and boot" ), linuxTemplates() );
 
     return templates;
 }

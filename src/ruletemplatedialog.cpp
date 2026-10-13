@@ -25,9 +25,12 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QPushButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace custom_footer {
 
@@ -44,15 +47,32 @@ RuleTemplateDialog::RuleTemplateDialog( QWidget* parent )
     list_->setObjectName( "templateList" );
     list_->setColumnCount( 2 );
     list_->setHeaderLabels( { tr( "Template" ), tr( "Finds" ) } );
-    list_->setRootIsDecorated( false );
     list_->setSelectionMode( QAbstractItemView::SingleSelection );
     list_->setAllColumnsShowFocus( true );
     list_->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
     list_->header()->setStretchLastSection( true );
-    for ( const auto& ruleTemplate : ruleTemplates() ) {
-        auto* item = new QTreeWidgetItem( list_, { ruleTemplate.name, ruleTemplate.description } );
+    // A group item per group, with its templates as children. Checking a
+    // group checks its templates, and it shows whether all, some or none
+    // of them are checked (Qt::ItemIsAutoTristate).
+    const auto& templates = ruleTemplates();
+    QTreeWidgetItem* group = nullptr;
+    for ( int i = 0; i < templates.size(); ++i ) {
+        const auto& ruleTemplate = templates[ i ];
+        if ( !group || group->text( 0 ) != ruleTemplate.group ) {
+            group = new QTreeWidgetItem( list_, { ruleTemplate.group } );
+            group->setFlags( Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable
+                             | Qt::ItemIsAutoTristate );
+            group->setCheckState( 0, Qt::Unchecked );
+            group->setFirstColumnSpanned( true );
+        }
+        auto* item = new QTreeWidgetItem( group, { ruleTemplate.name, ruleTemplate.description } );
+        item->setFlags( Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable
+                        | Qt::ItemNeverHasChildren );
+        item->setCheckState( 0, Qt::Unchecked );
+        item->setData( 0, Qt::UserRole, i );
         item->setToolTip( 1, ruleTemplate.description );
     }
+    list_->expandAll();
     layout->addWidget( list_, 1 );
 
     auto* form = new QFormLayout;
@@ -76,17 +96,17 @@ RuleTemplateDialog::RuleTemplateDialog( QWidget* parent )
     layout->addWidget( note_ );
 
     buttons_ = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
-    buttons_->button( QDialogButtonBox::Ok )->setText( tr( "Add Rule" ) );
+    buttons_->button( QDialogButtonBox::Ok )->setText( tr( "Add Rules" ) );
     layout->addWidget( buttons_ );
 
-    connect( list_, &QTreeWidget::currentItemChanged, this, &RuleTemplateDialog::updateChoice );
+    connect( list_, &QTreeWidget::itemChanged, this, &RuleTemplateDialog::updateChoice );
     connect( keyEdit_, &QLineEdit::textChanged, this, &RuleTemplateDialog::updateChoice );
-    connect( list_, &QTreeWidget::itemActivated, this, [ this ] {
-        if ( buttons_->button( QDialogButtonBox::Ok )->isEnabled() ) {
-            accept();
-        }
-        else {
-            keyEdit_->setFocus();
+    // Double-clicking a template's name checks or unchecks it, like its
+    // check box; Space does so from the keyboard, and Enter adds the rules.
+    connect( list_, &QTreeWidget::itemDoubleClicked, this, []( QTreeWidgetItem* item ) {
+        if ( item->parent() ) {
+            item->setCheckState( 0, item->checkState( 0 ) == Qt::Checked ? Qt::Unchecked
+                                                                         : Qt::Checked );
         }
     } );
     connect( buttons_, &QDialogButtonBox::accepted, this, &QDialog::accept );
@@ -99,52 +119,91 @@ void RuleTemplateDialog::reset( const QStringList& existingKeys )
 {
     existingKeys_ = existingKeys;
     keyEdit_->clear();
+    // Unchecking a group unchecks its templates.
+    for ( int g = 0; g < list_->topLevelItemCount(); ++g ) {
+        list_->topLevelItem( g )->setCheckState( 0, Qt::Unchecked );
+    }
     list_->setCurrentItem( list_->topLevelItem( 0 ) );
+    list_->scrollToTop();
     list_->setFocus();
     updateChoice();
 }
 
-FooterEntry RuleTemplateDialog::entry() const
+QList<FooterEntry> RuleTemplateDialog::entries() const
 {
-    const int index = chosenTemplate();
-    if ( index < 0 ) {
-        return {};
+    QList<FooterEntry> entries;
+    for ( const int index : checkedTemplates() ) {
+        entries.append( ruleTemplates().at( index ).entry( keyEdit_->text() ) );
     }
-    return ruleTemplates().at( index ).entry( keyEdit_->text() );
+    return entries;
 }
 
 void RuleTemplateDialog::updateChoice()
 {
-    const int index = chosenTemplate();
-    const bool asksForKey = index >= 0 && ruleTemplates().at( index ).asksForKey();
+    bool asksForKey = false;
+    for ( const int index : checkedTemplates() ) {
+        asksForKey = asksForKey || ruleTemplates().at( index ).asksForKey();
+    }
     keyEdit_->setEnabled( asksForKey );
     keyLabel_->setEnabled( asksForKey );
 
-    const auto key = entry().key;
-    buttons_->button( QDialogButtonBox::Ok )->setEnabled( !key.isEmpty() );
+    // A template asking for a key without one makes no rule.
+    const auto newEntries = entries();
+    const bool complete = !newEntries.isEmpty()
+                          && std::none_of( newEntries.begin(), newEntries.end(),
+                                           []( const FooterEntry& e ) { return e.key.isEmpty(); } );
+    buttons_->button( QDialogButtonBox::Ok )->setEnabled( complete );
 
     // The pattern adds the `=`: one typed with the key is dropped.
-    const bool typedEquals
-        = asksForKey && !key.isEmpty() && keyEdit_->text().trimmed().endsWith( QLatin1Char( '=' ) );
+    const auto givenKey = RuleTemplate::givenKey( keyEdit_->text() );
+    const bool typedEquals = asksForKey && !givenKey.isEmpty()
+                             && keyEdit_->text().trimmed().endsWith( QLatin1Char( '=' ) );
     keyHint_->setText( typedEquals
-                           ? tr( "The = is added for you: the rule looks for %1=" ).arg( key )
+                           ? tr( "The = is added for you: the rule looks for %1=" ).arg( givenKey )
                            : QString() );
     keyHint_->setVisible( typedEquals );
 
     // Rules sharing a key are alternatives: allowed, but never silently.
-    const bool used = !key.isEmpty() && existingKeys_.contains( key );
-    note_->setText( used ? tr( "A rule with the key “%1” exists already: the new rule becomes an "
-                               "alternative for its value: whichever of them matches first in the "
-                               "file supplies it." )
-                               .arg( key )
-                         : QString() );
-    note_->setVisible( used );
+    QStringList usedKeys;
+    for ( const auto& entry : newEntries ) {
+        if ( !entry.key.isEmpty() && existingKeys_.contains( entry.key )
+             && !usedKeys.contains( entry.key ) ) {
+            usedKeys.append( entry.key );
+        }
+    }
+    QString note;
+    if ( usedKeys.size() == 1 ) {
+        note = tr( "A rule with the key “%1” exists already: the new rule becomes an "
+                   "alternative for its value: whichever of them matches first in the "
+                   "file supplies it." )
+                   .arg( usedKeys.first() );
+    }
+    else if ( usedKeys.size() > 1 ) {
+        QStringList quoted;
+        for ( const auto& key : usedKeys ) {
+            quoted.append( tr( "“%1”" ).arg( key ) );
+        }
+        note = tr( "Rules with the keys %1 exist already: each new rule with one of them "
+                   "becomes an alternative for its value: whichever matches first in the file "
+                   "supplies it." )
+                   .arg( QLocale().createSeparatedList( quoted ) );
+    }
+    note_->setText( note );
+    note_->setVisible( !note.isEmpty() );
 }
 
-int RuleTemplateDialog::chosenTemplate() const
+QList<int> RuleTemplateDialog::checkedTemplates() const
 {
-    auto* item = list_->currentItem();
-    return item ? list_->indexOfTopLevelItem( item ) : -1;
+    QList<int> indexes;
+    for ( int g = 0; g < list_->topLevelItemCount(); ++g ) {
+        const auto* group = list_->topLevelItem( g );
+        for ( int i = 0; i < group->childCount(); ++i ) {
+            if ( group->child( i )->checkState( 0 ) == Qt::Checked ) {
+                indexes.append( group->child( i )->data( 0, Qt::UserRole ).toInt() );
+            }
+        }
+    }
+    return indexes;
 }
 
 } // namespace custom_footer

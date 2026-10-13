@@ -148,11 +148,45 @@ struct TemplateUi {
         return dialog;
     }
 
-    void choose( const QString& name ) const
+    /// The item of the template named @p name, under its group.
+    QTreeWidgetItem* templateItem( const QString& name ) const
+    {
+        const auto items = templates->findItems( name, Qt::MatchExactly | Qt::MatchRecursive, 0 );
+        REQUIRE( items.size() == 1 );
+        REQUIRE( items.first()->parent() );
+        return items.first();
+    }
+
+    QTreeWidgetItem* groupItem( const QString& name ) const
     {
         const auto items = templates->findItems( name, Qt::MatchExactly, 0 );
         REQUIRE( items.size() == 1 );
-        templates->setCurrentItem( items.first() );
+        return items.first();
+    }
+
+    void check( const QString& name, bool checked = true ) const
+    {
+        templateItem( name )->setCheckState( 0, checked ? Qt::Checked : Qt::Unchecked );
+    }
+
+    void checkGroup( const QString& name ) const
+    {
+        groupItem( name )->setCheckState( 0, Qt::Checked );
+    }
+
+    /// The names of the checked templates, in list order.
+    QStringList checkedTemplates() const
+    {
+        QStringList names;
+        for ( int g = 0; g < templates->topLevelItemCount(); ++g ) {
+            const auto* group = templates->topLevelItem( g );
+            for ( int i = 0; i < group->childCount(); ++i ) {
+                if ( group->child( i )->checkState( 0 ) == Qt::Checked ) {
+                    names.append( group->child( i )->text( 0 ) );
+                }
+            }
+        }
+        return names;
     }
 
     QPushButton* ok() const
@@ -165,11 +199,11 @@ struct TemplateUi {
         return buttons->button( QDialogButtonBox::Cancel );
     }
 
-    /// Choose a template and click OK.
+    /// Check a template and click OK.
     void add( const QString& name, const QString& askedKey = QString() )
     {
         open();
-        choose( name );
+        check( name );
         if ( !askedKey.isEmpty() ) {
             templateKey->setText( askedKey );
         }
@@ -234,6 +268,18 @@ bool sameEntry( const FooterEntry& a, const FooterEntry& b )
     return true;
 }
 
+/// The templates of @p group, in list order.
+QList<RuleTemplate> templatesIn( const QString& group )
+{
+    QList<RuleTemplate> inGroup;
+    for ( const auto& t : ruleTemplates() ) {
+        if ( t.group == group ) {
+            inGroup.append( t );
+        }
+    }
+    return inGroup;
+}
+
 } // namespace
 
 SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
@@ -251,8 +297,32 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
                 REQUIRE( !t.description.contains( '\n' ) );
             }
             REQUIRE( names
-                     == QStringList{ "Version", "Build number", "Serial number", "IPv4 address",
-                                     "Environment", "User", "Log start", "key=value" } );
+                     == QStringList{ "Version", "Build number", "Serial number", "Environment",
+                                     "User", "Log start", "key=value", "IPv4 address" } );
+        }
+
+        THEN( "each is in a group, the templates of a group next to each other, General first" )
+        {
+            QStringList groups;
+            for ( const auto& t : templates ) {
+                INFO( t.name.toStdString() );
+                REQUIRE( !t.group.isEmpty() );
+                if ( groups.isEmpty() || groups.last() != t.group ) {
+                    REQUIRE( !groups.contains( t.group ) );
+                    groups.append( t.group );
+                }
+            }
+            REQUIRE( groups.mid( 0, 2 ) == QStringList{ "General", "Network" } );
+        }
+
+        THEN( "the IPv4 address is under Network, the others of the issue under General" )
+        {
+            for ( const auto* name : { "Version", "Build number", "Serial number", "Environment",
+                                       "User", "Log start", "key=value" } ) {
+                INFO( name );
+                REQUIRE( templateNamed( name ).group == "General" );
+            }
+            REQUIRE( templateNamed( "IPv4 address" ).group == "Network" );
         }
 
         THEN( "every template makes an enabled rule without mappings whose pattern compiles" )
@@ -621,22 +691,31 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
         {
             ui.open();
 
-            THEN( "it lists every template with its name and description" )
+            THEN( "it lists every template with its name and description under its group" )
             {
                 const auto& templates = ruleTemplates();
-                REQUIRE( ui.templates->topLevelItemCount() == templates.size() );
-                for ( int i = 0; i < templates.size(); ++i ) {
-                    REQUIRE( ui.templates->topLevelItem( i )->text( 0 ) == templates[ i ].name );
-                    REQUIRE( ui.templates->topLevelItem( i )->text( 1 )
-                             == templates[ i ].description );
+                int i = 0;
+                for ( int g = 0; g < ui.templates->topLevelItemCount(); ++g ) {
+                    const auto* group = ui.templates->topLevelItem( g );
+                    REQUIRE( group->childCount() > 0 );
+                    for ( int c = 0; c < group->childCount(); ++c, ++i ) {
+                        REQUIRE( i < templates.size() );
+                        REQUIRE( group->text( 0 ) == templates[ i ].group );
+                        REQUIRE( group->child( c )->text( 0 ) == templates[ i ].name );
+                        REQUIRE( group->child( c )->text( 1 ) == templates[ i ].description );
+                    }
                 }
+                REQUIRE( i == templates.size() );
+                REQUIRE( ui.templates->topLevelItem( 0 )->text( 0 ) == "General" );
+                REQUIRE( ui.templates->topLevelItem( 1 )->text( 0 ) == "Network" );
             }
 
-            THEN( "the first template is chosen and needs no key" )
+            THEN( "nothing is checked, so OK is disabled and no key is asked for" )
             {
-                REQUIRE( ui.templates->currentItem() == ui.templates->topLevelItem( 0 ) );
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+                REQUIRE( ui.groupItem( "General" )->checkState( 0 ) == Qt::Unchecked );
+                REQUIRE( !ui.ok()->isEnabled() );
                 REQUIRE( !ui.templateKey->isEnabled() );
-                REQUIRE( ui.ok()->isEnabled() );
                 REQUIRE( ui.note->isHidden() );
             }
         }
@@ -726,7 +805,7 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
         WHEN( "cancelling the dialog" )
         {
             ui.open();
-            ui.choose( "IPv4 address" );
+            ui.check( "IPv4 address" );
             ui.cancel()->click();
 
             THEN( "nothing is added and the selection stays" )
@@ -760,15 +839,158 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
     }
 }
 
+SCENARIO( "From template… adds every checked template", "[ruletemplate][footereditor]" )
+{
+    GIVEN( "the template dialog of an editor with two rules, the second selected" )
+    {
+        const auto rules = twoRules();
+        FooterEditor editor( rules );
+        TemplateUi ui( editor );
+        editor.show();
+        ui.list->setCurrentIndex( ui.model->index( 1, RuleListModel::KeyColumn ) );
+        ui.open();
+
+        WHEN( "checking log start, then the version, and clicking OK" )
+        {
+            ui.check( "Log start" );
+            ui.check( "Version" );
+            REQUIRE( ui.ok()->isEnabled() );
+            ui.ok()->click();
+
+            THEN( "both are added after the existing rules in list order, the first selected" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 4 );
+                REQUIRE( sameEntry( entries[ 2 ], templateNamed( "Version" ).entry() ) );
+                REQUIRE( sameEntry( entries[ 3 ], templateNamed( "Log start" ).entry() ) );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.key->text() == "Version" );
+            }
+
+            THEN( "the existing rules are unchanged" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
+                REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+            }
+        }
+
+        WHEN( "checking the Network group" )
+        {
+            ui.checkGroup( "Network" );
+
+            THEN( "its templates are checked, and OK adds them" )
+            {
+                QStringList names;
+                for ( const auto& t : templatesIn( "Network" ) ) {
+                    names.append( t.name );
+                }
+                REQUIRE( ui.checkedTemplates() == names );
+                REQUIRE( ui.ok()->isEnabled() );
+                ui.ok()->click();
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 2 + names.size() );
+                REQUIRE( sameEntry( entries[ 2 ], templateNamed( "IPv4 address" ).entry() ) );
+                REQUIRE( ui.currentRow() == 2 );
+            }
+        }
+
+        WHEN( "checking the General group" )
+        {
+            ui.checkGroup( "General" );
+
+            THEN( "all its templates are checked, and OK waits for the key of key=value" )
+            {
+                REQUIRE( ui.checkedTemplates().size() == templatesIn( "General" ).size() );
+                REQUIRE( ui.templateKey->isEnabled() );
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "giving the key user and clicking OK" )
+            {
+                ui.templateKey->setText( "user" );
+                REQUIRE( ui.ok()->isEnabled() );
+                ui.ok()->click();
+
+                THEN( "there is one new rule per template in list order, the first selected" )
+                {
+                    const auto entries = editor.entries();
+                    const auto general = templatesIn( "General" );
+                    REQUIRE( entries.size() == 2 + general.size() );
+                    REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
+                    REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+                    for ( int i = 0; i < general.size(); ++i ) {
+                        REQUIRE( sameEntry( entries[ 2 + i ], general[ i ].entry( "user" ) ) );
+                    }
+                    REQUIRE( ui.currentRow() == 2 );
+                }
+            }
+
+            AND_WHEN( "unchecking key=value" )
+            {
+                ui.check( "key=value", false );
+
+                THEN( "the group is partly checked, no key is asked, and OK adds the others" )
+                {
+                    REQUIRE( ui.groupItem( "General" )->checkState( 0 ) == Qt::PartiallyChecked );
+                    REQUIRE( !ui.templateKey->isEnabled() );
+                    REQUIRE( ui.ok()->isEnabled() );
+                    ui.ok()->click();
+                    REQUIRE( editor.entries().size() == 2 + templatesIn( "General" ).size() - 1 );
+                }
+            }
+        }
+
+        WHEN( "checking a template and unchecking it again" )
+        {
+            ui.check( "Version" );
+            ui.check( "Version", false );
+
+            THEN( "OK is disabled again" )
+            {
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+        }
+
+        WHEN( "double-clicking a template" )
+        {
+            Q_EMIT ui.templates->itemDoubleClicked( ui.templateItem( "Version" ), 0 );
+
+            THEN( "it is checked, and double-clicking it again unchecks it" )
+            {
+                REQUIRE( ui.checkedTemplates() == QStringList{ "Version" } );
+                REQUIRE( ui.dialog->isVisible() );
+                Q_EMIT ui.templates->itemDoubleClicked( ui.templateItem( "Version" ), 0 );
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+            }
+        }
+
+        WHEN( "checking templates, cancelling and opening the dialog again" )
+        {
+            ui.check( "Version" );
+            ui.checkGroup( "Network" );
+            ui.cancel()->click();
+            ui.open();
+
+            THEN( "nothing is checked" )
+            {
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+                REQUIRE( ui.groupItem( "Network" )->checkState( 0 ) == Qt::Unchecked );
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+        }
+    }
+}
+
 SCENARIO( "The key=value template asks for the key", "[ruletemplate][footereditor]" )
 {
-    GIVEN( "the template dialog with key=value chosen" )
+    GIVEN( "the template dialog with key=value checked" )
     {
         FooterEditor editor( twoRules() );
         TemplateUi ui( editor );
         editor.show();
         ui.open();
-        ui.choose( "key=value" );
+        ui.check( "key=value" );
 
         THEN( "the key field is enabled, and OK waits for a key" )
         {
@@ -853,19 +1075,30 @@ SCENARIO( "The key=value template asks for the key", "[ruletemplate][footeredito
                 THEN( "it starts over, without the key given before" )
                 {
                     REQUIRE( ui.templateKey->text().isEmpty() );
-                    REQUIRE( ui.templates->currentItem() == ui.templates->topLevelItem( 0 ) );
+                    REQUIRE( ui.checkedTemplates().isEmpty() );
                 }
             }
         }
 
-        WHEN( "choosing a template that needs no key" )
+        WHEN( "checking a template that needs no key too" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
 
-            THEN( "the key field is disabled again" )
+            THEN( "the key is still asked for, and OK still waits for it" )
             {
-                REQUIRE( !ui.templateKey->isEnabled() );
-                REQUIRE( ui.ok()->isEnabled() );
+                REQUIRE( ui.templateKey->isEnabled() );
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "unchecking key=value" )
+            {
+                ui.check( "key=value", false );
+
+                THEN( "the key field is disabled again, and OK enabled" )
+                {
+                    REQUIRE( !ui.templateKey->isEnabled() );
+                    REQUIRE( ui.ok()->isEnabled() );
+                }
             }
         }
     }
@@ -882,9 +1115,9 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
         editor.show();
         ui.open();
 
-        WHEN( "choosing the version template" )
+        WHEN( "checking the version template" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
 
             THEN( "a note says the new rule becomes an alternative for Version" )
             {
@@ -909,9 +1142,9 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
             }
         }
 
-        WHEN( "choosing a template with another key" )
+        WHEN( "checking a template with another key" )
         {
-            ui.choose( "Log start" );
+            ui.check( "Log start" );
 
             THEN( "there is no note" )
             {
@@ -921,7 +1154,7 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
 
         WHEN( "giving key=value the key Version" )
         {
-            ui.choose( "key=value" );
+            ui.check( "key=value" );
             ui.templateKey->setText( "Version" );
 
             THEN( "the note shows up for the given key" )
@@ -942,6 +1175,79 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
     }
 }
 
+SCENARIO( "The alternative note names every checked template whose key is used",
+          "[ruletemplate][footereditor]" )
+{
+    GIVEN( "an editor with rules for the keys Version and IP address" )
+    {
+        const QList<FooterEntry> rules{ { "Version", "Version=(\\S+)", "", true, {} },
+                                        { "IP address", "ip=(\\S+)", "", true, {} } };
+        FooterEditor editor( rules );
+        TemplateUi ui( editor );
+        editor.show();
+        ui.open();
+
+        WHEN( "checking version, build number and the IPv4 address" )
+        {
+            ui.check( "Version" );
+            ui.check( "Build number" );
+            ui.check( "IPv4 address" );
+
+            THEN( "the note names Version and IP address, but not Build" )
+            {
+                REQUIRE( !ui.note->isHidden() );
+                REQUIRE( ui.note->text().contains( "“Version”" ) );
+                REQUIRE( ui.note->text().contains( "“IP address”" ) );
+                REQUIRE( !ui.note->text().contains( "Build" ) );
+                REQUIRE( ui.note->text().contains( "alternative" ) );
+                REQUIRE( ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "unchecking version" )
+            {
+                ui.check( "Version", false );
+
+                THEN( "the note names only IP address" )
+                {
+                    REQUIRE( !ui.note->isHidden() );
+                    REQUIRE( ui.note->text().contains( "“IP address”" ) );
+                    REQUIRE( !ui.note->text().contains( "Version" ) );
+                }
+            }
+
+            AND_WHEN( "adding them" )
+            {
+                ui.ok()->click();
+
+                THEN( "they are added after the existing rules, which stay unchanged" )
+                {
+                    const auto entries = editor.entries();
+                    REQUIRE( entries.size() == 5 );
+                    REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
+                    REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+                    REQUIRE( entries[ 2 ].key == "Version" );
+                    REQUIRE( entries[ 3 ].key == "Build" );
+                    REQUIRE( entries[ 4 ].key == "IP address" );
+                    REQUIRE( ui.currentRow() == 2 );
+                }
+            }
+        }
+
+        WHEN( "checking key=value with the key Version along with the IPv4 address" )
+        {
+            ui.check( "key=value" );
+            ui.check( "IPv4 address" );
+            ui.templateKey->setText( "Version" );
+
+            THEN( "the note names the given key too" )
+            {
+                REQUIRE( ui.note->text().contains( "“Version”" ) );
+                REQUIRE( ui.note->text().contains( "“IP address”" ) );
+            }
+        }
+    }
+}
+
 SCENARIO( "The alternative note counts only rules the scanner uses",
           "[ruletemplate][footereditor]" )
 {
@@ -957,9 +1263,9 @@ SCENARIO( "The alternative note counts only rules the scanner uses",
 
         THEN( "neither key gets the note" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
             REQUIRE( ui.note->isHidden() );
-            ui.choose( "IPv4 address" );
+            ui.check( "IPv4 address" );
             REQUIRE( ui.note->isHidden() );
         }
     }
@@ -974,7 +1280,7 @@ SCENARIO( "The alternative note counts only rules the scanner uses",
 
         THEN( "its key gets no note" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
             REQUIRE( ui.note->isHidden() );
         }
     }

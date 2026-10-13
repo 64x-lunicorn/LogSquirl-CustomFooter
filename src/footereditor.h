@@ -144,9 +144,10 @@ Q_SIGNALS:
 
 private Q_SLOTS:
     void addEntry();
-    /// Open the template dialog; a chosen template is added as a new rule.
+    /// Open the template dialog; each checked template is added as a new
+    /// rule.
     void addFromTemplate();
-    void addTemplateRule();
+    void addTemplateRules();
     void removeEntry();
     void moveEntryUp();
     void moveEntryDown();
@@ -166,8 +167,8 @@ private Q_SLOTS:
 private:
     int currentRow() const;
     void selectRow( int row );
-    /// Append @p entry as a new rule, select it and focus its key.
-    void appendAndSelect( const FooterEntry& entry );
+    /// Append @p entries as new rules, select the first and focus its key.
+    void appendAndSelect( const QList<FooterEntry>& entries );
     void moveEntry( int from, int to );
     /// Whether @p row is the rule made from the line the picker shows.
     bool isLineRule( int row ) const;

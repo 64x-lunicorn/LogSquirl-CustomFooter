@@ -389,7 +389,7 @@ void FooterEditor::done( int result )
 void FooterEditor::addEntry()
 {
     panel_->commitPendingEdit();
-    appendAndSelect( FooterEntry() );
+    appendAndSelect( { FooterEntry() } );
 }
 
 void FooterEditor::addFromTemplate()
@@ -397,7 +397,7 @@ void FooterEditor::addFromTemplate()
     panel_->commitPendingEdit();
     if ( !templateDialog_ ) {
         templateDialog_ = new RuleTemplateDialog( this );
-        connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRule );
+        connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRules );
     }
     // Only rules the scanner uses make the new one an alternative.
     templateDialog_->reset( model_->check().keysInUse() );
@@ -405,13 +405,19 @@ void FooterEditor::addFromTemplate()
     templateDialog_->open();
 }
 
-void FooterEditor::addTemplateRule()
+void FooterEditor::addTemplateRules()
 {
-    const auto entry = templateDialog_->entry();
-    if ( entry.key.isEmpty() ) {
-        return;
+    // In the order the dialog lists them. OK is disabled while a checked
+    // template lacks its key; a rule without one is never added anyway.
+    QList<FooterEntry> entries;
+    for ( const auto& entry : templateDialog_->entries() ) {
+        if ( !entry.key.isEmpty() ) {
+            entries.append( entry );
+        }
     }
-    appendAndSelect( entry );
+    if ( !entries.isEmpty() ) {
+        appendAndSelect( entries );
+    }
 }
 
 void FooterEditor::removeEntry()
@@ -693,10 +699,10 @@ void FooterEditor::selectRow( int row )
     list_->scrollTo( index );
 }
 
-void FooterEditor::appendAndSelect( const FooterEntry& entry )
+void FooterEditor::appendAndSelect( const QList<FooterEntry>& entries )
 {
     const int row = model_->rowCount();
-    model_->appendEntries( { entry } );
+    model_->appendEntries( entries );
     selectRow( row );
     panel_->focusKey();
 }

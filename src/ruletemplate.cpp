@@ -39,7 +39,8 @@ SimpleRule simple( const QString& textBefore, ValueEnd valueEnd = ValueEnd::Whit
     return rule;
 }
 
-QList<RuleTemplate> makeTemplates()
+/// General: values most logs have, and `key=value` for any other.
+QList<RuleTemplate> generalTemplates()
 {
     QList<RuleTemplate> templates;
 
@@ -84,16 +85,6 @@ QList<RuleTemplate> makeTemplates()
           tr( "The word after Serial number:, e.g. Serial number: SN-0042; adjust the text" ),
           QStringLiteral( "Serial number" ),
           simple( QStringLiteral( "Serial number:" ) ),
-          {} } );
-
-    // A log with clients and servers has many addresses, and the first one
-    // in a line is an arbitrary one: the word after a text that says which
-    // address is meant.
-    templates.append(
-        { tr( "IPv4 address" ),
-          tr( "The address after IP:, e.g. IP: 192.168.1.20; adjust the text to your log" ),
-          QStringLiteral( "IP address" ),
-          simple( QStringLiteral( "IP:" ) ),
           {} } );
 
     // The environment and the user a log was written in or by have no shape
@@ -144,6 +135,45 @@ QList<RuleTemplate> makeTemplates()
                         {},
                         {},
                         QStringLiteral( "(?<![\\w.-])-{0,2}%1=(\\S+)" ) } );
+
+    return templates;
+}
+
+/// Network: addresses.
+QList<RuleTemplate> networkTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // A log with clients and servers has many addresses, and the first one
+    // in a line is an arbitrary one: the word after a text that says which
+    // address is meant.
+    templates.append(
+        { tr( "IPv4 address" ),
+          tr( "The address after IP:, e.g. IP: 192.168.1.20; adjust the text to your log" ),
+          QStringLiteral( "IP address" ),
+          simple( QStringLiteral( "IP:" ) ),
+          {} } );
+
+    return templates;
+}
+
+/// Appends the templates of @p group to @p templates, named @p name.
+void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
+{
+    for ( auto& ruleTemplate : group ) {
+        ruleTemplate.group = name;
+        templates.append( ruleTemplate );
+    }
+}
+
+QList<RuleTemplate> makeTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // One function per group, in the order the dialog shows the groups. A
+    // new group is a function above and a line here.
+    appendGroup( templates, tr( "General" ), generalTemplates() );
+    appendGroup( templates, tr( "Network" ), networkTemplates() );
 
     return templates;
 }

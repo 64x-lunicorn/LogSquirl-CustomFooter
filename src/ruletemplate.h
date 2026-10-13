@@ -47,6 +47,9 @@ struct RuleTemplate {
     /// group. Empty for a simple template. With asksForKey(), `%1` in it
     /// stands for the given key, escaped to match literally.
     QString linePattern;
+    /// The group the dialog shows it under, e.g. "General"; set for all
+    /// templates of a group by makeTemplates().
+    QString group;
 
     /// Whether the user gives the key, e.g. for `key=value`.
     bool asksForKey() const
@@ -73,7 +76,8 @@ struct RuleTemplate {
     static QString givenKey( const QString& askedKey );
 };
 
-/// The rule templates, in the order they are offered.
+/// The rule templates, in the order they are offered: group by group, the
+/// templates of a group next to each other.
 const QList<RuleTemplate>& ruleTemplates();
 
 } // namespace custom_footer

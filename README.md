@@ -186,6 +186,10 @@ keeps its patterns and key when the template changes.
 | Linux and boot | Kernel command line | `Command line` | The rest of the line after `Command line:` (`Command line: BOOT_IMAGE=/boot/vmlinuz-6.8.0-45-generic root=UUID=… ro quiet splash`) | Simple |
 | Linux and boot | U-Boot version | `U-Boot` | The version in the U-Boot banner (`U-Boot 2024.01 (Mar 11 2024 - 18:45:23 +0000)` → `2024.01`), not the SPL or TPL banner | Advanced |
 | Linux and boot | Syslog host | `Host` | The host after the time at the start of an RFC 3164 syslog line, with or without `<PRI>` (`Oct 13 08:12:01 webserver01 sshd[1234]: …` → `webserver01`); also journalctl's default output | Advanced |
+| Android | Build fingerprint | `Build fingerprint` | The build fingerprint by its shape, `brand/product/device:version/id/incremental:type/tags` with type `user`, `userdebug` or `eng` (`google/sunfish/sunfish:11/RQ3A.210805.001.A1/7474174:user/release-keys`), as in a tombstone, a crash in logcat (`Build fingerprint: '…'`), a bug report or getprop. Not inside a path. | Advanced |
+| Android | Device model | `Device model` | The value of `ro.product.model` in getprop output, spaces included (`[ro.product.model]: [Pixel 7]` → `Pixel 7`) | Simple |
+| Android | Android version | `Android version` | The value of `ro.build.version.release` in getprop output (`[ro.build.version.release]: [14]`) | Simple |
+| Android | Device serial number | `Serial number` | The value of `ro.serialno` in getprop output (`[ro.serialno]: [28031FDH2004VT]`) | Simple |
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also
@@ -203,6 +207,8 @@ of them becomes an alternative for that key.
 Syslog host takes the host of the first line, so it fits the log of one
 host, not one merged from several. ARM kernels write `Kernel command line:`
 instead of `Command line:`; change the text of Kernel command line to it.
+The Android getprop templates read the `[key]: [value]` lines of `adb shell
+getprop` and of a bug report, not `build.prop` (`ro.product.model=…`).
 
 ### Rule from a selected line
 

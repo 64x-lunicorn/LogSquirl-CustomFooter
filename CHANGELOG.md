@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version, from the U-Boot banner; and Syslog host, the host after the
   time of an RFC 3164 syslog line, which fits the log of one host, not
   merged ones.
+- **Android template group** — for logcat output and bug reports: Build
+  fingerprint, found by its shape
+  (`brand/product/device:version/id/incremental:type/tags`), and from
+  getprop's `[key]: [value]` lines Device model (`ro.product.model`),
+  Android version (`ro.build.version.release`) and Device serial number
+  (`ro.serialno`, with the key `Serial number`).
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

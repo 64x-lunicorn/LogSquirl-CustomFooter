@@ -550,6 +550,25 @@ hidden global test state.
 3. Read the log file line by line, up to `maxLines` lines and at most
    64 MiB, even inside a single huge line. Lines longer than 64 KiB are
    matched against their first 64 KiB.
+   **Encoding:** a scan from the start of a file tells how its bytes are
+   text from its first bytes (`FooterScanner::Encoding::detect()`), as
+   LogSquirl does for a byte order mark: `FF FE` makes it UTF-16LE,
+   `FE FF` UTF-16BE. Lines then start after the mark, end only at a line
+   feed that is a whole code unit (`0A 00` resp. `00 0A` at an even offset
+   from the mark; LogSquirl's `IndexingBlock::isDelimiter` likewise needs
+   the other byte to be `00`), so the `0A` byte in U+010A "Ċ" or U+0A00
+   ends no line, and are decoded as UTF-16 of that byte order; `\r\n` and the limits count in code units and bytes
+   as for UTF-8. Every other file is read as before: split at the byte
+   `0x0A` and decoded as UTF-8, a UTF-8 mark in the first line but dropped
+   from its text by the decoding, and a UTF-16 file without a mark as
+   bytes. The encoding is kept in the scan's `Progress`, and a continued
+   scan reads on in it; its offsets are always on code unit boundaries, and
+   half a code unit at the end of a file being written is left for the
+   next scan. Encodings LogSquirl guesses or the user chooses need the host
+   to say which one it uses (#60); `Encoding` is where that will come in.
+   `forEachLine()` is the one place that splits and decodes lines, for the
+   scan and the preview alike. `tests/footerscanner_utf16_test.cpp` covers
+   UTF-16 files, also across continued scans and in the live preview.
 4. For each line, check every rule whose key has no value yet:
    - **Stage 1 — Line Pattern**: If `linePattern` matches the line, proceed.
    - **Stage 2 — Value Pattern** (optional): If `valuePattern` is set, apply
@@ -562,8 +581,9 @@ hidden global test state.
    index of the rule that supplied it, and `lineNumber`, the Log Line it
    was found in, counting from 1 as LogSquirl does (a line ends at `\n`,
    so `\r\n` ends one line and a lone `\r` does not end one, as in the
-   host; a UTF-8 byte order mark belongs to the first line; a last line
-   without a line break counts too; 0 where unknown). As a key keeps the first value found, its line is the
+   host; a UTF-8 byte order mark belongs to the first line, a UTF-16 one
+   to none; a last line without a line break counts too; 0 where
+   unknown). As a key keeps the first value found, its line is the
    line of the shown value, also for rules sharing a key.
    `FooterScanner::footerValues()` hands them to the widget in rule order,
    for display, tooltips and going to the line. The preview's values carry

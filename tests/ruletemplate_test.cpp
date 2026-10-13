@@ -353,6 +353,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
         }
 
         THEN( "every template makes an enabled rule without mappings whose pattern compiles" )
+        THEN( "every template makes an enabled rule with its mappings whose pattern compiles" )
         {
             for ( const auto& t : templates ) {
                 INFO( t.name.toStdString() );
@@ -361,7 +362,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
                 REQUIRE( !entry.linePattern.isEmpty() );
                 REQUIRE( entry.valuePattern.isEmpty() );
                 REQUIRE( entry.enabled );
-                REQUIRE( entry.mappings.isEmpty() );
+                REQUIRE( entry.mappings.size() == t.mappings.size() );
                 REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
             }
         }

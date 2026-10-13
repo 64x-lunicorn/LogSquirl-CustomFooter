@@ -608,6 +608,92 @@ const QString kVin = QStringLiteral( "(?<![A-Za-z0-9])"
                                      "(?=[A-HJ-NPR-Z0-9]{0,16}[0-9])"
                                      "[A-HJ-NPR-Z0-9]{17}(?![A-Za-z0-9])" );
 
+/// A manufacturer and its world manufacturer identifiers (WMI), the first
+/// three characters of a VIN, separated by spaces.
+struct Manufacturer {
+    const char* name;
+    const char* wmis;
+};
+
+/**
+ * Common WMIs of major manufacturers, as listed in Wikibooks' "Vehicle
+ * Identification Numbers (VIN codes)/World Manufacturer Identifier (WMI)".
+ * Only WMIs of one brand; a WMI shared by several brands, such as
+ * Chrysler Group's `1C4`, is left out and shows raw. The names are brand
+ * names and not translated.
+ */
+const Manufacturer kManufacturers[] = {
+    { "Volkswagen", "WVW WV1 WV2 1VW 3VW" },
+    { "Audi", "WAU WUA TRU" },
+    { "Porsche", "WP0 WP1" },
+    { "Škoda", "TMB" },
+    { "SEAT", "VSS" },
+    { "BMW", "WBA WBS WBY" },
+    { "MINI", "WMW" },
+    { "Mercedes-Benz", "WDB WDD W1K W1N W1V" },
+    { "Opel/Vauxhall", "W0L" },
+    { "Ford", "1FA 1FM 1FT 3FA WF0" },
+    { "Chevrolet", "1G1 2G1 1GC 1GN" },
+    { "GMC", "1GT" },
+    { "Cadillac", "1G6 1GY" },
+    { "Tesla", "5YJ 7SA LRW" },
+    { "Toyota", "JTD JTE JT2 2T1 4T1 5TD" },
+    { "Lexus", "JTH" },
+    { "Honda", "JHM 1HG 2HG 5J6 5FN" },
+    { "Nissan", "JN1 JN8 1N4 5N1" },
+    { "Mazda", "JM1" },
+    { "Subaru", "JF1 4S3 4S4" },
+    { "Hyundai", "KMH 5NP" },
+    { "Kia", "KNA KND" },
+    { "Volvo", "YV1 YV4" },
+    { "Fiat", "ZFA" },
+    { "Alfa Romeo", "ZAR" },
+    { "Ferrari", "ZFF" },
+    { "Renault", "VF1" },
+    { "Peugeot", "VF3" },
+    { "Citroën", "VF7" },
+    { "Land Rover", "SAL" },
+    { "Jaguar", "SAJ" },
+    { "Bentley", "SCB" },
+};
+
+/// Each WMI of kManufacturers mapped to its manufacturer.
+QList<ValueMapping> manufacturerMappings()
+{
+    QList<ValueMapping> mappings;
+    for ( const auto& manufacturer : kManufacturers ) {
+        const auto wmis = QString::fromLatin1( manufacturer.wmis ).split( QLatin1Char( ' ' ) );
+        for ( const auto& wmi : wmis ) {
+            mappings.append( { wmi, QString::fromUtf8( manufacturer.name ) } );
+        }
+    }
+    return mappings;
+}
+
+/// The first year of the model year cycle the mappings cover.
+constexpr int kFirstModelYear = 2010;
+
+/// The model year codes of a VIN's 10th character, one per year from
+/// kFirstModelYear: letters without I, O, Q, U and Z, then digits without
+/// 0. They repeat every 30 years.
+const char kModelYearCodes[] = "ABCDEFGHJKLMNPRSTVWXY123456789";
+
+/// The years after which the model year codes repeat.
+constexpr int kModelYearCycle = 30;
+static_assert( sizeof( kModelYearCodes ) - 1 == kModelYearCycle, "one code per year" );
+
+/// Each model year code mapped to its year in the cycle from
+/// kFirstModelYear.
+QList<ValueMapping> modelYearMappings()
+{
+    QList<ValueMapping> mappings;
+    const auto codes = QString::fromLatin1( kModelYearCodes );
+    for ( int i = 0; i < codes.size(); ++i ) {
+        mappings.append( { codes.at( i ), QString::number( kFirstModelYear + i ) } );
+    }
+    return mappings;
+}
+
 /// Automotive: the vehicle and its telematics unit.
 QList<RuleTemplate> automotiveTemplates()
 {
@@ -638,6 +724,35 @@ QList<RuleTemplate> automotiveTemplates()
           QStringLiteral( "ICCID" ),
           simple( QStringLiteral( "ICCID:" ) ),
           {} } );
+
+    // The manufacturer and the model year are parts of a VIN: kVin in a
+    // lookahead, so they are found in exactly the VINs the VIN template
+    // finds, then the part. The WMI is the first three characters, the
+    // model year code the 10th. Mappings turn the codes into text; an
+    // unmapped code shows as it is.
+    RuleTemplate manufacturer{ tr( "Manufacturer" ),
+                               tr( "The manufacturer from the first three characters of a VIN "
+                                   "(the WMI), e.g. WVW: Volkswagen; mapped for common WMIs, "
+                                   "another shows as it is" ),
+                               QStringLiteral( "Manufacturer" ),
+                               {},
+                               QStringLiteral( "(?=%1)([A-HJ-NPR-Z0-9]{3})" ).arg( kVin ) };
+    manufacturer.mappings = manufacturerMappings();
+    templates.append( manufacturer );
+
+    RuleTemplate modelYear{
+        tr( "Model year" ),
+        tr( "The model year from the 10th character of a VIN, e.g. A: 2010; the codes repeat "
+            "every %1 years, and the mappings give the years %2 to %3" )
+            .arg( kModelYearCycle )
+            .arg( kFirstModelYear )
+            .arg( kFirstModelYear + kModelYearCycle - 1 ),
+        QStringLiteral( "Model year" ),
+        {},
+        QStringLiteral( "(?=%1)[A-HJ-NPR-Z0-9]{9}([A-HJ-NPR-Z0-9])" ).arg( kVin )
+    };
+    modelYear.mappings = modelYearMappings();
+    templates.append( modelYear );
 
     return templates;
 }
@@ -688,6 +803,7 @@ FooterEntry RuleTemplate::entry( const QString& askedKey ) const
     else {
         entry.linePattern = linePattern;
     }
+    entry.mappings = mappings;
     return entry;
 }
 

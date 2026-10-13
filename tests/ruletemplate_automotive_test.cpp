@@ -140,11 +140,13 @@ void addFromTemplate( FooterEditor& editor, const QString& name )
 
 } // namespace
 
-SCENARIO( "The Automotive group holds VIN, IMEI and ICCID", "[ruletemplate][automotive]" )
+SCENARIO( "The Automotive group starts with VIN, IMEI and ICCID", "[ruletemplate][automotive]" )
 {
     THEN( "in this order, keyed as named" )
     {
-        REQUIRE( namesIn( "Automotive" ) == QStringList{ "VIN", "IMEI", "ICCID" } );
+        // The templates with mappings after them are tested in
+        // ruletemplate_mapping_test.cpp.
+        REQUIRE( namesIn( "Automotive" ).mid( 0, 3 ) == QStringList{ "VIN", "IMEI", "ICCID" } );
         for ( const auto* name : { "VIN", "IMEI", "ICCID" } ) {
             INFO( name );
             REQUIRE( templateNamed( name ).key == name );

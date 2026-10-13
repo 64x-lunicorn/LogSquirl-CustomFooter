@@ -30,25 +30,14 @@
 #include "footerscanner.h"
 #include "ruletemplate.h"
 #include "simplerule.h"
+#include "templatesamples.h"
 
 #include <QFile>
 #include <QTemporaryDir>
 
-#include <algorithm>
-#include <optional>
-
 using namespace custom_footer;
 
 namespace {
-
-const RuleTemplate& templateNamed( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
 
 /// The values @p entries extract from a file of @p lines, through the
 /// scanner, as the footer would show them.
@@ -70,59 +59,13 @@ QMap<QString, QString> scanLines( const QList<FooterEntry>& entries, const QStri
     return FooterScanner::scan( path, entries );
 }
 
-/// The value the template named @p templateName extracts from @p line;
-/// nothing if it does not match.
-std::optional<QString> extract( const QString& templateName, const QString& line )
-{
-    const auto entry = templateNamed( templateName ).entry();
-    const auto values = scanLines( { entry }, { "first line", line, "last line" } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
-
-/// Lines a template finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( templateName, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( templateName, line ) == std::nullopt );
-    }
-}
-
-/// The names of the templates of @p group, in list order.
-QStringList namesIn( const QString& group )
-{
-    QStringList names;
-    for ( const auto& t : ruleTemplates() ) {
-        if ( t.group == group ) {
-            names.append( t.name );
-        }
-    }
-    return names;
-}
-
 } // namespace
 
 SCENARIO( "The Test run group holds the pytest templates", "[ruletemplate]" )
 {
     THEN( "Python version, pytest version and Test result, in this order" )
     {
-        REQUIRE( namesIn( "Test run" )
+        REQUIRE( namesOf( templatesIn( "Test run" ) )
                  == QStringList{ "Python version", "pytest version", "Test result" } );
     }
 

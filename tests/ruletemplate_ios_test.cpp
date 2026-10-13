@@ -28,12 +28,12 @@
 #include "footerscanner.h"
 #include "ruletemplate.h"
 #include "simplerule.h"
+#include "templatesamples.h"
 
 #include <QFile>
 #include <QStringList>
 #include <QTemporaryDir>
 
-#include <algorithm>
 #include <optional>
 
 using namespace custom_footer;
@@ -41,15 +41,6 @@ using namespace custom_footer;
 namespace {
 
 const QString kGroup = QStringLiteral( "iOS crash log" );
-
-const RuleTemplate& templateNamed( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
 
 /// The value the template named @p templateName extracts from a file of
 /// @p lines through the scanner, as the footer would show it; nothing if it
@@ -74,33 +65,6 @@ std::optional<QString> extractFromFile( const QString& templateName, const QStri
         return std::nullopt;
     }
     return values.value( entry.key );
-}
-
-std::optional<QString> extract( const QString& templateName, const QString& line )
-{
-    return extractFromFile( templateName, { "first line", line, "last line" } );
-}
-
-/// Lines a template finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( templateName, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( templateName, line ) == std::nullopt );
-    }
 }
 
 /// The header of a crash report of an iPad app, iPadOS 17.1.2, as posted on
@@ -168,13 +132,7 @@ SCENARIO( "The iOS crash log group holds its templates", "[ruletemplate][ios]" )
         THEN( "the group holds hardware model, OS version, incident identifier and app version, "
               "in this order" )
         {
-            QStringList names;
-            for ( const auto& t : ruleTemplates() ) {
-                if ( t.group == kGroup ) {
-                    names.append( t.name );
-                }
-            }
-            REQUIRE( names
+            REQUIRE( namesOf( templatesIn( kGroup ) )
                      == QStringList{ "Hardware model", "OS version", "Incident identifier",
                                      "App version" } );
         }

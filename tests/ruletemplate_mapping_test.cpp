@@ -34,6 +34,7 @@
 #include "footerscanner.h"
 #include "ruletemplate.h"
 #include "ruletemplatedialog.h"
+#include "templatesamples.h"
 
 #include <QDialogButtonBox>
 #include <QFile>
@@ -45,21 +46,11 @@
 #include <QToolButton>
 #include <QTreeWidget>
 
-#include <algorithm>
 #include <optional>
 
 using namespace custom_footer;
 
 namespace {
-
-const RuleTemplate& templateNamed( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
 
 /// Mappings as `raw=display` strings, so they compare and print.
 QStringList pairsOf( const QList<ValueMapping>& mappings )
@@ -80,63 +71,6 @@ std::optional<QString> displayOf( const QList<ValueMapping>& mappings, const QSt
         }
     }
     return std::nullopt;
-}
-
-/// The value the template named @p templateName shows in the footer for
-/// a file with @p line, mappings applied; nothing if it does not match.
-std::optional<QString> extract( const QString& templateName, const QString& line )
-{
-    const auto entry = templateNamed( templateName ).entry();
-    REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    const auto path = dir.path() + "/sample.log";
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "first line\n" );
-    file.write( line.toUtf8() );
-    file.write( "\nlast line\n" );
-    file.close();
-
-    const auto values = FooterScanner::scan( path, { entry } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
-
-/// Lines a template finds, with the value the footer shows for each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( templateName, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( templateName, line ) == std::nullopt );
-    }
-}
-
-/// The names of the templates of @p group, in list order.
-QStringList namesIn( const QString& group )
-{
-    QStringList names;
-    for ( const auto& t : ruleTemplates() ) {
-        if ( t.group == group ) {
-            names.append( t.name );
-        }
-    }
-    return names;
 }
 
 /// Adds the templates named @p names in @p editor through From template….
@@ -180,7 +114,7 @@ SCENARIO( "Manufacturer and Model year follow the VIN in the Automotive group",
 {
     THEN( "after VIN, IMEI and ICCID, keyed as named and advanced" )
     {
-        REQUIRE( namesIn( "Automotive" )
+        REQUIRE( namesOf( templatesIn( "Automotive" ) )
                  == QStringList{ "VIN", "IMEI", "ICCID", "Manufacturer", "Model year" } );
         for ( const auto* name : { "Manufacturer", "Model year" } ) {
             INFO( name );

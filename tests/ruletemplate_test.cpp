@@ -30,11 +30,11 @@
 #include "ruletemplate.h"
 #include "ruletemplatedialog.h"
 #include "simplerule.h"
+#include "templatesamples.h"
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -42,75 +42,15 @@
 #include <QStyle>
 #include <QTableView>
 #include <QTableWidget>
-#include <QTemporaryDir>
 #include <QTest>
 #include <QToolButton>
 #include <QTreeWidget>
 
-#include <algorithm>
 #include <optional>
 
 using namespace custom_footer;
 
 namespace {
-
-const RuleTemplate& templateNamed( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
-
-/// The value @p entry extracts from @p line through the scanner, as the
-/// footer would show it; nothing if it does not match.
-std::optional<QString> extract( const FooterEntry& entry, const QString& line )
-{
-    REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    const auto path = dir.path() + "/sample.log";
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "first line\n" );
-    file.write( line.toUtf8() );
-    file.write( "\nlast line\n" );
-    file.close();
-
-    const auto values = FooterScanner::scan( path, { entry } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
-
-std::optional<QString> extract( const QString& templateName, const QString& line )
-{
-    return extract( templateNamed( templateName ).entry(), line );
-}
-
-/// Lines a template finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( templateName, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( templateName, line ) == std::nullopt );
-    }
-}
 
 /// A double-click at @p pos as a platform sends it: press, release, double
 /// click, release. QTest::mouseDClick() does not reach the view's
@@ -285,18 +225,6 @@ bool sameEntry( const FooterEntry& a, const FooterEntry& b )
         }
     }
     return true;
-}
-
-/// The templates of @p group, in list order.
-QList<RuleTemplate> templatesIn( const QString& group )
-{
-    QList<RuleTemplate> inGroup;
-    for ( const auto& t : ruleTemplates() ) {
-        if ( t.group == group ) {
-            inGroup.append( t );
-        }
-    }
-    return inGroup;
 }
 
 } // namespace
@@ -666,30 +594,23 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
 
         THEN( "the value directly after = ends at whitespace" )
         {
-            for ( const Sample& sample :
-                  std::initializer_list<Sample>{ { "user=alice", "alice" },
-                                                 { "level=info user=alice msg=hi", "alice" },
-                                                 { "a=1 user=x;y=2", "x;y=2" },
-                                                 { "superuser=root user=alice", "alice" },
-                                                 { "user= msg=hi user=bob", "bob" },
-                                                 { "Starting with --user=alice", "alice" },
-                                                 { "--user=alice", "alice" },
-                                                 { "-user=alice", "alice" },
-                                                 { "a=1 user=alice", "alice" } } ) {
-                INFO( sample.line );
-                REQUIRE( extract( entry, sample.line ) == QString( sample.value ) );
-            }
+            requireFinds( entry, { { "user=alice", "alice" },
+                                   { "level=info user=alice msg=hi", "alice" },
+                                   { "a=1 user=x;y=2", "x;y=2" },
+                                   { "superuser=root user=alice", "alice" },
+                                   { "user= msg=hi user=bob", "bob" },
+                                   { "Starting with --user=alice", "alice" },
+                                   { "--user=alice", "alice" },
+                                   { "-user=alice", "alice" },
+                                   { "a=1 user=alice", "alice" } } );
         }
 
         THEN( "not for other keys, another separator, or without a value" )
         {
-            for ( const auto* line :
-                  { "users: alice", "user: alice", "User=alice", "user=", "user= msg=hi",
-                    "superuser=root", "a.user=x", "my-user=x", "my-user=bob", "x.user=bob",
-                    "my--user=bob", "---user=bob" } ) {
-                INFO( line );
-                REQUIRE( extract( entry, line ) == std::nullopt );
-            }
+            requireFindsNothing( entry, { "users: alice", "user: alice", "User=alice",
+                                          "user=", "user= msg=hi", "superuser=root", "a.user=x",
+                                          "my-user=x", "my-user=bob", "x.user=bob", "my--user=bob",
+                                          "---user=bob" } );
         }
     }
 

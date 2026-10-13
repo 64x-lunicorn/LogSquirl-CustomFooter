@@ -24,90 +24,17 @@
 
 #include <catch2/catch.hpp>
 
-#include "footerscanner.h"
 #include "ruletemplate.h"
 #include "simplerule.h"
-
-#include <QFile>
-#include <QTemporaryDir>
-
-#include <algorithm>
-#include <optional>
+#include "templatesamples.h"
 
 using namespace custom_footer;
-
-namespace {
-
-/// The template named @p name in the Android group.
-const RuleTemplate& androidTemplate( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it
-        = std::find_if( templates.begin(), templates.end(), [ & ]( const RuleTemplate& t ) {
-              return t.group == "Android" && t.name == name;
-          } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
-
-/// The value @p entry extracts from @p line through the scanner, as the
-/// footer would show it; nothing if it does not match.
-std::optional<QString> extract( const FooterEntry& entry, const QString& line )
-{
-    REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    const auto path = dir.path() + "/sample.log";
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "first line\n" );
-    file.write( line.toUtf8() );
-    file.write( "\nlast line\n" );
-    file.close();
-
-    const auto values = FooterScanner::scan( path, { entry } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
-
-/// Lines a template finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    const auto entry = androidTemplate( templateName ).entry();
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( entry, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    const auto entry = androidTemplate( templateName ).entry();
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( entry, line ) == std::nullopt );
-    }
-}
-
-} // namespace
 
 SCENARIO( "The Android group holds its templates in order", "[ruletemplate][android]" )
 {
     GIVEN( "the templates" )
     {
-        QStringList names;
-        for ( const auto& t : ruleTemplates() ) {
-            if ( t.group == "Android" ) {
-                names.append( t.name );
-            }
-        }
+        const auto names = namesOf( templatesIn( "Android" ) );
 
         THEN( "Android has build fingerprint, device model, Android version and serial number" )
         {
@@ -124,8 +51,8 @@ SCENARIO( "The Android group holds its templates in order", "[ruletemplate][andr
                     std::pair{ "Android version", "Android version" },
                     std::pair{ "Device serial number", "Serial number" } } ) {
                 INFO( name );
-                REQUIRE( androidTemplate( name ).key == key );
-                REQUIRE( !androidTemplate( name ).asksForKey() );
+                REQUIRE( templateNamed( name ).key == key );
+                REQUIRE( !templateNamed( name ).asksForKey() );
             }
         }
 
@@ -136,7 +63,7 @@ SCENARIO( "The Android group holds its templates in order", "[ruletemplate][andr
                     std::pair{ "Android version", "ro.build.version.release" },
                     std::pair{ "Device serial number", "ro.serialno" } } ) {
                 INFO( name );
-                const auto& t = androidTemplate( name );
+                const auto& t = templateNamed( name );
                 REQUIRE( t.isSimple() );
                 REQUIRE( t.simple.textBefore == QString( "[%1]: [" ).arg( property ) );
                 REQUIRE( t.simple.valueEnd == ValueEnd::Character );
@@ -144,7 +71,7 @@ SCENARIO( "The Android group holds its templates in order", "[ruletemplate][andr
                 const auto entry = t.entry();
                 REQUIRE( simpleRuleOf( entry ) == t.simple );
             }
-            const auto& fingerprint = androidTemplate( "Build fingerprint" );
+            const auto& fingerprint = templateNamed( "Build fingerprint" );
             REQUIRE( !fingerprint.isSimple() );
             REQUIRE( !simpleRuleOf( fingerprint.entry() ).has_value() );
         }

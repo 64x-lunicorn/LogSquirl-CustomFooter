@@ -25,76 +25,15 @@
 
 #include <catch2/catch.hpp>
 
-#include "footerscanner.h"
 #include "ruletemplate.h"
 #include "simplerule.h"
-
-#include <QFile>
-#include <QTemporaryDir>
-
-#include <algorithm>
-#include <optional>
+#include "templatesamples.h"
 
 using namespace custom_footer;
 
 namespace {
 
-const QString linuxGroup = QStringLiteral( "Linux and boot" );
-
-const RuleTemplate& templateNamed( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
-
-/// The value the template named @p templateName extracts from @p line
-/// through the scanner, as the footer would show it; nothing if it does
-/// not match.
-std::optional<QString> extract( const QString& templateName, const QString& line )
-{
-    const auto entry = templateNamed( templateName ).entry();
-    REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    const auto path = dir.path() + "/sample.log";
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "first line\n" );
-    file.write( line.toUtf8() );
-    file.write( "\nlast line\n" );
-    file.close();
-
-    const auto values = FooterScanner::scan( path, { entry } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
-
-/// Lines a template finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( templateName, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( templateName, line ) == std::nullopt );
-    }
-}
+const QString kGroup = QStringLiteral( "Linux and boot" );
 
 } // namespace
 
@@ -102,12 +41,7 @@ SCENARIO( "The Linux and boot group holds its templates", "[ruletemplate]" )
 {
     GIVEN( "the templates of the group" )
     {
-        QStringList names;
-        for ( const auto& t : ruleTemplates() ) {
-            if ( t.group == linuxGroup ) {
-                names.append( t.name );
-            }
-        }
+        const auto names = namesOf( templatesIn( kGroup ) );
 
         THEN( "they are these, in this order" )
         {

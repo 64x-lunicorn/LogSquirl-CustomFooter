@@ -25,51 +25,15 @@
 
 #include <catch2/catch.hpp>
 
-#include "footerscanner.h"
 #include "ruletemplate.h"
 #include "simplerule.h"
+#include "templatesamples.h"
 
-#include <QFile>
 #include <QRegularExpression>
-#include <QTemporaryDir>
-
-#include <algorithm>
-#include <optional>
 
 using namespace custom_footer;
 
 namespace {
-
-const RuleTemplate& templateNamed( const QString& name )
-{
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
-
-/// The value @p entry extracts from @p line through the scanner, as the
-/// footer would show it; nothing if it does not match.
-std::optional<QString> extract( const FooterEntry& entry, const QString& line )
-{
-    REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    const auto path = dir.path() + "/sample.log";
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "first line\n" );
-    file.write( line.toUtf8() );
-    file.write( "\nlast line\n" );
-    file.close();
-
-    const auto values = FooterScanner::scan( path, { entry } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
 
 /// The rule of the template named @p name, with the text before the value
 /// that starts its pattern, @p text, replaced by @p adjusted, as a user
@@ -82,38 +46,6 @@ FooterEntry adjusted( const QString& name, const QString& text, const QString& a
     return entry;
 }
 
-/// Lines a rule finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const FooterEntry& entry, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( entry, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    requireFinds( templateNamed( templateName ).entry(), samples );
-}
-
-void requireFindsNothing( const FooterEntry& entry, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( entry, line ) == std::nullopt );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    requireFindsNothing( templateNamed( templateName ).entry(), lines );
-}
-
 } // namespace
 
 SCENARIO( "The Network group holds the address templates", "[ruletemplate]" )
@@ -122,13 +54,8 @@ SCENARIO( "The Network group holds the address templates", "[ruletemplate]" )
     {
         THEN( "Network holds IPv4, MAC and IPv6 address, in this order" )
         {
-            QStringList names;
-            for ( const auto& t : ruleTemplates() ) {
-                if ( t.group == "Network" ) {
-                    names.append( t.name );
-                }
-            }
-            REQUIRE( names == QStringList{ "IPv4 address", "MAC address", "IPv6 address" } );
+            REQUIRE( namesOf( templatesIn( "Network" ) )
+                     == QStringList{ "IPv4 address", "MAC address", "IPv6 address" } );
         }
 
         THEN( "each has its key" )

@@ -181,6 +181,11 @@ keeps its patterns and key when the template changes.
 | General | Log start | `Log start` | When the log starts: the first date and time in the file, as the first match counts. ISO 8601: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Truncated fields such as `10:30:5` or `+01:0` are not matched; a `:` after a complete timestamp (`10:30:00: started`) is fine. | Advanced |
 | General | `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Also as a flag, `-user=` or `--user=`. Not in a longer key (`superuser=`, `a.user=`, `my-user=`), and `user= x` has no value. | Advanced |
 | Network | IPv4 address | `IP address` | The word after `IP:` (`IP: 192.168.1.20`), not the first address in a line, which in a log with clients and servers is an arbitrary one | Simple |
+| Linux and boot | Kernel version | `Kernel` | The word after `Linux version` in dmesg (`Linux version 6.8.0-45-generic (buildd@…) …` → `6.8.0-45-generic`) | Simple |
+| Linux and boot | Hardware (DMI) | `Hardware` | Vendor, product and board before `, BIOS` in the `DMI:` line (`DMI: LENOVO 20XW0055GE/20XW0055GE, BIOS N32ET86W (1.62 ) 06/26/2023` → `LENOVO 20XW0055GE/20XW0055GE`); a comma in the product is kept. `DMI: not present or invalid.` is not taken. | Advanced |
+| Linux and boot | Kernel command line | `Command line` | The rest of the line after `Command line:` (`Command line: BOOT_IMAGE=/boot/vmlinuz-6.8.0-45-generic root=UUID=… ro quiet splash`) | Simple |
+| Linux and boot | U-Boot version | `U-Boot` | The version in the U-Boot banner (`U-Boot 2024.01 (Mar 11 2024 - 18:45:23 +0000)` → `2024.01`), not the SPL or TPL banner | Advanced |
+| Linux and boot | Syslog host | `Host` | The host after the time at the start of an RFC 3164 syslog line, with or without `<PRI>` (`Oct 13 08:12:01 webserver01 sshd[1234]: …` → `webserver01`); also journalctl's default output | Advanced |
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also
@@ -194,6 +199,10 @@ given. For lists separated by `;` or `,`, change `(\S+)` in the pattern to
 `([^;]+)`. If an enabled rule with a line pattern already has the key of a
 checked template, the dialog names every such key: each new rule with one
 of them becomes an alternative for that key.
+
+Syslog host takes the host of the first line, so it fits the log of one
+host, not one merged from several. ARM kernels write `Kernel command line:`
+instead of `Command line:`; change the text of Kernel command line to it.
 
 ### Rule from a selected line
 

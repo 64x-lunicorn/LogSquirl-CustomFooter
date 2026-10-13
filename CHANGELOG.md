@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Environment and User templates** — two more templates in simple mode:
   Environment, the word after `env:` (`env: prod`, `env: staging`), and
   User, the word after `user:`. Adjust the text to your log.
+- **Linux and boot template group** — templates for dmesg, boot and
+  syslog output: Kernel version, the word after `Linux version`; Hardware
+  (DMI), vendor and product before `, BIOS` in the `DMI:` line; Kernel
+  command line, the rest of the line after `Command line:`; U-Boot
+  version, from the U-Boot banner; and Syslog host, the host after the
+  time of an RFC 3164 syslog line, which fits the log of one host, not
+  merged ones.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

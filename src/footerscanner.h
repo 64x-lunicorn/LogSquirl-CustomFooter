@@ -96,6 +96,10 @@ public:
         /// The encoding of a file starting with @p start.
         static Encoding detect( const QByteArray& start );
 
+        /// The encoding of the file at @p filePath, told from its first
+        /// bytes (detect()); UTF-8 if it cannot be read.
+        static Encoding ofFile( const QString& filePath );
+
         /// Bytes per code unit: 1 or 2.
         int unitBytes() const
         {

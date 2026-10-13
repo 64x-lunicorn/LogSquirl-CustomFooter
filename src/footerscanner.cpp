@@ -260,6 +260,15 @@ FooterScanner::Encoding FooterScanner::Encoding::detect( const QByteArray& start
     return {};
 }
 
+FooterScanner::Encoding FooterScanner::Encoding::ofFile( const QString& filePath )
+{
+    QFile file( filePath );
+    if ( filePath.isEmpty() || !file.open( QIODevice::ReadOnly ) ) {
+        return {};
+    }
+    return encodingOf( file );
+}
+
 bool FooterScanner::Encoding::isUnit( const char* at, char unit ) const
 {
     switch ( form ) {

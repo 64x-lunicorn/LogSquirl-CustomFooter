@@ -327,6 +327,32 @@ SCENARIO( "FooterScanner reads other files as before", "[footerscanner][utf16]" 
     }
 }
 
+SCENARIO( "The encoding of a file is told from its first bytes", "[footerscanner][utf16]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/any.log";
+
+    GIVEN( "files with and without a UTF-16 byte order mark, and none" )
+    {
+        THEN( "a mark gives UTF-16 of its byte order; anything else, UTF-8" )
+        {
+            for ( const auto order : { ByteOrder::LittleEndian, ByteOrder::BigEndian } ) {
+                writeBytes( path, utf16File( "VIN: X\n", order ) );
+                REQUIRE( Encoding::ofFile( path ) == Encoding::detect( bom( order ) ) );
+                REQUIRE( Encoding::ofFile( path ).unitBytes() == 2 );
+            }
+            writeBytes( path, "\xEF\xBB\xBF"
+                              "VIN: X\n" );
+            REQUIRE( Encoding::ofFile( path ) == Encoding() );
+            writeBytes( path, "" );
+            REQUIRE( Encoding::ofFile( path ) == Encoding() );
+            REQUIRE( Encoding::ofFile( tmpDir.path() + "/missing.log" ) == Encoding() );
+            REQUIRE( Encoding::ofFile( QString() ) == Encoding() );
+        }
+    }
+}
+
 SCENARIO( "FooterScanner continues a scan of a growing UTF-16 file",
           "[footerscanner][utf16][resume]" )
 {

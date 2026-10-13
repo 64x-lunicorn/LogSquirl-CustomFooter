@@ -220,6 +220,12 @@ from macOS too; the JSON of an untranslated `.ips` file is not matched.
 | Java and Spring Boot | Host | `Host` | The host between `on` and `with PID` in the Spring Boot 2 start line (`… on myhost with PID 4242`); Spring Boot 3 no longer logs it | Advanced |
 | Java and Spring Boot | Active profile | `Active profile` | The active Spring profiles: `The following 1 profile is active: "prod"` → `prod`; several as listed (`"dev", "local"`, or `dev,local` before Spring Boot 2.7). Not the default profile of `No active profile set, falling back to …`. | Advanced |
 | Java and Spring Boot | JRE version | `JRE version` | The runtime version in `(build …)` of the `# JRE version:` line of a JVM crash log (`hs_err_pid*.log`), `… (build 17.0.8+7)` → `17.0.8+7`; none if the JVM crashed while starting and left it empty | Advanced |
+| Automotive | VIN | `VIN` | A VIN by its shape alone, with or without text before it (`VIN: WVWZZZ1JZXW000001`, `"vin": "1M8GDM9AXKP042788"`): 17 characters from `A`–`Z` and `0`–`9` without `I`, `O` and `Q`, with both letters and digits, not part of a longer word; `_` and punctuation may border it. Upper case only, and no check digit test, as only North American VINs have one. | Advanced |
+| Automotive | IMEI | `IMEI` | The word after `IMEI:` (`IMEI: 490154203237518`) | Simple |
+| Automotive | ICCID | `ICCID` | The word after `ICCID:` (`%XICCID: 89014103211118510720`) | Simple |
+
+The Automotive templates fit the log of one vehicle or telematics unit:
+the footer shows the first VIN, IMEI or ICCID in the file.
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also
@@ -228,6 +234,10 @@ to say which value you mean. MAC address and IPv6 address need the
 address's shape and open in advanced mode; their pattern starts with the
 text, `MAC:` or `IPv6:`, which you change there in the same way
 (`link/ether`, `inet6`). Version does not count `version` inside
+`Build:`, `IP:`, `env:`, `user:`, `IMEI:` or `ICCID:` to what your log
+says; the text may also end a longer word (`ClientIP:`, `superuser:`,
+`%XICCID:`), so make it as long as needed
+to say which value you mean. Version does not count `version` inside
 another word (`conversion`, `server`), and so also misses a lower-case
 `appversion`; `app_version` and `appVersion` are found. For `key=value`,
 give the key without `=` (a trailing `=` is dropped); while it is checked,

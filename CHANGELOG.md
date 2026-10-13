@@ -93,6 +93,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Spring Boot 3 no longer logs it). Active profile, from `The following …
   active:`, one profile without its quotes. JRE version, the runtime
   version in `(build …)` of the `# JRE version:` line of a JVM crash log.
+- **Automotive template group** — VIN, found by its shape alone, with or
+  without text before it: 17 letters and digits without `I`, `O` and `Q`,
+  with both letters and digits, not part of a longer word (no check digit
+  test, which only North American VINs have). IMEI and ICCID, the word
+  after `IMEI:` and `ICCID:` in simple mode; adjust the text to your log.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

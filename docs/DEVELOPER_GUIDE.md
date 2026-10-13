@@ -970,6 +970,14 @@ value, is only for values unique by nature (a VIN, a build fingerprint);
 anything else needs text before the value, so that the first match is
 the value meant and not some other value of the same shape.
 
+The VIN template is such a shape: `kVin` in `ruletemplate.cpp` holds it
+without a capturing group (17 characters of `[A-HJ-NPR-Z0-9]`, lookaheads
+for at least one letter and one digit, no letter or digit on either
+side), and the VIN template captures all of it. A template that takes a
+part of a VIN puts `kVin` in a lookahead and captures the part, so it
+finds exactly the VINs the VIN template finds. Its tests are in
+`tests/ruletemplate_automotive_test.cpp`.
+
 `RuleTemplateDialog` lists the templates in a `QTreeWidget`: a top-level
 item per group, `Qt::ItemIsAutoTristate`, with a checkable child per
 template showing name and description and holding its index in

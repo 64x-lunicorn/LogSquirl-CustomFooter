@@ -288,17 +288,29 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
     {
         const auto& templates = ruleTemplates();
 
-        THEN( "there are eight, each with a name and a one-line description" )
+        THEN( "each has a name and a one-line description" )
         {
-            QStringList names;
             for ( const auto& t : templates ) {
-                names.append( t.name );
+                INFO( t.name.toStdString() );
+                REQUIRE( !t.name.isEmpty() );
                 REQUIRE( !t.description.isEmpty() );
                 REQUIRE( !t.description.contains( '\n' ) );
             }
-            REQUIRE( names
+        }
+
+        THEN( "General and Network hold their templates in this order" )
+        {
+            const auto names = []( const QString& group ) {
+                QStringList inGroup;
+                for ( const auto& t : templatesIn( group ) ) {
+                    inGroup.append( t.name );
+                }
+                return inGroup;
+            };
+            REQUIRE( names( "General" )
                      == QStringList{ "Version", "Build number", "Serial number", "Environment",
-                                     "User", "Log start", "key=value", "IPv4 address" } );
+                                     "User", "Log start", "key=value" } );
+            REQUIRE( names( "Network" ) == QStringList{ "IPv4 address" } );
         }
 
         THEN( "each is in a group, the templates of a group next to each other, General first" )

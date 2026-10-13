@@ -139,7 +139,7 @@ SCENARIO( "Linux and boot templates are simple where the value follows a fixed t
     {
         const auto& version = templateNamed( "Kernel version" );
         REQUIRE( version.isSimple() );
-        REQUIRE( version.simple == SimpleRule{ "Linux version", ValueEnd::Whitespace, {} } );
+        REQUIRE( version.simple == SimpleRule{ "Linux version ", ValueEnd::Whitespace, {} } );
 
         const auto& commandLine = templateNamed( "Kernel command line" );
         REQUIRE( commandLine.isSimple() );

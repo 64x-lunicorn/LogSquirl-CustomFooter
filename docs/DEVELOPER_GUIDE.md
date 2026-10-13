@@ -970,6 +970,12 @@ value, is only for values unique by nature (a VIN, a build fingerprint);
 anything else needs text before the value, so that the first match is
 the value meant and not some other value of the same shape.
 
+A simple rule allows no whitespace between its text and the value
+(`IP:192.168.1.20`), so a simple template whose text ends in a letter or
+digit ends it with a space (`Linux version `), as **Rule from a selected
+line** does: without it, `Linux versions 1` would give the kernel version
+`s`. A test in `tests/ruletemplate_test.cpp` checks every such template.
+
 The VIN template is such a shape: `kVin` in `ruletemplate.cpp` holds it
 without a capturing group (17 characters of `[A-HJ-NPR-Z0-9]`, lookaheads
 for at least one letter and one digit, no letter or digit on either

@@ -223,7 +223,7 @@ QList<RuleTemplate> linuxTemplates()
                         tr( "The kernel release after Linux version, e.g. Linux version "
                             "6.8.0-45-generic" ),
                         QStringLiteral( "Kernel" ),
-                        simple( QStringLiteral( "Linux version" ) ),
+                        simple( QStringLiteral( "Linux version " ) ),
                         {} } );
 
     // The DMI line, `DMI: <vendor> <product>/<board>, BIOS <version> <date>`
@@ -361,7 +361,7 @@ QList<RuleTemplate> testRunTemplates()
                         tr( "The Python version in the pytest header, e.g. "
                             "platform linux -- Python 3.12.3, pytest-8.3.2" ),
                         QStringLiteral( "Python" ),
-                        upToComma( QStringLiteral( "-- Python" ) ),
+                        upToComma( QStringLiteral( "-- Python " ) ),
                         {} } );
     templates.append( { tr( "pytest version" ),
                         tr( "The pytest version in the pytest header, e.g. "
@@ -430,7 +430,7 @@ QList<RuleTemplate> ciTemplates()
                         tr( "The commit after HEAD is now at, e.g. HEAD is now at aa5a02d; "
                             "the first checkout in the log counts" ),
                         QStringLiteral( "Commit" ),
-                        simple( QStringLiteral( "HEAD is now at" ) ),
+                        simple( QStringLiteral( "HEAD is now at " ) ),
                         {} } );
 
     // The first line of a GitLab job log: `Running with gitlab-runner
@@ -440,7 +440,7 @@ QList<RuleTemplate> ciTemplates()
           tr( "The version after Running with gitlab-runner, e.g. Running with gitlab-runner "
               "16.2.0" ),
           QStringLiteral( "GitLab Runner version" ),
-          simple( QStringLiteral( "Running with gitlab-runner" ) ),
+          simple( QStringLiteral( "Running with gitlab-runner " ) ),
           {} } );
 
     // Jenkins starts a build's console output with its cause. For a build
@@ -451,7 +451,7 @@ QList<RuleTemplate> ciTemplates()
         { tr( "Started by" ),
           tr( "The Jenkins user after Started by user, e.g. Started by user Jane Doe" ),
           QStringLiteral( "Started by" ),
-          simple( QStringLiteral( "Started by user" ), ValueEnd::EndOfLine ),
+          simple( QStringLiteral( "Started by user " ), ValueEnd::EndOfLine ),
           {} } );
 
     return templates;
@@ -545,7 +545,7 @@ QList<RuleTemplate> javaTemplates()
         { tr( "Java version" ),
           tr( "The word after using Java in the Spring Boot start line, e.g. using Java 17.0.8" ),
           QStringLiteral( "Java version" ),
-          simple( QStringLiteral( "using Java" ) ),
+          simple( QStringLiteral( "using Java " ) ),
           {} } );
 
     // The host is between `on` and `with PID` of the start line of Spring

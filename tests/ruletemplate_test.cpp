@@ -338,6 +338,20 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
             REQUIRE( templateNamed( "IPv4 address" ).group == "Network" );
         }
 
+        THEN( "a simple template whose text ends in a word does not match inside a longer word" )
+        {
+            // `Linux versions 1` is no kernel version `s` (#56).
+            for ( const auto& t : templates ) {
+                const auto text = t.simple.textBefore.trimmed();
+                if ( !t.isSimple() || text.isEmpty() || !text.back().isLetterOrNumber() ) {
+                    continue;
+                }
+                INFO( t.name.toStdString() );
+                REQUIRE( extract( t.entry(), text + "s 1" ) == std::nullopt );
+                REQUIRE( extract( t.entry(), text + " 1" ) == "1" );
+            }
+        }
+
         THEN( "every template makes an enabled rule without mappings whose pattern compiles" )
         {
             for ( const auto& t : templates ) {

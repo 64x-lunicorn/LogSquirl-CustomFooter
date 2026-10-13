@@ -154,11 +154,11 @@ SCENARIO( "The CI group holds its templates", "[ruletemplate]" )
         REQUIRE( templateNamed( "Runner image" ).simple
                  == SimpleRule{ "Image:", ValueEnd::Whitespace, {} } );
         REQUIRE( templateNamed( "Commit" ).simple
-                 == SimpleRule{ "HEAD is now at", ValueEnd::Whitespace, {} } );
+                 == SimpleRule{ "HEAD is now at ", ValueEnd::Whitespace, {} } );
         REQUIRE( templateNamed( "GitLab Runner version" ).simple
-                 == SimpleRule{ "Running with gitlab-runner", ValueEnd::Whitespace, {} } );
+                 == SimpleRule{ "Running with gitlab-runner ", ValueEnd::Whitespace, {} } );
         REQUIRE( templateNamed( "Started by" ).simple
-                 == SimpleRule{ "Started by user", ValueEnd::EndOfLine, {} } );
+                 == SimpleRule{ "Started by user ", ValueEnd::EndOfLine, {} } );
         for ( const auto* name :
               { "Runner image", "Commit", "GitLab Runner version", "Started by" } ) {
             INFO( name );

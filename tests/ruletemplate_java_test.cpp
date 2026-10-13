@@ -185,7 +185,7 @@ SCENARIO( "Java and Spring Boot templates are simple where a fixed text comes be
     {
         const auto& t = javaTemplate( "Java version" );
         REQUIRE( t.isSimple() );
-        REQUIRE( t.simple.textBefore == "using Java" );
+        REQUIRE( t.simple.textBefore == "using Java " );
         REQUIRE( t.simple.valueEnd == ValueEnd::Whitespace );
         const auto entry = t.entry();
         REQUIRE( simpleRuleOf( entry ).has_value() );

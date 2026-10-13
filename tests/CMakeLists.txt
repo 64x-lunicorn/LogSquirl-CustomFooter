@@ -49,6 +49,7 @@ add_executable(logsquirl_custom_footer_tests
     ruletemplate_network_test.cpp
     ruletemplate_testrun_test.cpp
     ruletemplate_ci_test.cpp
+    ruletemplate_ios_test.cpp
     latestjob_test.cpp
     rulecheck_test.cpp
     regexlab_test.cpp

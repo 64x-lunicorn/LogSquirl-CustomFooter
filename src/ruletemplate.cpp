@@ -457,6 +457,56 @@ QList<RuleTemplate> ciTemplates()
     return templates;
 }
 
+/// iOS crash log: the header of an Apple crash report, which names the
+/// device, the system and the app once.
+QList<RuleTemplate> iosCrashTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // The header fields have their names at the start of the line, padded
+    // with spaces to a column, and appear once per report.
+    //
+    // The model identifier, such as `iPhone15,5` or `Mac14,6`, is one word.
+    templates.append( { tr( "Hardware model" ),
+                        tr( "The device after Hardware Model:, e.g. Hardware Model: iPhone15,5" ),
+                        QStringLiteral( "Hardware model" ),
+                        simple( QStringLiteral( "Hardware Model:" ) ),
+                        {} } );
+
+    // The system name, version and build, such as `iPhone OS 17.2 (21C62)`
+    // or `macOS 14.6.1 (23G93)`, has spaces: up to the end of the line.
+    templates.append(
+        { tr( "OS version" ),
+          tr( "The system after OS Version:, e.g. OS Version: iPhone OS 17.2 (21C62)" ),
+          QStringLiteral( "OS version" ),
+          simple( QStringLiteral( "OS Version:" ), ValueEnd::EndOfLine ),
+          {} } );
+
+    // A UUID unique to the report; one word.
+    templates.append( { tr( "Incident identifier" ),
+                        tr( "The report's UUID after Incident Identifier:" ),
+                        QStringLiteral( "Incident identifier" ),
+                        simple( QStringLiteral( "Incident Identifier:" ) ),
+                        {} } );
+
+    // The app's CFBundleVersion and, in parentheses, its
+    // CFBundleShortVersionString (`1 (3.0)`), so up to the end of the line.
+    // Advanced, as `Version:` also ends `OS Version:`, `Baseband Version:`
+    // and `Report Version:`, which follow it in the header: a simple rule
+    // would take the OS version where the app's `Version:` is empty. So
+    // `Version:` must not follow a word and a space; it may start the line
+    // or follow other text, such as a prefix a log adds (`crash: Version:`),
+    // but not directly a letter (`AppVersion:`).
+    templates.append(
+        { tr( "App version" ),
+          tr( "The app's version after Version:, e.g. Version: 1.0 (1); not OS Version:" ),
+          QStringLiteral( "App version" ),
+          {},
+          QStringLiteral( "(?<!\\S|\\w\\s)Version:\\s*(.*\\S)" ) } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -478,6 +528,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "Android" ), androidTemplates() );
     appendGroup( templates, tr( "Test run" ), testRunTemplates() );
     appendGroup( templates, tr( "CI" ), ciTemplates() );
+    appendGroup( templates, tr( "iOS crash log" ), iosCrashTemplates() );
 
     return templates;
 }

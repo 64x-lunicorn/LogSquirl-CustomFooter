@@ -924,7 +924,8 @@ with the message open), and the 26.11 FakeHost scenarios in
 
 `ruletemplate.h` is a data table, `ruleTemplates()`: each `RuleTemplate`
 has a name, a one-line description, a key, either a `SimpleRule` or an
-advanced `linePattern` with the value as group 1, and its group.
+advanced `linePattern` with the value as group 1, its group, and value
+mappings, empty for most templates.
 `makeTemplates()` builds the table from one function per group
 (`generalTemplates()`, `networkTemplates()`, …), each returning its
 templates in order; `appendGroup()` sets their `group`, so the rows of a
@@ -983,6 +984,19 @@ side), and the VIN template captures all of it. A template that takes a
 part of a VIN puts `kVin` in a lookahead and captures the part, so it
 finds exactly the VINs the VIN template finds. Its tests are in
 `tests/ruletemplate_automotive_test.cpp`.
+
+A template may bring value mappings, which `entry()` copies into the new
+rule; from there they are the rule's own, edited in the panel and saved
+with it, and a template without mappings makes a rule without any.
+Manufacturer and Model year use them: they capture the WMI and the 10th
+character of a VIN (`kVin` in a lookahead), and their mappings are built
+from compact tables in `ruletemplate.cpp`, `kManufacturers` (a brand and
+its WMIs, separated by spaces, taken from Wikibooks' WMI list; a WMI
+shared by several brands is left out) and `kModelYearCodes` (one code per
+year from `kFirstModelYear`, 2010, for one 30-year cycle). A new template
+with mappings sets `mappings` after building the row. Their tests,
+through the scanner, the From template… dialog and a save and load, are in
+`tests/ruletemplate_mapping_test.cpp`.
 
 `RuleTemplateDialog` lists the templates in a `QTreeWidget`: a top-level
 item per group, `Qt::ItemIsAutoTristate`, with a checkable child per

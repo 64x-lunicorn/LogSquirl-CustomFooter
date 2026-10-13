@@ -169,7 +169,7 @@ double-click checks one too), and click **Add Rules**. Each checked
 template becomes a new rule, after the existing rules and in the order the
 dialog lists them, and the first new rule is selected; no existing rule
 changes. A template only makes new rules: a rule made from one earlier
-keeps its patterns and key when the template changes.
+keeps its patterns, key and mappings when the template changes.
 
 | Group | Template | Key | Finds | Mode |
 |-------|----------|-----|-------|------|
@@ -223,9 +223,17 @@ from macOS too; the JSON of an untranslated `.ips` file is not matched.
 | Automotive | VIN | `VIN` | A VIN by its shape alone, with or without text before it (`VIN: WVWZZZ1JZXW000001`, `"vin": "1M8GDM9AXKP042788"`): 17 characters from `A`–`Z` and `0`–`9` without `I`, `O` and `Q`, with both letters and digits, not part of a longer word; `_` and punctuation may border it. Upper case only, and no check digit test, as only North American VINs have one. | Advanced |
 | Automotive | IMEI | `IMEI` | The word after `IMEI:` (`IMEI: 490154203237518`) | Simple |
 | Automotive | ICCID | `ICCID` | The word after `ICCID:` (`%XICCID: 89014103211118510720`) | Simple |
+| Automotive | Manufacturer | `Manufacturer` | The first three characters (the WMI) of a VIN the VIN template finds, mapped to the manufacturer for common WMIs (`WVWZZZ1JZXW000001` → `Volkswagen`, `WBA…` → `BMW`); an unmapped WMI shows as it is (`1M8GDM9AXKP042788` → `1M8`) | Advanced |
+| Automotive | Model year | `Model year` | The 10th character of a VIN the VIN template finds, mapped to the model year (`WBA3A5C51CF256985` → `2012`). The codes repeat every 30 years; the mappings give 2010 to 2039, so `K` reads `2019` even for a vehicle from 1989. | Advanced |
 
 The Automotive templates fit the log of one vehicle or telematics unit:
-the footer shows the first VIN, IMEI or ICCID in the file.
+the footer shows the first VIN, IMEI or ICCID in the file, and the
+manufacturer and model year of that VIN.
+
+A template can bring value mappings, as Manufacturer and Model year do:
+the new rule has them like mappings you add yourself, shown in the editor,
+editable, and saved with the rule. Add a mapping for a WMI that is
+missing, or change a model year that belongs to the earlier cycle.
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:`, `user:`, `IMEI:` or `ICCID:` to what your log

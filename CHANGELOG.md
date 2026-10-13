@@ -98,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with both letters and digits, not part of a longer word (no check digit
   test, which only North American VINs have). IMEI and ICCID, the word
   after `IMEI:` and `ICCID:` in simple mode; adjust the text to your log.
+- **Templates with value mappings** — a template can bring value
+  mappings, which the new rule has like any others: shown in the editor,
+  editable and saved with it. Two Automotive templates use them, both
+  finding their value in exactly the VINs the VIN template finds:
+  Manufacturer, the first three characters (the WMI) mapped to the
+  manufacturer for common WMIs of major brands (`WVW` → Volkswagen, `WBA`
+  → BMW), an unmapped WMI shown as it is; and Model year, the 10th
+  character mapped to the year in the cycle 2010 to 2039.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

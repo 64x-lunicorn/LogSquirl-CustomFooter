@@ -26,9 +26,18 @@
 #include <catch2/catch.hpp>
 
 #include <QApplication>
+#include <QtGlobal>
 
 int main( int argc, char* argv[] )
 {
+    // The widget tests are written for the offscreen platform, as CI runs them:
+    // there QFileDialog is a widget rather than the desktop's native dialog, and
+    // tooltips show regardless of window focus. Default to it unless the caller
+    // chose a platform, so ctest and the binary itself pass on any desktop.
+    if ( qEnvironmentVariableIsEmpty( "QT_QPA_PLATFORM" ) ) {
+        qputenv( "QT_QPA_PLATFORM", "offscreen" );
+    }
+
     QApplication app( argc, argv );
     return Catch::Session().run( argc, argv );
 }

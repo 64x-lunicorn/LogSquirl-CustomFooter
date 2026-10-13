@@ -42,9 +42,15 @@ namespace custom_footer {
  * The rules are compiled once on construction. Rules sharing a key are
  * alternatives: the key's value comes from the first line that any of its
  * rules matches; if several of them match that line, the first rule in list
- * order wins. An enabled rule without a line pattern is incomplete and
- * skipped; one with a line pattern but without a key, or with an invalid
- * pattern, is skipped and reported in problems().
+ * order wins. Which rules are used is the RuleCheck's decision, as in the
+ * editor: an enabled rule without a line pattern is incomplete and
+ * skipped; one with a line pattern but a problem, such as no key or an
+ * invalid pattern, is skipped and reported in problems().
+ *
+ * Every value found carries the Log Line it was found in
+ * (FooterValue::lineNumber), counting from 1 in the whole file as the host
+ * does: a line ends with "\n", so a "\r\n" ends one line too, and a last
+ * line without a line break counts as well.
  */
 class FooterScanner {
 public:
@@ -83,6 +89,9 @@ public:
         Progress progress;
         /// Whether the scan continued from the given progress.
         bool resumed = false;
+        /// The file's size when the scan opened it, to tell whether a change
+        /// of it can alter the scan (fileUnchangedFor()).
+        qint64 fileSize = 0;
     };
 
     /// What one rule finds in a file, for the editor's live preview.
@@ -96,13 +105,14 @@ public:
             Cancelled,      ///< The preview was cancelled; nothing else is set.
         };
         Status status = Status::NoFile;
-        QString error;       ///< Why a pattern is invalid.
+        QString error;       ///< Why a pattern is invalid, in the RuleCheck's words.
         QString filePath;    ///< The file previewed.
         QString key;         ///< The rule's key.
         bool enabled = true; ///< Whether the rule is enabled; a disabled one supplies nothing.
 
         /// The rule's first match, if any: the value the footer would show
-        /// from it, and the line it is in.
+        /// from it, and the line it is in. The value's lineNumber is
+        /// lineNumber, copied once the preview is made.
         std::optional<FooterValue> value;
         qint64 lineNumber = 0; ///< Of the first match, counting from 1.
         QString line;          ///< The first matching line, as matched: at most kMaxLineBytes.
@@ -126,14 +136,17 @@ public:
         /// Other enabled rules have the same key.
         bool sharedKey = false;
         /// The value the footer shows for the rule's key in this file, from
-        /// whichever of its rules supplies it, and the line it is in.
+        /// whichever of its rules supplies it, and the line it is in. The
+        /// value's lineNumber is keyLineNumber, as in the footer.
         std::optional<FooterValue> keyValue;
         qint64 keyLineNumber = 0;
 
         /// What was read of the file, to tell whether a change of it can
         /// alter the preview (fileUnchangedFor()); no values.
         Progress read;
-        /// The file's size when the preview was made.
+        /// The file's size when the preview opened it, as Scan::fileSize, to
+        /// tell whether a change of it can alter the preview
+        /// (fileUnchangedFor()).
         qint64 fileSize = 0;
 
         bool limitReached() const
@@ -144,7 +157,8 @@ public:
 
     explicit FooterScanner( const QList<FooterEntry>& entries );
 
-    /// One message per skipped rule, in rule order.
+    /// The RuleCheck's listing of the skipped rules' problems ("Rule N: …"),
+    /// in rule order.
     const QStringList& problems() const
     {
         return problems_;
@@ -177,6 +191,10 @@ public:
      * without a line break is matched but not remembered in the progress, as
      * it may still be being written.
      *
+     * A continued scan counts lines on from @p from, so the line numbers of
+     * the values it finds are those in the whole file; values kept from
+     * @p from keep theirs. A scan from the start numbers them afresh.
+     *
      * A cancelled scan returns no values and empty progress.
      */
     Scan scanFrom( const QString& filePath, const Progress& from, int maxLines = kDefaultMaxLines,
@@ -201,9 +219,23 @@ public:
      * Whether a change of @p filePath since @p preview was made cannot alter
      * it: the part of the file read is unchanged, and either the preview
      * stopped at a limit, so appended lines are beyond it, or the file has
-     * its size still. A truncated or replaced file is changed.
+     * its size still and ends with the last complete line read. A truncated
+     * or replaced file is changed, and so is one ending in a line without a
+     * line break, which may have been rewritten in place.
      */
     static bool fileUnchangedFor( const QString& filePath, const Preview& preview );
+
+    /**
+     * Whether a change of @p filePath since @p scan of it cannot alter it:
+     * the part of the file scanned is unchanged, and either the scan is
+     * done (every key has a value, or a limit was reached), so appended
+     * lines are not scanned, or the file has its size still and ends with
+     * the last complete line scanned. A truncated or replaced file is
+     * changed, and so is one ending in a line without a line break, which
+     * may have been rewritten in place, or one of which no complete line
+     * was scanned, as there is nothing to compare.
+     */
+    static bool fileUnchangedFor( const QString& filePath, const Scan& scan );
 
     /// The given values, once per key, at the position of the key's first rule.
     QList<FooterValue> footerValues( const Values& values ) const;
@@ -244,19 +276,30 @@ private:
     /// the one extraction valueOf() and matchOf() share.
     static std::optional<Matches> matchesOf( const Rule& rule, const QString& line );
 
-    /// Compile a rule; empty and with @p problem set if it cannot be used.
-    static std::optional<Rule> compile( const FooterEntry& entry, int index, QString* problem );
+    /// Compile a rule. Its patterns are compiled on first use, and once:
+    /// RuleCheck::problemsOf() tells from them whether it can be used.
+    static Rule compile( const FooterEntry& entry, int index );
 
     /// The value a rule extracts from a line, if it matches, and where. Only
-    /// the preview needs where, once per preview.
+    /// the preview needs where, once per preview. The caller sets the value's
+    /// line number.
     static std::optional<Match> matchOf( const Rule& rule, const QString& line );
 
     /// The value a rule extracts from a line, if it matches; the scan's hot
-    /// path, so it computes nothing else.
+    /// path, so it computes nothing else. The caller sets the value's line
+    /// number.
     static std::optional<FooterValue> valueOf( const Rule& rule, const QString& line );
 
     /// Whether the file is still the one the progress was made on.
     static bool continues( QFile& file, const Progress& from );
+
+    /// Whether the file still holds what @p read covers, and, unless
+    /// appended lines are beyond what was read (@p beyondRead), has
+    /// @p size still and nothing after what was read: bytes that were not
+    /// remembered, such as a last line without a line break, may have
+    /// changed in place.
+    static bool unchangedSince( const QString& filePath, const Progress& read, bool beyondRead,
+                                qint64 size );
 
     QList<Rule> rules_;
     QStringList keys_; ///< Distinct keys, in the order of their first rule.

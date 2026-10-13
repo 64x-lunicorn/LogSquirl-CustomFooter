@@ -18,14 +18,14 @@
  */
 
 /**
- * @file activefilewatcher_test.cpp
- * @brief BDD tests for the watcher of the active file, shared by the footer
- *        and the editor's preview.
+ * @file filechangesource_test.cpp
+ * @brief BDD tests for the file system's notifications about the active
+ *        file, which the footer and the editor's preview follow.
  */
 
 #include <catch2/catch.hpp>
 
-#include "activefilewatcher.h"
+#include "filechangesource.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -61,7 +61,7 @@ void writeBytes( const QString& path, const QByteArray& content, bool append = f
 
 } // namespace
 
-SCENARIO( "ActiveFileWatcher follows the active file", "[activefilewatcher]" )
+SCENARIO( "FileChangeSource follows the active file", "[filechangesource]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -70,34 +70,34 @@ SCENARIO( "ActiveFileWatcher follows the active file", "[activefilewatcher]" )
     writeBytes( first, "a\n" );
     writeBytes( second, "b\n" );
 
-    ActiveFileWatcher watcher( 0 );
+    FileChangeSource source;
     int changes = 0;
-    QObject::connect( &watcher, &ActiveFileWatcher::changed, [ &changes ] { ++changes; } );
+    source.changed = [ &changes ] { ++changes; };
 
-    GIVEN( "a watcher that switched from one file to another" )
+    GIVEN( "a source that switched from one file to another" )
     {
-        watcher.setFile( first );
-        watcher.watch();
-        watcher.setFile( second );
-        watcher.watch();
+        source.setFile( first );
+        source.rearm();
+        source.setFile( second );
+        source.rearm();
 
         WHEN( "a change of the first file, still queued, arrives" )
         {
-            REQUIRE( QMetaObject::invokeMethod( &watcher, "fileChanged", Qt::DirectConnection,
+            REQUIRE( QMetaObject::invokeMethod( &source, "fileChanged", Qt::DirectConnection,
                                                 Q_ARG( QString, first ) ) );
 
             THEN( "it is ignored, and the second file stays watched" )
             {
-                REQUIRE_FALSE( watcher.isPending() );
-                REQUIRE( watcher.watchedPaths() == QStringList{ second } );
+                REQUIRE( changes == 0 );
+                REQUIRE( source.watchedPaths() == QStringList{ second } );
             }
         }
     }
 
     GIVEN( "a watched file" )
     {
-        watcher.setFile( first );
-        watcher.watch();
+        source.setFile( first );
+        source.rearm();
 
         WHEN( "it grows" )
         {
@@ -131,52 +131,57 @@ SCENARIO( "ActiveFileWatcher follows the active file", "[activefilewatcher]" )
         {
             REQUIRE( QFile::remove( first ) );
             REQUIRE( processUntil( [ &changes ] { return changes == 1; } ) );
-            watcher.watch();
+            source.rearm();
 
             THEN( "its directory is watched instead" )
             {
-                REQUIRE( watcher.isWaitingForFile() );
-                REQUIRE( watcher.watchedPaths() == QStringList{ dir.path() } );
+                REQUIRE( source.waitingForFile() );
+                REQUIRE( source.watchedPaths() == QStringList{ dir.path() } );
             }
 
             AND_WHEN( "it is created again" )
             {
                 writeBytes( first, "new\n" );
 
-                THEN( "a change is reported, and the file is watched again once read" )
+                THEN( "one change is reported, and the file is watched again once read" )
                 {
-                    REQUIRE( processUntil( [ &changes ] { return changes == 2; } ) );
-                    watcher.watch();
-                    REQUIRE_FALSE( watcher.isWaitingForFile() );
-                    REQUIRE( watcher.watchedPaths() == QStringList{ first } );
+                    REQUIRE( processUntil( [ &changes ] { return changes >= 2; } ) );
+                    REQUIRE_FALSE( source.waitingForFile() );
+                    REQUIRE( source.watchedPaths().isEmpty() );
+                    // Late notifications of the creation report nothing more.
+                    processUntil( [] { return false; }, 200 );
+                    REQUIRE( changes == 2 );
+                    source.rearm();
+                    REQUIRE_FALSE( source.waitingForFile() );
+                    REQUIRE( source.watchedPaths() == QStringList{ first } );
                 }
             }
         }
     }
 }
 
-SCENARIO( "ActiveFileWatcher reports only changes of the file's content or identity",
-          "[activefilewatcher]" )
+SCENARIO( "FileChangeSource reports only changes of the file's content or identity",
+          "[filechangesource]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const auto path = dir.path() + "/active.log";
     writeBytes( path, "a\n" );
 
-    ActiveFileWatcher watcher( 0 );
-    // The test reports the notifications itself.
-    watcher.setSystemNotifications( false );
+    FileChangeSource source;
+    // The test delivers the notifications itself.
+    source.setSystemNotifications( false );
     int changes = 0;
-    QObject::connect( &watcher, &ActiveFileWatcher::changed, [ &changes ] { ++changes; } );
-    const auto notify = [ &watcher, &path ] {
-        REQUIRE( QMetaObject::invokeMethod( &watcher, "fileChanged", Qt::DirectConnection,
+    source.changed = [ &changes ] { ++changes; };
+    const auto notify = [ &source, &path ] {
+        REQUIRE( QMetaObject::invokeMethod( &source, "fileChanged", Qt::DirectConnection,
                                             Q_ARG( QString, path ) ) );
     };
 
     GIVEN( "a file its owner has read" )
     {
-        watcher.setFile( path );
-        watcher.watch();
+        source.setFile( path );
+        source.rearm();
 
         WHEN( "a notification arrives, but the file is as it was" )
         {
@@ -184,8 +189,6 @@ SCENARIO( "ActiveFileWatcher reports only changes of the file's content or ident
 
             THEN( "it is dropped" )
             {
-                REQUIRE_FALSE( watcher.isPending() );
-                QCoreApplication::processEvents();
                 REQUIRE( changes == 0 );
             }
         }
@@ -198,9 +201,6 @@ SCENARIO( "ActiveFileWatcher reports only changes of the file's content or ident
 
             THEN( "one change is reported" )
             {
-                REQUIRE( watcher.isPending() );
-                REQUIRE( processUntil( [ &changes ] { return changes == 1; } ) );
-                QCoreApplication::processEvents();
                 REQUIRE( changes == 1 );
             }
         }
@@ -212,7 +212,19 @@ SCENARIO( "ActiveFileWatcher reports only changes of the file's content or ident
 
             THEN( "a change is reported" )
             {
-                REQUIRE( watcher.isPending() );
+                REQUIRE( changes == 1 );
+            }
+        }
+
+        WHEN( "a notification arrives after the owner read the grown file again" )
+        {
+            writeBytes( path, "b\n", true );
+            source.rearm();
+            notify();
+
+            THEN( "it is dropped, as only the owner's read" )
+            {
+                REQUIRE( changes == 0 );
             }
         }
     }

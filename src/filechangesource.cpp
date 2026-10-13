@@ -17,32 +17,28 @@
  * along with logsquirl-custom-footer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "activefilewatcher.h"
+#include "filechangesource.h"
 
 #include <QFileInfo>
 
 namespace custom_footer {
 
-ActiveFileWatcher::ActiveFileWatcher( int delayMs, QObject* parent )
+FileChangeSource::FileChangeSource( QObject* parent )
     : QObject( parent )
-    , delayMs_( delayMs )
 {
-    timer_.setSingleShot( true );
-    connect( &timer_, &QTimer::timeout, this, &ActiveFileWatcher::changed );
-    connect( &watcher_, &QFileSystemWatcher::fileChanged, this, &ActiveFileWatcher::fileChanged );
+    connect( &watcher_, &QFileSystemWatcher::fileChanged, this, &FileChangeSource::fileChanged );
     connect( &watcher_, &QFileSystemWatcher::directoryChanged, this,
-             &ActiveFileWatcher::directoryChanged );
+             &FileChangeSource::directoryChanged );
 }
 
-void ActiveFileWatcher::setFile( const QString& filePath )
+void FileChangeSource::setFile( const QString& path )
 {
-    timer_.stop();
     unwatch();
-    file_ = filePath;
+    file_ = path;
     known_ = {};
 }
 
-void ActiveFileWatcher::watch()
+void FileChangeSource::rearm()
 {
     if ( file_.isEmpty() ) {
         return;
@@ -74,40 +70,17 @@ void ActiveFileWatcher::watch()
     }
 }
 
-void ActiveFileWatcher::schedule()
-{
-    if ( !timer_.isActive() ) {
-        timer_.start( delayMs_ );
-    }
-}
-
-void ActiveFileWatcher::scheduleIn( int delayMs )
-{
-    timer_.start( delayMs );
-}
-
-void ActiveFileWatcher::cancelPending()
-{
-    timer_.stop();
-}
-
-void ActiveFileWatcher::setSystemNotifications( bool enabled )
+void FileChangeSource::setSystemNotifications( bool enabled )
 {
     systemNotifications_ = enabled;
     if ( !enabled ) {
-        timer_.stop();
         unwatch();
     }
 }
 
-void ActiveFileWatcher::setDelay( int delayMs )
+void FileChangeSource::fileChanged( const QString& path )
 {
-    delayMs_ = delayMs;
-}
-
-void ActiveFileWatcher::fileChanged( const QString& path )
-{
-    // A change of a file watched before, still queued.
+    // A change of a file followed before, still queued.
     if ( path != file_ ) {
         return;
     }
@@ -118,19 +91,31 @@ void ActiveFileWatcher::fileChanged( const QString& path )
     }
     known_ = now;
     // The file may have been renamed away, and some watchers would keep
-    // following it: watch() watches whatever is at the path then.
+    // following it: rearm() watches whatever is at the path then.
     watcher_.removePath( file_ );
-    schedule();
+    report();
 }
 
-void ActiveFileWatcher::directoryChanged( const QString& path )
+void FileChangeSource::directoryChanged( const QString& path )
 {
-    if ( path == watchedDir_ && QFileInfo::exists( file_ ) ) {
-        schedule();
+    if ( path != watchedDir_ || !QFileInfo::exists( file_ ) ) {
+        return;
+    }
+    // Creating the file may bring several notifications: one report, and
+    // rearm() watches the file once the owner reads it.
+    known_ = stampOf( file_ );
+    unwatch();
+    report();
+}
+
+void FileChangeSource::report()
+{
+    if ( changed ) {
+        changed();
     }
 }
 
-ActiveFileWatcher::Stamp ActiveFileWatcher::stampOf( const QString& filePath )
+FileChangeSource::Stamp FileChangeSource::stampOf( const QString& filePath )
 {
     const QFileInfo info( filePath );
     Stamp stamp;
@@ -143,7 +128,7 @@ ActiveFileWatcher::Stamp ActiveFileWatcher::stampOf( const QString& filePath )
     return stamp;
 }
 
-void ActiveFileWatcher::unwatch()
+void FileChangeSource::unwatch()
 {
     const auto paths = watchedPaths();
     if ( !paths.isEmpty() ) {

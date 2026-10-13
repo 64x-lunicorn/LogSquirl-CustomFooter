@@ -18,6 +18,7 @@
  */
 
 #include "footerscanner.h"
+#include "rulecheck.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -184,47 +185,28 @@ FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
 {
     for ( int i = 0; i < entries.size(); ++i ) {
         const auto& entry = entries[ i ];
-        if ( !entry.enabled || entry.linePattern.isEmpty() ) {
+        if ( !RuleCheck::isUsed( entry ) ) {
             continue;
         }
 
-        const auto describe = [ &entry, i ]( const QString& problem ) {
-            return QStringLiteral( "Rule %1 (%2): %3" ).arg( i + 1 ).arg( entry.key, problem );
-        };
-
-        if ( entry.key.trimmed().isEmpty() ) {
-            problems_.append( describe( QStringLiteral( "no key" ) ) );
-            continue;
-        }
-
-        QString problem;
-        auto rule = compile( entry, i, &problem );
-        if ( !rule ) {
-            problems_.append( describe( problem ) );
+        // Skipped for the problems the editor shows, in its words.
+        auto rule = compile( entry, i );
+        const auto problems
+            = RuleCheck::problemsOf( RuleCheck::Rule( entry ), rule.lineRegex, rule.valueRegex );
+        if ( !problems.isEmpty() ) {
+            problems_ += RuleCheck::listing( i, problems );
             continue;
         }
 
         if ( !keys_.contains( entry.key ) ) {
             keys_.append( entry.key );
         }
-        rules_.append( std::move( *rule ) );
+        rules_.append( std::move( rule ) );
     }
 }
 
-std::optional<FooterScanner::Rule> FooterScanner::compile( const FooterEntry& entry, int index,
-                                                           QString* problem )
+FooterScanner::Rule FooterScanner::compile( const FooterEntry& entry, int index )
 {
-    const auto lineError = patternError( entry.linePattern );
-    if ( !lineError.isEmpty() ) {
-        *problem = QStringLiteral( "line pattern: %1" ).arg( lineError );
-        return std::nullopt;
-    }
-    const auto valueError = patternError( entry.valuePattern );
-    if ( !valueError.isEmpty() ) {
-        *problem = QStringLiteral( "value pattern: %1" ).arg( valueError );
-        return std::nullopt;
-    }
-
     Rule rule;
     rule.index = index;
     rule.key = entry.key;
@@ -260,6 +242,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     if ( !file.open( QIODevice::ReadOnly ) ) {
         return scan;
     }
+    // Before reading: bytes appended while the scan reads count as unread.
+    scan.fileSize = file.size();
 
     auto& progress = scan.progress;
     scan.resumed = continues( file, from );
@@ -283,8 +267,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     if ( progress.values.size() < keys_.size() ) {
         const bool completed
             = forEachLine( file, position, maxLines, cancelled,
-                           [ this, &progress, &unterminated,
-                             &stoppedInLine ]( const QString& line, LineKind kind, qint64 ) {
+                           [ this, &progress, &unterminated, &stoppedInLine ](
+                               const QString& line, LineKind kind, qint64 lineNumber ) {
                                stoppedInLine = kind == LineKind::Stopped;
                                // The start of a line the limit stopped in is matched like
                                // that of any over-long line.
@@ -297,7 +281,10 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
                                    if ( values.contains( rule.key ) ) {
                                        continue;
                                    }
+                                   // The line is counted on from the progress: a
+                                   // continued scan numbers the lines of the whole file.
                                    if ( auto found = valueOf( rule, line ) ) {
+                                       found->lineNumber = lineNumber;
                                        values.insert( rule.key, std::move( *found ) );
                                    }
                                }
@@ -402,9 +389,13 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         preview.status = Preview::Status::NoLinePattern;
         return preview;
     }
-    QString problem;
-    const auto selected = compile( entry, rule, &problem );
-    if ( !selected ) {
+    // A rule without a key still matches; only its patterns can keep it
+    // from matching.
+    const auto selected = compile( entry, rule );
+    const auto problem
+        = RuleCheck::problemsOf( RuleCheck::Rule( entry ), selected.lineRegex, selected.valueRegex )
+              .preventingMatches();
+    if ( !problem.isEmpty() ) {
         preview.status = Preview::Status::InvalidPattern;
         preview.error = problem;
         return preview;
@@ -414,24 +405,25 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         return preview;
     }
 
-    // The rules the footer would take the key's value from: the enabled and
-    // valid ones with this key, in list order, as the constructor keeps them.
-    QList<Rule> keyRules;
-    if ( !entry.key.trimmed().isEmpty() ) {
-        QList<FooterEntry> sameKey = entries;
-        for ( auto& other : sameKey ) {
-            other.enabled = other.enabled && other.key == entry.key;
-        }
-        keyRules = FooterScanner( sameKey ).rules_;
-        preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
-                                         [ rule ]( const Rule& r ) { return r.index != rule; } );
+    // The rules the footer would take the key's value from: the enabled
+    // ones with this key that the rule check accepts, in list order, as the
+    // constructor keeps them. None for a rule without a key.
+    QList<FooterEntry> sameKey = entries;
+    for ( auto& other : sameKey ) {
+        other.enabled = other.enabled && other.key == entry.key;
     }
+    const QList<Rule> keyRules = FooterScanner( sameKey ).rules_;
+    preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
+                                     [ rule ]( const Rule& r ) { return r.index != rule; } );
 
     QFile file( filePath );
     if ( !file.open( QIODevice::ReadOnly ) ) {
         preview.status = Preview::Status::Unreadable;
         return preview;
     }
+    // Before reading, as the scan does: bytes appended while the preview
+    // reads count as unread.
+    preview.fileSize = file.size();
 
     const auto cancel = [] {
         Preview cancelledPreview;
@@ -451,7 +443,7 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
                            // Where the first match is, is only needed once.
                            std::optional<FooterValue> own;
                            if ( preview.matches == 0 ) {
-                               if ( auto match = matchOf( *selected, line ) ) {
+                               if ( auto match = matchOf( selected, line ) ) {
                                    own = match->value;
                                    preview.value = std::move( match->value );
                                    preview.lineNumber = lineNumber;
@@ -463,7 +455,7 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
                                }
                            }
                            else {
-                               own = valueOf( *selected, line );
+                               own = valueOf( selected, line );
                            }
                            if ( own ) {
                                ++preview.matches;
@@ -486,6 +478,14 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     if ( !completed ) {
         return cancel();
     }
+    // The values carry their lines, as the footer's do: derived here, and
+    // only here, from lineNumber and keyLineNumber, the one record of them.
+    if ( preview.value ) {
+        preview.value->lineNumber = preview.lineNumber;
+    }
+    if ( preview.keyValue ) {
+        preview.keyValue->lineNumber = preview.keyLineNumber;
+    }
 
     // Counting a last line that is unterminated, or that the limit stopped in.
     preview.lines = position.lines + ( partialLine ? 1 : 0 );
@@ -502,7 +502,6 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     read.head = readAt( file, 0, qMin( read.offset, kIdentityBytes ) );
     const auto tailSize = qMin( read.offset, kIdentityBytes );
     read.tail = readAt( file, read.offset - tailSize, tailSize );
-    preview.fileSize = file.size();
 
     preview.status = Preview::Status::Scanned;
     return preview;
@@ -513,11 +512,25 @@ bool FooterScanner::fileUnchangedFor( const QString& filePath, const Preview& pr
     if ( preview.status != Preview::Status::Scanned || preview.filePath != filePath ) {
         return false;
     }
+    return unchangedSince( filePath, preview.read, preview.limitReached(), preview.fileSize );
+}
+
+bool FooterScanner::fileUnchangedFor( const QString& filePath, const Scan& scan )
+{
+    return unchangedSince( filePath, scan.progress, scan.progress.done, scan.fileSize );
+}
+
+bool FooterScanner::unchangedSince( const QString& filePath, const Progress& read, bool beyondRead,
+                                    qint64 size )
+{
     QFile file( filePath );
-    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, preview.read ) ) {
+    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, read ) ) {
         return false;
     }
-    return preview.limitReached() || file.size() == preview.fileSize;
+    // Bytes after what was read, such as a last line without a line break,
+    // are not remembered: rewritten in place they keep the size, so only a
+    // file read to its end counts as unchanged by its size.
+    return beyondRead || ( file.size() == size && size == read.offset );
 }
 
 QList<FooterValue> FooterScanner::footerValues( const Values& values ) const

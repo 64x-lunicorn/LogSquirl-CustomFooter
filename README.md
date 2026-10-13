@@ -78,11 +78,13 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
 
 ## Configuration
 
-Rules are edited in *Plugins → Custom Footer…*. The dialog lists the rules on
-the left, each with its enabled check box, key and line pattern, with buttons
-to add (also from a template), remove, reorder, import and export them. The panel on the right shows
-the selected rule: its key, line pattern, value pattern and value mappings.
-Changes show up in the list as you type.
+Rules are edited in *Plugins → Custom Footer…* (on LogSquirl 26.11,
+*Plugins → Custom Footer → Edit Rules…*). The dialog lists the rules on the
+left, each with its enabled check box, key and line pattern, with buttons to
+add (also from a template or a selected Log Line), remove, reorder, import
+and export them. The panel on the right shows the selected rule: its key,
+line pattern, value pattern and value mappings. Changes show up in the list
+as you type.
 
 Order matters: among rules sharing a key, the one higher in the list wins on
 the same line. Reorder rules by dragging them in the list, with the ↑/↓
@@ -132,6 +134,32 @@ opens, a rule whose patterns have that form is shown in simple mode, every
 other rule in advanced mode. Simple rules are saved as their patterns, so the
 config and JSON formats do not change.
 
+### Testing a pattern in the Regex Lab
+
+**Test…** next to the line pattern and next to the value pattern opens the
+pattern in LogSquirl's **Regex Lab**, to try it against sample lines and
+change it there. **Apply** in the Lab puts the pattern into the rule, just as
+if you had typed it: the validation marks and the live preview follow, and
+it is saved with OK or Apply in the editor. **Cancel**, or closing the Lab,
+changes nothing.
+
+- Rules have no "match case" setting of their own: they match case unless
+  the pattern starts with `(?i)`. The Lab opens with **Match case** on, or
+  off for a pattern starting with `(?i)` (shown without it). If you apply
+  with Match case off, the rule's pattern gets `(?i)` in front (after
+  start-of-pattern items such as `(*CRLF)`, which must come first).
+- Applying the pattern exactly as the Lab opened with it changes nothing.
+- In simple mode, Test… of the line pattern opens the generated pattern.
+  Applying it unchanged keeps the rule simple; applying a changed pattern
+  switches the rule to Advanced with that pattern, as editing it by hand
+  would. A simple rule has no value pattern, so its Test… is disabled.
+- One Lab is open for the editor at a time; Test… is disabled until you
+  apply or cancel it. The pattern goes to the rule you opened the Lab for,
+  even if you select another rule or move it meanwhile. If you remove that
+  rule, or close the editor, before applying, the Lab's pattern is not used.
+- Test… needs LogSquirl 26.11 or later. On older versions it is disabled
+  and says so in its tooltip; everything else works as before.
+
 ### Rule templates
 
 **From template…** next to the add button adds a ready-made rule to adjust
@@ -156,6 +184,48 @@ by `;` or `,`, change `(\S+)` in the pattern to `([^;]+)`. If an enabled
 rule with a line pattern already has the template's key, the dialog says
 so: the new rule becomes an alternative for that key.
 
+### Rule from a selected line
+
+On LogSquirl 26.11 or later, select the Log Line that holds the value and
+choose *Plugins → Custom Footer → Rule from Selected Line…*. (There the
+editor itself is *Plugins → Custom Footer → Edit Rules…*.) The rule editor
+opens, or comes forward with your edits kept, with a new rule in simple
+mode, and shows the line above the rule's fields. Click where the value
+starts, or mark the value with the mouse:
+
+- the text before the value becomes **text before the value**: the word
+  right before it (`VIN:`), with the word before that if it is only a
+  separator (`id =`);
+- **value ends at** follows from the mark: whitespace for one word, the
+  character after the value (e.g. `,` in `speed=5,rpm=300`), or the end of
+  the line for a value with spaces in it;
+- the **key** is suggested from that text (`VIN:` → `VIN`, `[VIN]` →
+  `VIN`, `app.version=` → `app.version`). A key you type yourself is kept
+  when you mark another value.
+
+The preview shows the extracted value at once. A click marks the whole
+word it lands in; spaces around a mark are not part of the value. Of a very
+long line only the first 64 KiB are shown, as the footer reads no further.
+Some marks make no rule, and the editor says why: a value at the very
+start of the line has no text before it, and a value whose text before it
+also appears earlier in the line would never be found, as a rule takes the
+first match (`a: 1 a: 2` marking `2`). Mark another value then, or write an
+advanced rule.
+
+Like every rule, the new one gives its key the value of the **first** Log
+Line in the file it matches, not necessarily the selected one. If an
+earlier Log Line matches first, the editor says which one and what the
+footer will show.
+
+When several lines are selected, the rule is made from the first, and the
+editor says so. The editor's **From selected line…** button does the same
+with the line selected when the editor opened: while the editor is open,
+LogSquirl's window, and so its selection, cannot change. Without a selected
+line or an open Log File, a message says what to do. While the Regex Lab is
+open for the editor, marks in the line are not taken. LogSquirl 26.10 does
+not offer the selected line: there the menu has *Plugins → Custom Footer…*
+as before, and the button is not shown.
+
 ### How rules are applied
 
 - Each key takes its value from the **first line** of the file that one of
@@ -167,21 +237,32 @@ so: the new rule becomes an alternative for that key.
   patterns, and enabled rules with a line pattern but no key, at the field
   with the reason and in the rule list, and won't save until they are fixed.
 - The file is scanned in the background whenever it becomes the active file
-  and when rules are applied. A rule with an invalid pattern is skipped and
-  reported in the LogSquirl log.
+  and when rules are applied. A rule the editor would mark, e.g. with an
+  invalid pattern, is skipped and reported in the LogSquirl log in the
+  editor's words, such as `Rule 2: invalid line pattern: …`.
 - The active file is **watched**: when it changes, e.g. while following a
-  growing log, it is scanned again within about half a second, so values
-  that show up later in the file appear in the footer. Only the lines
-  appended since the last scan are read, and none once every key has a
-  value; a file that was truncated or replaced is scanned from its start.
-  If the file is rotated away, the footer picks it up again once it is
-  recreated.
+  growing log, it is scanned again about half a second later, so values
+  that show up later in the file appear in the footer. A change during a
+  scan is scanned half a second after that scan, never right after it.
+  Only the lines appended since the last scan are read, and none once
+  every key has a value; a file that was truncated or replaced is scanned
+  from its start. If the file is rotated away, the footer picks it up
+  again once it is recreated.
 - **Copy a value** by clicking it in the footer: exactly the value is copied,
   not its key, and a short "Copied" tooltip confirms it. Hover a value to see
   which rule supplied it and, for a mapped value, the raw value it replaced.
   With the keyboard, Tab to a value and press Space, Return or the copy
   shortcut. The context menu of a value offers "Copy Value", "Copy Key and
   Value", and "Copy All" for every key and value shown, one per line.
+- **Go to the Log Line of a value** (LogSquirl 26.11 or later) by
+  double-clicking it, or with "Go to Log Line" in its context menu (with
+  the keyboard: Tab to the value and press the context menu key). LogSquirl
+  selects the line the value was found in and scrolls to it in the tab in
+  front; the tooltip of a value names that line. For a key that several
+  rules share, it is the line that supplied the shown value. If the line is
+  no longer in the file, a short tooltip says so. A double-click copies
+  the value too, as its first click does. On LogSquirl 26.10 the values
+  only copy.
 - A scan stops after `scan/maxLines` lines (default 100000, `0` for no
   limit) and never reads more than 64 MiB; lines longer than 64 KiB are
   matched against their start.
@@ -281,7 +362,7 @@ graph TD
     B --> G[FooterController]
     D[FooterConfig] -->|load rules| G
     G -->|scan on worker thread| C[FooterScanner]
-    H[File watcher] -->|file grew| G
+    H[File follower] -->|file grew| G
     G -->|latest scan results| E[FooterDisplayWidget]
     E -->|register_footer_widget| A
     B -->|edit rules| F[FooterEditor]

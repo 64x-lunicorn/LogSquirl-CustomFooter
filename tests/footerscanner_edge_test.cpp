@@ -106,11 +106,11 @@ SCENARIO( "FooterScanner handles invalid regex gracefully", "[footerscanner][edg
         {
             const FooterScanner scanner( entries );
 
-            THEN( "each invalid rule is reported by key" )
+            THEN( "each invalid rule is reported by rule number, in the editor's words" )
             {
                 REQUIRE( scanner.problems().size() == 2 );
-                REQUIRE( scanner.problems()[ 0 ].contains( "Bad" ) );
-                REQUIRE( scanner.problems()[ 1 ].contains( "Worse" ) );
+                REQUIRE( scanner.problems()[ 0 ].startsWith( "Rule 1: invalid line pattern: " ) );
+                REQUIRE( scanner.problems()[ 1 ].startsWith( "Rule 2: invalid value pattern: " ) );
             }
 
             THEN( "the valid rule still matches" )
@@ -313,8 +313,8 @@ SCENARIO( "FooterScanner treats rules sharing a key as alternatives", "[footersc
             THEN( "the key is shown at the position of its first rule" )
             {
                 REQUIRE( ordered.size() == 2 );
-                REQUIRE( ordered[ 0 ] == FooterValue{ "Version", "2.0", "2.0", 2 } );
-                REQUIRE( ordered[ 1 ] == FooterValue{ "ID", "42", "42", 1 } );
+                REQUIRE( ordered[ 0 ] == FooterValue{ "Version", "2.0", "2.0", 2, 2 } );
+                REQUIRE( ordered[ 1 ] == FooterValue{ "ID", "42", "42", 1, 1 } );
             }
         }
     }
@@ -363,7 +363,8 @@ SCENARIO( "FooterScanner skips incomplete rules", "[footerscanner][edge]" )
                 REQUIRE( results.size() == 1 );
                 REQUIRE( results[ "ID" ] == "42" );
                 REQUIRE( scanner.problems().size() == 1 );
-                REQUIRE( scanner.problems()[ 0 ].startsWith( "Rule 1" ) );
+                REQUIRE( scanner.problems()[ 0 ]
+                         == "Rule 1: a rule with a line pattern needs a key" );
             }
         }
     }

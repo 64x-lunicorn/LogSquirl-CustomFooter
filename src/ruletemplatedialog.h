@@ -54,8 +54,8 @@ public:
     explicit RuleTemplateDialog( QWidget* parent = nullptr );
 
     /// Start over for a new choice: the first template, no key, and
-    /// @p existingKeys as the keys of the rules the scanner uses: enabled,
-    /// with a line pattern.
+    /// @p existingKeys as the keys of the rules the scanner uses
+    /// (RuleCheck::keysInUse()).
     void reset( const QStringList& existingKeys );
 
     /// The rule the chosen template makes, with the given key if it asks

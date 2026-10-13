@@ -28,6 +28,7 @@
 #include "footervalue.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <atomic>
@@ -38,10 +39,19 @@ namespace {
 
 using Status = FooterScanner::Preview::Status;
 
-void writeBytes( const QString& path, const QByteArray& content )
+void writeBytes( const QString& path, const QByteArray& content, bool append = false )
 {
     QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    REQUIRE( file.open( append ? QIODevice::Append : QIODevice::WriteOnly ) );
+    REQUIRE( file.write( content ) == content.size() );
+}
+
+/// Overwrite bytes in place, keeping the file's size.
+void overwriteAt( const QString& path, qint64 offset, const QByteArray& content )
+{
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::ReadWrite ) );
+    REQUIRE( file.seek( offset ) );
     REQUIRE( file.write( content ) == content.size() );
 }
 
@@ -87,7 +97,7 @@ SCENARIO( "FooterScanner previews what a rule finds in a file", "[footerscanner]
             THEN( "it shows the raw and the mapped value" )
             {
                 REQUIRE( preview.value );
-                REQUIRE( *preview.value == FooterValue{ "Mode", "Production", "0x04", 0 } );
+                REQUIRE( *preview.value == FooterValue{ "Mode", "Production", "0x04", 0, 4 } );
             }
             THEN( "it counts the matching lines of the whole file, without a limit reached" )
             {
@@ -189,12 +199,13 @@ SCENARIO( "FooterScanner previews what a rule finds in a file", "[footerscanner]
         {
             const auto line = FooterScanner::preview( path, entries, 0 );
             REQUIRE( line.status == Status::InvalidPattern );
-            REQUIRE( line.error.startsWith( "line pattern: " ) );
-            REQUIRE( line.error.size() > QString( "line pattern: " ).size() );
+            REQUIRE( line.error
+                     == "invalid line pattern: " + FooterScanner::patternError( "mode=(" ) );
 
             const auto value = FooterScanner::preview( path, entries, 1 );
             REQUIRE( value.status == Status::InvalidPattern );
-            REQUIRE( value.error.startsWith( "value pattern: " ) );
+            REQUIRE( value.error
+                     == "invalid value pattern: " + FooterScanner::patternError( "(unclosed" ) );
         }
         THEN( "an invalid pattern is reported even without a file" )
         {
@@ -252,7 +263,7 @@ SCENARIO( "FooterScanner previews which rule supplies a shared key", "[footersca
             REQUIRE( preview.value->value == "2.0" );
             REQUIRE( preview.lineNumber == 2 );
             REQUIRE( preview.keyValue );
-            REQUIRE( *preview.keyValue == FooterValue{ "Version", "1.0", "1.0", 2 } );
+            REQUIRE( *preview.keyValue == FooterValue{ "Version", "1.0", "1.0", 2, 1 } );
             REQUIRE( preview.keyLineNumber == 1 );
         }
         THEN( "it matches what the footer shows for the key" )
@@ -392,6 +403,107 @@ SCENARIO( "FooterScanner's preview reads lines as the footer's scan does",
             REQUIRE( scan.values.isEmpty() );
             REQUIRE( preview.lines == scan.progress.lines );
             REQUIRE( preview.lineLimitReached );
+        }
+    }
+}
+
+SCENARIO( "FooterScanner tells whether a change of a file can alter a preview of it",
+          "[footerscanner][preview]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/previewed.log";
+    const QList<FooterEntry> entries = { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } };
+
+    GIVEN( "a preview of a file without a match, read to its end" )
+    {
+        writeBytes( path, "starting\nnoise\n" );
+        const auto preview = FooterScanner::preview( path, entries, 0 );
+        REQUIRE( preview.status == Status::Scanned );
+        REQUIRE_FALSE( preview.value );
+        REQUIRE_FALSE( preview.limitReached() );
+
+        THEN( "a file left as it was cannot alter it" )
+        {
+            REQUIRE( FooterScanner::fileUnchangedFor( path, preview ) );
+        }
+
+        WHEN( "a matching line is appended after the preview's read" )
+        {
+            writeBytes( path, "VIN: LATE\n", true );
+
+            THEN( "it can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, preview ) );
+            }
+
+            AND_WHEN( "the preview's size was taken with the line in it" )
+            {
+                // What the preview held when its size was taken after the
+                // line was appended, between the end of the read and the
+                // size: the window the scanner offers no hook into.
+                auto sizedLate = preview;
+                sizedLate.fileSize = QFileInfo( path ).size();
+
+                THEN( "the size does not hide the line, as it was not read" )
+                {
+                    REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, sizedLate ) );
+                }
+            }
+        }
+    }
+
+    GIVEN( "a preview of a file whose last line has no line break yet" )
+    {
+        writeBytes( path, "noise\nVIN: A" );
+        const auto preview = FooterScanner::preview( path, entries, 0 );
+        REQUIRE( preview.value->value == "A" );
+
+        WHEN( "that line is rewritten in place, at the same size" )
+        {
+            overwriteAt( path, 6, "VIN: B" );
+
+            THEN( "it can alter it" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, preview ) );
+            }
+
+            AND_WHEN( "the preview is redone" )
+            {
+                const auto redone = FooterScanner::preview( path, entries, 0 );
+
+                THEN( "it finds the new value" )
+                {
+                    REQUIRE( redone.value->value == "B" );
+                }
+            }
+        }
+
+        WHEN( "that line is removed" )
+        {
+            REQUIRE( QFile::resize( path, 6 ) );
+
+            THEN( "it can alter it, though the lines read are unchanged" )
+            {
+                REQUIRE_FALSE( FooterScanner::fileUnchangedFor( path, preview ) );
+            }
+        }
+    }
+
+    GIVEN( "a preview that reached the line limit" )
+    {
+        writeBytes( path, "one\ntwo\nthree\n" );
+        const auto preview = FooterScanner::preview( path, entries, 0, 2 );
+        REQUIRE( preview.lineLimitReached );
+
+        WHEN( "matching lines are appended" )
+        {
+            writeBytes( path, "VIN: LATE\n", true );
+
+            THEN( "they are beyond the limit and cannot alter it" )
+            {
+                REQUIRE( FooterScanner::fileUnchangedFor( path, preview ) );
+            }
         }
     }
 }

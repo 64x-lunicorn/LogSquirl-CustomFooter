@@ -26,9 +26,11 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QToolTip>
 
 #include <algorithm>
+#include <utility>
 
 namespace custom_footer {
 
@@ -58,7 +60,7 @@ QString withoutMnemonics( QString text )
     return text.replace( QLatin1Char( '&' ), QStringLiteral( "&&" ) );
 }
 
-QString toolTipOf( const FooterValue& value )
+QString toolTipOf( const FooterValue& value, bool canGoToLine )
 {
     QStringList lines;
     lines.append( QStringLiteral( "<b>%1:</b> %2" )
@@ -70,12 +72,19 @@ QString toolTipOf( const FooterValue& value )
     if ( value.rule >= 0 ) {
         lines.append( FooterValueItem::tr( "From rule %1" ).arg( value.rule + 1 ) );
     }
+    if ( value.lineNumber > 0 ) {
+        lines.append( FooterValueItem::tr( "Found in Log Line %1" ).arg( value.lineNumber ) );
+    }
     lines.append( QStringLiteral( "<i>%1</i>" ).arg( FooterValueItem::tr( "Click to copy" ) ) );
+    if ( canGoToLine ) {
+        lines.append( QStringLiteral( "<i>%1</i>" )
+                          .arg( FooterValueItem::tr( "Double-click to go to the Log Line" ) ) );
+    }
     return lines.join( QStringLiteral( "<br>" ) );
 }
 
 /// What the tooltip adds to the accessible name, as plain text.
-QString descriptionOf( const FooterValue& value )
+QString descriptionOf( const FooterValue& value, bool canGoToLine )
 {
     QStringList sentences;
     if ( value.isMapped() ) {
@@ -84,7 +93,13 @@ QString descriptionOf( const FooterValue& value )
     if ( value.rule >= 0 ) {
         sentences.append( FooterValueItem::tr( "From rule %1." ).arg( value.rule + 1 ) );
     }
+    if ( value.lineNumber > 0 ) {
+        sentences.append( FooterValueItem::tr( "Found in Log Line %1." ).arg( value.lineNumber ) );
+    }
     sentences.append( FooterValueItem::tr( "Press Space to copy." ) );
+    if ( canGoToLine ) {
+        sentences.append( FooterValueItem::tr( "Open the context menu to go to the Log Line." ) );
+    }
     return sentences.join( QLatin1Char( ' ' ) );
 }
 
@@ -101,7 +116,11 @@ FooterValueItem::FooterValueItem( const FooterValue& value, QWidget* parent )
     connect( this, &QToolButton::clicked, this, &FooterValueItem::copyToClipboard );
 
     // A menu of the button itself would make it a menu button; this one is
-    // only shown on request.
+    // only shown on request. Going to the Log Line comes first, where offered.
+    goToLine_
+        = contextMenu_->addAction( tr( "Go to Log Line" ), this, [ this ] { requestGoToLine(); } );
+    goToLine_->setObjectName( QStringLiteral( "goToLogLine" ) );
+    goToLine_->setVisible( false );
     contextMenu_->addAction( tr( "Copy Value" ), this, &FooterValueItem::copyToClipboard )
         ->setObjectName( QStringLiteral( "copyValue" ) );
     contextMenu_
@@ -119,9 +138,34 @@ void FooterValueItem::setValue( const FooterValue& value )
 {
     value_ = value;
     setText( withoutMnemonics( value.value ) );
-    setToolTip( toolTipOf( value ) );
     setAccessibleName( keyAndValue( value ) );
-    setAccessibleDescription( descriptionOf( value ) );
+    updateOffers();
+}
+
+void FooterValueItem::setGoToLineOffered( bool offered )
+{
+    goToLineOffered_ = offered;
+    updateOffers();
+}
+
+bool FooterValueItem::canGoToLine() const
+{
+    return goToLineOffered_ && value_.lineNumber > 0;
+}
+
+void FooterValueItem::updateOffers()
+{
+    const bool canGo = canGoToLine();
+    setToolTip( toolTipOf( value_, canGo ) );
+    setAccessibleDescription( descriptionOf( value_, canGo ) );
+    goToLine_->setVisible( canGo );
+}
+
+void FooterValueItem::requestGoToLine()
+{
+    if ( canGoToLine() ) {
+        emit goToLineRequested();
+    }
 }
 
 void FooterValueItem::copyToClipboard()
@@ -132,16 +176,18 @@ void FooterValueItem::copyToClipboard()
 void FooterValueItem::copyText( const QString& text )
 {
     QGuiApplication::clipboard()->setText( text );
+    showNotice( tr( "Copied" ) );
+}
 
-    // Confirm at the value for a moment. The tooltip is not given this item:
+void FooterValueItem::showNotice( const QString& message )
+{
+    // Show it at the value for a moment. The tooltip is not given this item:
     // it would become the item's child, and go away with the item even when
     // it shows another widget's tooltip by then, e.g. one of the host.
-    const auto confirmation = tr( "Copied" );
-    QToolTip::showText( mapToGlobal( rect().center() ), confirmation, nullptr, {},
-                        kConfirmationMs );
+    QToolTip::showText( mapToGlobal( rect().center() ), message, nullptr, {}, kConfirmationMs );
 
 #if QT_VERSION >= QT_VERSION_CHECK( 6, 8, 0 )
-    QAccessibleAnnouncementEvent announcement( this, confirmation );
+    QAccessibleAnnouncementEvent announcement( this, message );
     QAccessible::updateAccessibility( &announcement );
 #endif
 }
@@ -169,6 +215,19 @@ void FooterValueItem::keyPressEvent( QKeyEvent* event )
     QToolButton::keyPressEvent( event );
 }
 
+void FooterValueItem::mouseDoubleClickEvent( QMouseEvent* event )
+{
+    // Its first click has copied the value already. Taken here, the second
+    // press does not press the button again, so it neither copies a second
+    // time nor makes a click of its own.
+    if ( event->button() == Qt::LeftButton && canGoToLine() ) {
+        event->accept();
+        emit goToLineRequested();
+        return;
+    }
+    QToolButton::mouseDoubleClickEvent( event );
+}
+
 FooterDisplayWidget::FooterDisplayWidget( QWidget* parent )
     : QWidget( parent )
     , layout_( new QHBoxLayout( this ) )
@@ -193,6 +252,9 @@ FooterDisplayWidget::Entry FooterDisplayWidget::createEntry( const FooterValue& 
     row->addWidget( entry.key );
 
     entry.item = new FooterValueItem( value, entry.box );
+    entry.item->setGoToLineOffered( goToLineOffered_ );
+    connect( entry.item, &FooterValueItem::goToLineRequested, this,
+             [ this, item = entry.item ] { emit goToLineRequested( item->value() ); } );
     entry.item->contextMenu()
         ->addAction( tr( "Copy All" ), entry.item,
                      [ this, item = entry.item ] { item->copyText( allValuesText() ); } )
@@ -261,6 +323,24 @@ QList<FooterValue> FooterDisplayWidget::values() const
         shown.append( entry.item->value() );
     }
     return shown;
+}
+
+void FooterDisplayWidget::setGoToLineOffered( bool offered )
+{
+    goToLineOffered_ = offered;
+    for ( const auto& entry : std::as_const( entries_ ) ) {
+        entry.item->setGoToLineOffered( offered );
+    }
+}
+
+void FooterDisplayWidget::notify( const QString& key, const QString& message )
+{
+    for ( const auto& entry : std::as_const( entries_ ) ) {
+        if ( entry.item->value().key == key ) {
+            entry.item->showNotice( message );
+            return;
+        }
+    }
 }
 
 QString FooterDisplayWidget::allValuesText() const

@@ -19,69 +19,50 @@
 
 #pragma once
 
+#include "changesource.h"
+
 #include <QDateTime>
 #include <QFileSystemWatcher>
 #include <QObject>
 #include <QString>
 #include <QStringList>
-#include <QTimer>
 
 namespace custom_footer {
 
 /**
- * Watches the active log file for its owner, the footer or the editor's
- * preview, and says when it should be read again.
+ * The file system's notifications about the active log file, as a
+ * ChangeSource.
  *
- * Changes are collected for a pause before changed() is emitted, without
- * postponing it for as long as a busy log keeps changing. Once a change was
- * seen, the file is no longer watched until the owner calls watch() again
- * when it reads the file: a file that was renamed away and replaced is then
- * watched at its path. While the file is missing, e.g. after it was rotated
- * away, its directory is watched instead, and changed() is emitted once
- * the file is there again.
+ * Once a change was reported, the file is no longer watched until rearm(),
+ * which the owner calls when it reads the file: a file that was renamed
+ * away and replaced is then watched at its path. While the file is missing,
+ * e.g. after it was rotated away, its directory is watched instead, and a
+ * change is reported once the file is there again; then the directory is
+ * no longer watched either, however many notifications creating the file
+ * brings. Notifications queued for a file followed before are ignored.
  *
  * Some systems report reading the file as a change of it, e.g. of its
  * access time, so an owner reacting to every notification would read the
  * file again and again. A notification is therefore reported only if the
  * file's size, modification or birth time, or its existence differ from
- * when the owner last read it (watch()) or the last change was reported.
+ * when the owner last read it (rearm()) or the last change was reported.
  */
-class ActiveFileWatcher : public QObject {
+class FileChangeSource : public QObject, public ChangeSource {
     Q_OBJECT
 
 public:
-    explicit ActiveFileWatcher( int delayMs, QObject* parent = nullptr );
+    explicit FileChangeSource( QObject* parent = nullptr );
 
-    /// Watch another file, or none; nothing of the previous one is kept, and
-    /// nothing is watched until watch().
-    void setFile( const QString& filePath );
+    void setFile( const QString& path ) override;
+    void rearm() override;
+    bool waitingForFile() const override
+    {
+        return !watchedDir_.isEmpty();
+    }
+
     const QString& file() const
     {
         return file_;
-    }
-
-    /// Watch the file again, or its directory while it is missing.
-    void watch();
-
-    /// Emit changed() after the pause, as for a change of the file.
-    void schedule();
-
-    /// Emit changed() after @p delayMs instead, replacing a pending change.
-    void scheduleIn( int delayMs );
-
-    /// Drop a change not yet reported.
-    void cancelPending();
-
-    /// Whether a change is waiting for the pause to end.
-    bool isPending() const
-    {
-        return timer_.isActive();
-    }
-
-    /// Whether the file is missing and its directory is watched for it.
-    bool isWaitingForFile() const
-    {
-        return !watchedDir_.isEmpty();
     }
 
     /// What is watched, for tests.
@@ -90,17 +71,11 @@ public:
         return watcher_.files() + watcher_.directories();
     }
 
-    void setDelay( int delayMs );
-
     /// Whether the file system is asked for notifications at all. Tests of
-    /// what an owner does on changed() turn it off and emit changed()
+    /// which notifications are reported turn it off and deliver them
     /// themselves: some systems report reads of the file too, e.g. its
-    /// access time, which would arm the pause behind the test's back.
+    /// access time, which would report changes behind the test's back.
     void setSystemNotifications( bool enabled );
-
-Q_SIGNALS:
-    /// The file changed, or reappeared, and the pause has passed.
-    void changed();
 
 private Q_SLOTS:
     void fileChanged( const QString& path );
@@ -122,14 +97,13 @@ private:
     };
     static Stamp stampOf( const QString& filePath );
 
+    void report();
     void unwatch();
 
     QString file_;
     /// The file's directory, watched while the file is missing.
     QString watchedDir_;
     QFileSystemWatcher watcher_;
-    QTimer timer_;
-    int delayMs_;
     bool systemNotifications_ = true;
     /// The file as last read by the owner, or as last reported changed.
     Stamp known_;

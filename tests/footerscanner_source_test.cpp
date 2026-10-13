@@ -19,7 +19,7 @@
 
 /**
  * @file footerscanner_source_test.cpp
- * @brief BDD tests for where a shown value came from: raw value and rule.
+ * @brief BDD tests for where a shown value came from: raw value, rule and line.
  */
 
 #include <catch2/catch.hpp>
@@ -65,12 +65,13 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
         {
             const auto values = scanner.footerValues( scanner.scanFrom( path, {} ).values );
 
-            THEN( "each value carries its key, shown value, raw value and rule, in rule order" )
+            THEN(
+                "each value carries its key, shown value, raw value, rule and line, in rule order" )
             {
                 REQUIRE( values.size() == 2 );
-                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
+                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "0x04", 1, 2 } );
                 REQUIRE( values[ 0 ].isMapped() );
-                REQUIRE( values[ 1 ] == FooterValue{ "VIN", "ABC123", "ABC123", 2 } );
+                REQUIRE( values[ 1 ] == FooterValue{ "VIN", "ABC123", "ABC123", 2, 1 } );
                 REQUIRE_FALSE( values[ 1 ].isMapped() );
             }
         }
@@ -87,7 +88,7 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
             THEN( "the value names the alternative that supplied it" )
             {
                 REQUIRE( values.size() == 1 );
-                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "4", 3 } );
+                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "4", 3, 1 } );
             }
         }
     }
@@ -107,8 +108,8 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
             THEN( "values from before and after keep their sources" )
             {
                 REQUIRE( values.size() == 2 );
-                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
-                REQUIRE( values[ 1 ] == FooterValue{ "VIN", "LATER", "LATER", 2 } );
+                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "0x04", 1, 1 } );
+                REQUIRE( values[ 1 ] == FooterValue{ "VIN", "LATER", "LATER", 2, 2 } );
             }
         }
     }
@@ -124,8 +125,8 @@ SCENARIO( "FooterScanner tells where each shown value came from", "[footerscanne
             THEN( "the value of that line has its source too" )
             {
                 REQUIRE( values.size() == 2 );
-                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
-                REQUIRE( values[ 1 ] == FooterValue{ "VIN", "DONE", "DONE", 2 } );
+                REQUIRE( values[ 0 ] == FooterValue{ "Mode", "Production", "0x04", 1, 2 } );
+                REQUIRE( values[ 1 ] == FooterValue{ "VIN", "DONE", "DONE", 2, 1 } );
             }
         }
     }

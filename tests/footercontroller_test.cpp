@@ -19,12 +19,15 @@
 
 /**
  * @file footercontroller_test.cpp
- * @brief BDD tests for the background scanning of the active file.
+ * @brief BDD tests for the background scanning of the active file. The
+ *        follower's clock and change source are the test's own: the test
+ *        reports the file's changes and moves the time itself. Only the
+ *        scans run on the real worker thread, on real files.
  */
 
 #include <catch2/catch.hpp>
 
-#include "activefilewatcher.h"
+#include "followerfakes.h"
 #include "footerconfig.h"
 #include "footercontroller.h"
 #include "footerdisplaywidget.h"
@@ -42,41 +45,70 @@ using namespace custom_footer;
 
 namespace {
 
+constexpr int kGap = FollowerParts::kGapMs;
+
 void writeFile( const QString& path, const QByteArray& content, bool append = false )
 {
     QFile file( path );
     REQUIRE( file.open( append ? QIODevice::Append : QIODevice::WriteOnly ) );
-    file.write( content );
+    REQUIRE( file.write( content ) == content.size() );
 }
 
-/// Process events until the condition holds or the timeout expires.
-bool waitFor( const std::function<bool()>& condition, int timeoutMs = 5000 )
+/// Process events until @p done, for at most a generous bound: a hung
+/// worker fails the test instead of hanging it. Nothing depends on timing.
+bool processUntil( const std::function<bool()>& done, int boundMs = 10000 )
 {
     QElapsedTimer timer;
     timer.start();
-    while ( !condition() ) {
-        if ( timer.elapsed() > timeoutMs ) {
+    while ( !done() ) {
+        if ( timer.elapsed() > boundMs ) {
             return false;
         }
         QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 5 );
+        QThread::msleep( 1 );
     }
     return true;
 }
 
-/// Process events for a while, for checks that something does not happen.
-void settle( int ms = 300 )
+/// Process events until every scan started has finished, shown or dropped.
+bool scansSettle( const FooterController& controller )
 {
-    waitFor( [] { return false; }, ms );
+    return processUntil(
+        [ &controller ] { return controller.scansFinished() == controller.scansStarted(); } );
 }
 
 QString shownText( const FooterDisplayWidget& widget )
 {
     QStringList shown;
-    for ( const auto* item : widget.findChildren<FooterValueItem*>() ) {
-        shown.append( item->value().key + ": " + item->value().value );
+    for ( const auto& value : widget.values() ) {
+        shown.append( value.key + ": " + value.value );
     }
     return shown.join( " | " );
+}
+
+/// The follower's parts for a controller: a clock and a change source the
+/// test keeps a hold of.
+struct Fakes {
+    Fakes()
+    {
+        auto manualClock = std::make_unique<ManualClock>();
+        auto fakeChanges = std::make_unique<FakeChangeSource>();
+        clock = manualClock.get();
+        changes = fakeChanges.get();
+        parts = FollowerParts{ std::move( manualClock ), std::move( fakeChanges ) };
+    }
+
+    ManualClock* clock = nullptr;
+    FakeChangeSource* changes = nullptr;
+    FollowerParts parts;
+};
+
+/// A controller on @p widget with the test's clock and change source.
+std::unique_ptr<FooterController> makeController( FooterDisplayWidget& widget,
+                                                  const QString& configDir, Fakes& fakes )
+{
+    return std::make_unique<FooterController>( &widget, configDir, FooterController::Warn{},
+                                               nullptr, std::move( fakes.parts ) );
 }
 
 } // namespace
@@ -87,10 +119,8 @@ SCENARIO( "FooterController scans the active file in the background", "[footerco
     QTemporaryDir logDir;
     REQUIRE( configDir.isValid() );
     REQUIRE( logDir.isValid() );
-
-    QList<FooterEntry> entries;
-    entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
-    REQUIRE( FooterConfig::saveEntries( configDir.path(), entries ) );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
 
     const auto first = logDir.path() + "/first.log";
     const auto second = logDir.path() + "/second.log";
@@ -98,136 +128,482 @@ SCENARIO( "FooterController scans the active file in the background", "[footerco
     writeFile( second, "VIN: SECOND\n" );
 
     FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
 
-    GIVEN( "a controller for the widget" )
+    WHEN( "a file becomes active" )
     {
-        FooterController controller( &widget, configDir.path() );
+        controller->setActiveFile( first );
 
-        WHEN( "a file becomes active" )
+        THEN( "its values are shown, without waiting for a pause" )
         {
-            controller.setActiveFile( first );
-
-            THEN( "its values are shown" )
-            {
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "FIRST" ); } ) );
-            }
+            REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST"; } ) );
+            REQUIRE( fakes.clock->now() == 0 );
         }
 
-        WHEN( "the active file changes before the first scan is shown" )
+        THEN( "its changes are followed" )
         {
-            controller.setActiveFile( first );
-            controller.setActiveFile( second );
-
-            THEN( "only the values of the newer file end up shown" )
-            {
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "SECOND" ); } ) );
-                settle();
-                REQUIRE_FALSE( shownText( widget ).contains( "FIRST" ) );
-            }
-        }
-
-        WHEN( "another file becomes active" )
-        {
-            controller.setActiveFile( first );
-            REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "FIRST" ); } ) );
-            controller.setActiveFile( second );
-
-            THEN( "the values of the previous file are gone at once" )
-            {
-                REQUIRE_FALSE( shownText( widget ).contains( "FIRST" ) );
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "SECOND" ); } ) );
-            }
-        }
-
-        WHEN( "no file is active" )
-        {
-            controller.setActiveFile( first );
-            REQUIRE( waitFor( [ & ] { return !shownText( widget ).isEmpty(); } ) );
-            controller.setActiveFile( QString() );
-
-            THEN( "the footer is cleared" )
-            {
-                REQUIRE( shownText( widget ).isEmpty() );
-            }
-        }
-
-        WHEN( "the rules change on disk" )
-        {
-            controller.setActiveFile( first );
-            REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "FIRST" ); } ) );
-
-            QList<FooterEntry> renamed;
-            renamed.append( { "Vehicle", "VIN:\\s+(\\S+)", "", true, {} } );
-            REQUIRE( FooterConfig::saveEntries( configDir.path(), renamed ) );
-
-            THEN( "they are used only after a reload" )
-            {
-                controller.setActiveFile( first );
-                settle();
-                REQUIRE_FALSE( shownText( widget ).contains( "Vehicle" ) );
-
-                controller.reloadConfig();
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "Vehicle" ); } ) );
-            }
+            REQUIRE( fakes.changes->file == first );
         }
     }
 
-    GIVEN( "an active file that grows" )
+    WHEN( "the active file changes before the first scan is shown" )
     {
-        const auto growing = logDir.path() + "/growing.log";
-        writeFile( growing, "starting up\n" );
+        controller->setActiveFile( first );
+        controller->setActiveFile( second );
 
-        FooterController controller( &widget, configDir.path() );
-        controller.setActiveFile( growing );
-        settle();
+        THEN( "only the values of the newer file end up shown" )
+        {
+            REQUIRE( scansSettle( *controller ) );
+            REQUIRE( controller->scansStarted() == 2 );
+            REQUIRE( shownText( widget ) == "VIN: SECOND" );
+            REQUIRE( fakes.changes->file == second );
+        }
+    }
+
+    WHEN( "another file becomes active" )
+    {
+        controller->setActiveFile( first );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST"; } ) );
+        controller->setActiveFile( second );
+
+        THEN( "the values of the previous file are gone at once" )
+        {
+            REQUIRE( shownText( widget ).isEmpty() );
+            REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: SECOND"; } ) );
+        }
+    }
+
+    WHEN( "no file is active" )
+    {
+        controller->setActiveFile( first );
+        REQUIRE( processUntil( [ & ] { return !shownText( widget ).isEmpty(); } ) );
+        controller->setActiveFile( QString() );
+
+        THEN( "the footer is cleared and nothing is followed" )
+        {
+            REQUIRE( shownText( widget ).isEmpty() );
+            REQUIRE( fakes.changes->file.isEmpty() );
+
+            const int scans = controller->scansStarted();
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+            REQUIRE( controller->scansStarted() == scans );
+        }
+    }
+
+    WHEN( "the rules change on disk" )
+    {
+        controller->setActiveFile( first );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST"; } ) );
+        REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                            { { "Vehicle", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+
+        THEN( "they are used only after a reload" )
+        {
+            // A real scan with the rules loaded before: the file was rewritten.
+            const int scans = controller->scansStarted();
+            writeFile( first, "VIN: REWRITTEN\n" );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+            REQUIRE( controller->scansStarted() == scans + 1 );
+            REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: REWRITTEN"; } ) );
+
+            controller->reloadConfig();
+            REQUIRE(
+                processUntil( [ & ] { return shownText( widget ) == "Vehicle: REWRITTEN"; } ) );
+        }
+    }
+}
+
+SCENARIO( "FooterController scans afresh with rules reloaded while it scans", "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                          { "Missing", "never=(\\S+)", "", true, {} } } ) );
+
+    const auto path = logDir.path() + "/reloaded.log";
+    writeFile( path, "VIN: FIRST\nid=1\n" );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    GIVEN( "a scanned file, with a key still missing, being scanned on" )
+    {
+        controller->setActiveFile( path );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST"; } ) );
+        writeFile( path, "more\n", true );
+        fakes.changes->fire();
+        fakes.clock->advance( kGap );
+        // Running until its result is handled here, as events are not processed yet.
+        REQUIRE( controller->scansStarted() == 2 );
+
+        WHEN( "other rules are saved and reloaded" )
+        {
+            REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                                { { "Vehicle", "VIN:\\s+(\\S+)", "", true, {} },
+                                                  { "ID", "id=(\\S+)", "", true, {} } } ) );
+            controller->reloadConfig();
+
+            THEN( "the running scan is dropped, and the file scanned at once from its start" )
+            {
+                REQUIRE( controller->scansStarted() == 3 );
+                REQUIRE( scansSettle( *controller ) );
+                REQUIRE( controller->scansFinished() == 3 );
+                // Both values are in lines the earlier scans had read already.
+                REQUIRE( shownText( widget ) == "Vehicle: FIRST | ID: 1" );
+                REQUIRE( fakes.clock->now() == kGap );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterController scans on where it stopped when the active file grows",
+          "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE(
+        FooterConfig::saveEntries( configDir.path(), { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                                       { "ID", "id=(\\S+)", "", true, {} } } ) );
+
+    const auto growing = logDir.path() + "/growing.log";
+    writeFile( growing, "starting up\n" );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    GIVEN( "an active file without values yet" )
+    {
+        controller->setActiveFile( growing );
+        REQUIRE( scansSettle( *controller ) );
         REQUIRE( shownText( widget ).isEmpty() );
 
-        WHEN( "a matching line is appended" )
+        WHEN( "a matching line is appended and reported" )
         {
             writeFile( growing, "VIN: LATER\n", true );
+            fakes.changes->fire();
 
-            THEN( "the new value is shown without switching files" )
+            THEN( "it is scanned a pause later" )
             {
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "LATER" ); } ) );
+                fakes.clock->advance( kGap - 1 );
+                REQUIRE( controller->scansStarted() == 1 );
+
+                fakes.clock->advance( 1 );
+                REQUIRE( controller->scansStarted() == 2 );
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: LATER"; } ) );
+
+                AND_THEN( "the values found before are kept as it grows on" )
+                {
+                    writeFile( growing, "id=7\n", true );
+                    fakes.changes->fire();
+                    fakes.clock->advance( kGap );
+                    REQUIRE( processUntil(
+                        [ & ] { return shownText( widget ) == "VIN: LATER | ID: 7"; } ) );
+                }
             }
         }
     }
+}
+
+SCENARIO( "FooterController scans again after a change during a scan, a gap after it",
+          "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE(
+        FooterConfig::saveEntries( configDir.path(), { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                                       { "ID", "id=(\\S+)", "", true, {} } } ) );
+
+    const auto path = logDir.path() + "/changing.log";
+    writeFile( path, "VIN: FIRST\n" );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    GIVEN( "a scan of the active file running" )
+    {
+        // Running until its result is handled here, as events are not processed yet.
+        controller->setActiveFile( path );
+
+        WHEN( "the file changes, more than once" )
+        {
+            fakes.changes->fire();
+            fakes.changes->fire();
+            controller->setActiveFile( path );
+
+            THEN( "the running scan is not cancelled but shown" )
+            {
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST"; } ) );
+                REQUIRE( controller->scansStarted() == 1 );
+            }
+
+            THEN( "one more scan follows, the follower's gap after it, never back to back" )
+            {
+                REQUIRE( scansSettle( *controller ) );
+                writeFile( path, "id=7\n", true );
+                REQUIRE( fakes.clock->wakeTime() == fakes.clock->now() + kGap );
+
+                fakes.clock->advance( kGap - 1 );
+                REQUIRE( controller->scansStarted() == 1 );
+
+                fakes.clock->advance( 1 );
+                REQUIRE( controller->scansStarted() == 2 );
+                REQUIRE(
+                    processUntil( [ & ] { return shownText( widget ) == "VIN: FIRST | ID: 7"; } ) );
+                REQUIRE( controller->scansStarted() == 2 );
+                REQUIRE_FALSE( fakes.clock->wakeTime() );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterController does not rescan a file it only read", "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+
+    const auto path = logDir.path() + "/read.log";
+    FooterDisplayWidget widget;
+    Fakes fakes;
+
+    GIVEN( "a scanned file, with a key still missing" )
+    {
+        REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                            { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                              { "Missing", "never=(\\S+)", "", true, {} } } ) );
+        writeFile( path, "VIN: READ\n" );
+        auto controller = makeController( widget, configDir.path(), fakes );
+        controller->setActiveFile( path );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: READ"; } ) );
+        const int scans = controller->scansStarted();
+        const int rearms = fakes.changes->rearms;
+
+        WHEN( "a change is reported that left the file as it was, and the pause passes" )
+        {
+            // As Linux and Windows may report a read, e.g. for its access
+            // time; which notifications count is tested with FileChangeSource.
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "it is not scanned again, but watched on" )
+            {
+                REQUIRE( controller->scansStarted() == scans );
+                REQUIRE( fakes.changes->rearms == rearms + 1 );
+
+                AND_THEN( "a later change of it is scanned" )
+                {
+                    writeFile( path, "never=more\n", true );
+                    fakes.changes->fire();
+                    fakes.clock->advance( kGap );
+                    REQUIRE( controller->scansStarted() == scans + 1 );
+                    REQUIRE( processUntil(
+                        [ & ] { return shownText( widget ) == "VIN: READ | Missing: more"; } ) );
+                }
+            }
+        }
+    }
+
+    GIVEN( "a scanned file in which every key has a value" )
+    {
+        REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                            { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+        writeFile( path, "VIN: COMPLETE\n" );
+        auto controller = makeController( widget, configDir.path(), fakes );
+        controller->setActiveFile( path );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: COMPLETE"; } ) );
+        const int scans = controller->scansStarted();
+
+        WHEN( "it only grows" )
+        {
+            writeFile( path, "VIN: LATER\nmore lines\n", true );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "it is not scanned again, as 0.4.0 did not" )
+            {
+                REQUIRE( controller->scansStarted() == scans );
+                REQUIRE( shownText( widget ) == "VIN: COMPLETE" );
+            }
+        }
+
+        WHEN( "it is replaced" )
+        {
+            REQUIRE( QFile::remove( path ) );
+            writeFile( path, "VIN: REPLACEMENT\nand more lines\n" );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "it is scanned from its start" )
+            {
+                REQUIRE( controller->scansStarted() == scans + 1 );
+                REQUIRE(
+                    processUntil( [ & ] { return shownText( widget ) == "VIN: REPLACEMENT"; } ) );
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterController scans a truncated or rotated file from its start",
+          "[footercontroller]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+
+    const auto rotating = logDir.path() + "/rotating.log";
+    writeFile( rotating, "VIN: BEFORE-ROTATION\nmore lines\n" );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
 
     GIVEN( "an active file whose values are shown" )
     {
-        const auto rotating = logDir.path() + "/rotating.log";
-        writeFile( rotating, "VIN: BEFORE-ROTATION\nmore lines\n" );
-
-        FooterController controller( &widget, configDir.path() );
-        controller.setActiveFile( rotating );
-        REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "BEFORE-ROTATION" ); } ) );
+        controller->setActiveFile( rotating );
+        REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: BEFORE-ROTATION"; } ) );
 
         WHEN( "it is truncated and written again" )
         {
             writeFile( rotating, "VIN: AFTER\n" );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
 
             THEN( "the new values are shown" )
             {
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "AFTER" ); } ) );
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: AFTER"; } ) );
             }
         }
 
-        WHEN( "it is rotated away and recreated only later" )
+        WHEN( "it is rotated away" )
         {
             REQUIRE( QFile::rename( rotating, rotating + ".1" ) );
-            REQUIRE( waitFor( [ & ] { return controller.isWaitingForActiveFile(); } ) );
-            writeFile( rotating, "VIN: RECREATED\n" );
+            fakes.changes->waiting = true;
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
 
-            THEN( "the recreated file is scanned" )
+            THEN( "its values are gone, and its return is waited for" )
             {
-                REQUIRE( waitFor( [ & ] { return shownText( widget ).contains( "RECREATED" ); } ) );
+                REQUIRE( processUntil( [ & ] { return shownText( widget ).isEmpty(); } ) );
+                REQUIRE( controller->isWaitingForActiveFile() );
 
-                AND_THEN( "it is watched again" )
+                AND_WHEN( "it is recreated" )
                 {
-                    writeFile( rotating, "VIN: SECOND-ROTATION-WITH-A-LONGER-VALUE\n" );
-                    REQUIRE( waitFor(
-                        [ & ] { return shownText( widget ).contains( "SECOND-ROTATION" ); } ) );
+                    REQUIRE( scansSettle( *controller ) );
+                    writeFile( rotating, "VIN: RECREATED\n" );
+                    fakes.changes->waiting = false;
+                    fakes.changes->fire();
+                    fakes.clock->advance( kGap );
+
+                    THEN( "the recreated file is scanned, and followed on" )
+                    {
+                        REQUIRE( processUntil(
+                            [ & ] { return shownText( widget ) == "VIN: RECREATED"; } ) );
+                        REQUIRE_FALSE( controller->isWaitingForActiveFile() );
+
+                        writeFile( rotating, "VIN: SECOND-ROTATION-WITH-A-LONGER-VALUE\n" );
+                        fakes.changes->fire();
+                        fakes.clock->advance( kGap );
+                        REQUIRE( processUntil( [ & ] {
+                            return shownText( widget )
+                                   == "VIN: SECOND-ROTATION-WITH-A-LONGER-VALUE";
+                        } ) );
+                    }
                 }
+            }
+        }
+    }
+}
+
+SCENARIO( "FooterController shows the Log Line of each value as the active file grows",
+          "[footercontroller][linenumber]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE(
+        FooterConfig::saveEntries( configDir.path(), { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                                       { "ID", "id=(\\S+)", "", true, {} } } ) );
+
+    const auto log = logDir.path() + "/lines.log";
+    // Filler lines after the value, so that a line well inside the file can
+    // change in place without changing the bytes that identify it.
+    const QByteArray head = "starting up\nVIN: A\n";
+    const QByteArray filler = "filler filler filler filler filler\n";
+    writeFile( log, head + filler.repeated( 30 ) );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    // "key: value @ line" of every shown value.
+    const auto shownLines = [ &widget ] {
+        QStringList shown;
+        for ( const auto& value : widget.values() ) {
+            shown.append( QStringLiteral( "%1: %2 @ %3" )
+                              .arg( value.key, value.value )
+                              .arg( value.lineNumber ) );
+        }
+        return shown.join( " | " );
+    };
+
+    GIVEN( "an active file with one of the keys on its second line" )
+    {
+        controller->setActiveFile( log );
+        REQUIRE( processUntil( [ & ] { return shownLines() == "VIN: A @ 2"; } ) );
+
+        REQUIRE( scansSettle( *controller ) );
+
+        WHEN( "a line already scanned changes in place, lines with the other key are appended, "
+              "and the change is reported" )
+        {
+            {
+                // A fresh scan would take ID from the changed line, line 18.
+                QFile file( log );
+                REQUIRE( file.open( QIODevice::ReadWrite ) );
+                REQUIRE( file.seek( head.size() + filler.size() * 15 ) );
+                REQUIRE( file.write( "id=999" ) == 6 );
+            }
+            writeFile( log, "noise\nVIN: LATER\nid=7\n", true );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "one more scan reads only the appended lines, numbered in the whole file, and "
+                  "the old value keeps its line" )
+            {
+                REQUIRE(
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 2 | ID: 7 @ 35"; } ) );
+                REQUIRE( controller->scansStarted() == 2 );
+            }
+        }
+
+        WHEN( "the file is truncated and written again with the same values" )
+        {
+            writeFile( log, "VIN: A\nid=7\n" );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "the lines come from the new scan from its start" )
+            {
+                REQUIRE(
+                    processUntil( [ & ] { return shownLines() == "VIN: A @ 1 | ID: 7 @ 2"; } ) );
             }
         }
     }
@@ -241,20 +617,21 @@ SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]
     REQUIRE( logDir.isValid() );
 
     // Scan everything: the rule never matches, so the scan reads the whole file.
-    QList<FooterEntry> entries;
-    entries.append( { "Never", "^NEVER-MATCHES-(\\d+)$", "", true, {} } );
-    REQUIRE( FooterConfig::saveEntries( configDir.path(), entries ) );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "Never", "^NEVER-MATCHES-(\\d+)$", "", true, {} } } ) );
     REQUIRE( FooterConfig::saveMaxLines( configDir.path(), 0 ) );
 
     const auto big = logDir.path() + "/big.log";
     const QByteArray line( "2026-01-01 INFO some ordinary log line with nothing to find\n" );
-    writeFile( big, line.repeated( 400000 ) );
+    writeFile( big, line.repeated( 400000 ) + "NEVER-MATCHES-1\n" );
 
-    GIVEN( "a scan of a large file in progress" )
+    GIVEN( "a scan of a large file in progress, with a change of it reported" )
     {
         FooterDisplayWidget widget;
-        auto controller = std::make_unique<FooterController>( &widget, configDir.path() );
+        Fakes fakes;
+        auto controller = makeController( widget, configDir.path(), fakes );
         controller->setActiveFile( big );
+        fakes.changes->fire();
 
         WHEN( "the controller is destroyed right away" )
         {
@@ -262,94 +639,71 @@ SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]
             timer.start();
             controller.reset();
 
-            THEN( "it stops the scan promptly and shows nothing afterwards" )
+            THEN( "it stops the scan promptly, and nothing is shown or scanned afterwards" )
             {
                 REQUIRE( timer.elapsed() < 2000 );
-                settle();
+                QCoreApplication::processEvents();
                 REQUIRE( shownText( widget ).isEmpty() );
             }
         }
     }
 }
 
-SCENARIO( "FooterController shows the values of a log that changes faster than it is scanned",
+SCENARIO( "FooterController shows the values of a log that changes while it is scanned",
           "[footercontroller]" )
 {
     QTemporaryDir configDir;
     QTemporaryDir logDir;
     REQUIRE( configDir.isValid() );
     REQUIRE( logDir.isValid() );
-
-    // The VIN is on the first line, but the other rules never match: every
-    // scan reads the whole file, which takes longer than the rescan delay.
-    QList<FooterEntry> entries;
-    entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
-    for ( int i = 0; i < 3; ++i ) {
-        entries.append( { QString( "Never%1" ).arg( i ),
-                          QString( "^NEVER-%1-MATCHES-(\\d+)$" ).arg( i ),
-                          "",
-                          true,
-                          {} } );
-    }
-    REQUIRE( FooterConfig::saveEntries( configDir.path(), entries ) );
-    REQUIRE( FooterConfig::saveMaxLines( configDir.path(), 0 ) );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                                          { "Late", "^LATE-(\\d+)$", "", true, {} } } ) );
 
     const auto busy = logDir.path() + "/busy.log";
-    const QByteArray line( "2026-01-01 INFO some ordinary log line with nothing to find\n" );
-    writeFile( busy, "VIN: BUSY\n" + line.repeated( 400000 ) );
-
-    // Append to the log every few milliseconds while waiting.
-    QElapsedTimer sinceAppend;
-    sinceAppend.start();
-    const auto appendWhile = [ & ]( const std::function<bool()>& condition ) {
-        return waitFor(
-            [ & ] {
-                if ( sinceAppend.elapsed() >= 50 ) {
-                    writeFile( busy, line, true );
-                    sinceAppend.restart();
-                }
-                return condition();
-            },
-            30000 );
-    };
+    writeFile( busy, "VIN: BUSY\nsome ordinary log line\n" );
 
     FooterDisplayWidget widget;
-    FooterController controller( &widget, configDir.path() );
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
 
     GIVEN( "a busy log becomes active" )
     {
-        controller.setActiveFile( busy );
+        // The scan runs until its result is handled here, which no change cancels.
+        controller->setActiveFile( busy );
 
-        WHEN( "lines keep being appended faster than the file is scanned" )
+        WHEN( "changes keep being reported while it is scanned" )
         {
+            for ( int i = 0; i < 10; ++i ) {
+                writeFile( busy, "some ordinary log line\n", true );
+                fakes.changes->fire();
+            }
+
             THEN( "its values are shown nonetheless" )
             {
-                REQUIRE( appendWhile( [ & ] { return shownText( widget ).contains( "BUSY" ); } ) );
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: BUSY"; } ) );
+                REQUIRE( controller->scansStarted() == 1 );
 
                 AND_THEN( "values appended while it was scanned follow" )
                 {
-                    writeFile( busy, "NEVER-0-MATCHES-4711\n", true );
-                    REQUIRE(
-                        appendWhile( [ & ] { return shownText( widget ).contains( "4711" ); } ) );
+                    writeFile( busy, "LATE-4711\n", true );
+                    fakes.clock->advance( kGap );
+                    REQUIRE( processUntil(
+                        [ & ] { return shownText( widget ) == "VIN: BUSY | Late: 4711"; } ) );
                 }
             }
         }
 
         WHEN( "it is made active again and again while it is scanned" )
         {
+            for ( int i = 0; i < 10; ++i ) {
+                controller->setActiveFile( busy );
+            }
+
             THEN( "its values are shown nonetheless" )
             {
-                QElapsedTimer sinceActivated;
-                sinceActivated.start();
-                REQUIRE( waitFor(
-                    [ & ] {
-                        if ( sinceActivated.elapsed() >= 100 ) {
-                            controller.setActiveFile( busy );
-                            sinceActivated.restart();
-                        }
-                        return shownText( widget ).contains( "BUSY" );
-                    },
-                    30000 ) );
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: BUSY"; } ) );
+                REQUIRE( controller->scansStarted() == 1 );
             }
         }
     }
@@ -361,76 +715,59 @@ SCENARIO( "FooterController shows where each value came from", "[footercontrolle
     QTemporaryDir logDir;
     REQUIRE( configDir.isValid() );
     REQUIRE( logDir.isValid() );
-
-    QList<FooterEntry> entries;
-    entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
-    entries.append( { "Mode", "mode=(\\S+)", "", true, { { "0x04", "Production" } } } );
-    REQUIRE( FooterConfig::saveEntries( configDir.path(), entries ) );
+    REQUIRE( FooterConfig::saveEntries(
+        configDir.path(), { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
+                            { "Mode", "mode=(\\S+)", "", true, { { "0x04", "Production" } } } } ) );
 
     const auto log = logDir.path() + "/mapped.log";
     writeFile( log, "mode=0x04\nVIN: ABC\n" );
 
     FooterDisplayWidget widget;
-    FooterController controller( &widget, configDir.path() );
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
 
     GIVEN( "a file with a mapped and an unmapped value" )
     {
-        controller.setActiveFile( log );
+        controller->setActiveFile( log );
 
         THEN( "the widget gets the raw value and the rule of each shown value" )
         {
-            REQUIRE( waitFor( [ & ] { return widget.values().size() == 2; } ) );
-            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0 } );
-            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1 } );
+            REQUIRE( processUntil( [ & ] { return widget.values().size() == 2; } ) );
+            REQUIRE( widget.values()[ 0 ] == FooterValue{ "VIN", "ABC", "ABC", 0, 2 } );
+            REQUIRE( widget.values()[ 1 ] == FooterValue{ "Mode", "Production", "0x04", 1, 1 } );
         }
     }
 }
 
-SCENARIO( "FooterController does not rescan a file it only read", "[footercontroller]" )
+SCENARIO( "FooterController follows a growing log on disk", "[footercontroller][smoke]" )
 {
+    // The production clock and change source, on a real file: only that the
+    // parts are wired up, with a bound far above the follower's gap.
     QTemporaryDir configDir;
     QTemporaryDir logDir;
     REQUIRE( configDir.isValid() );
     REQUIRE( logDir.isValid() );
     REQUIRE( FooterConfig::saveEntries( configDir.path(),
-                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} },
-                                          { "Missing", "never=(\\S+)", "", true, {} } } ) );
-    const auto path = logDir.path() + "/read.log";
-    writeFile( path, "VIN: READ\n" );
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+
+    const auto growing = logDir.path() + "/growing.log";
+    writeFile( growing, "starting up\n" );
 
     FooterDisplayWidget widget;
     FooterController controller( &widget, configDir.path() );
-    auto* fileWatcher = controller.findChild<ActiveFileWatcher*>();
-    REQUIRE( fileWatcher );
 
-    GIVEN( "a scanned file, with a key still missing" )
+    GIVEN( "an active file without values yet" )
     {
-        controller.setActiveFile( path );
-        REQUIRE( waitFor( [ &widget ] { return shownText( widget ) == "VIN: READ"; } ) );
-        const int scans = controller.scansStarted();
+        controller.setActiveFile( growing );
+        REQUIRE( scansSettle( controller ) );
 
-        WHEN( "the system reports a change that was only the scan reading the file" )
+        WHEN( "a matching line is appended" )
         {
-            // As Linux and Windows may, e.g. for its access time.
-            REQUIRE( QMetaObject::invokeMethod( fileWatcher, "fileChanged", Qt::DirectConnection,
-                                                Q_ARG( QString, path ) ) );
+            writeFile( growing, "VIN: LATER\n", true );
 
-            THEN( "no rescan is scheduled" )
+            THEN( "the new value is shown without switching files" )
             {
-                REQUIRE_FALSE( fileWatcher->isPending() );
-                REQUIRE( controller.scansStarted() == scans );
-            }
-        }
-
-        WHEN( "the file grew, and the system reports it" )
-        {
-            writeFile( path, "more\n", true );
-            REQUIRE( QMetaObject::invokeMethod( fileWatcher, "fileChanged", Qt::DirectConnection,
-                                                Q_ARG( QString, path ) ) );
-
-            THEN( "it is scanned again" )
-            {
-                REQUIRE( fileWatcher->isPending() );
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: LATER"; } ) );
             }
         }
     }

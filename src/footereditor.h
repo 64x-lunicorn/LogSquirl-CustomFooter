@@ -20,14 +20,16 @@
 #pragma once
 
 #include "footerentry.h"
+#include "hostfunctions.h"
+#include "ruledetailpanel.h"
 #include "rulepreviewer.h"
 
 #include <QDialog>
-#include <QHash>
 #include <QList>
-#include <QMap>
+#include <QPersistentModelIndex>
 #include <QString>
-#include <QStringList>
+
+#include <optional>
 
 class QDialogButtonBox;
 class QLabel;
@@ -39,6 +41,7 @@ class RuleDetailPanel;
 class RuleListModel;
 class RuleListView;
 class RuleTemplateDialog;
+class SelectedLinePicker;
 
 /**
  * Modal dialog for editing footer extraction rules.
@@ -46,20 +49,24 @@ class RuleTemplateDialog;
  * Layout:
  *   - Left: the rule list (RuleListModel in a RuleListView), one row per rule
  *     with its enabled check box, key and line pattern, and below it the
- *     [+] [From template…] [-] [↑] [↓] [Import] [Export] buttons. Rules are reordered with
- *     ↑/↓, Ctrl+Shift+Up/Down in the list, or by dragging them
+ *     [+] [From template…] [From selected line…] [-] [↑] [↓] [Import] [Export]
+ *     buttons. Rules are reordered with ↑/↓, Ctrl+Shift+Up/Down in the list,
+ *     or by dragging them. [From selected line…] is shown only where
+ *     offerRuleFromLine() offers it
  *   - Right: the RuleDetailPanel for the selected rule, with all its fields
- *     and value mappings
+ *     and value mappings; above it, for a rule made from a Log Line, that
+ *     line, to click or mark the value in
  *   - Below: the problems of all rules, and OK / Cancel / Apply
  *
  * The rules live in the model, one row each with its mappings and problems,
  * so they stay together whichever way the list changes. Edits in the panel
  * are stored into the selected rule as they are made.
  *
- * Rules are validated as they are edited: an invalid pattern, or an enabled
- * rule with a line pattern but no key, is marked at its field and in the
- * list and blocks OK and Apply. Rules may share a key: they are
- * alternatives for its value.
+ * Rules are checked as they are edited, by the RuleCheck that holds the
+ * model's rows: the editor only shows what it finds. A problem, such as an
+ * invalid pattern or an enabled rule with a line pattern but no key, is
+ * marked at its field and in the list, listed below it, and blocks OK and
+ * Apply. Rules may share a key: they are alternatives for its value.
  *
  * The panel previews the selected rule against the active file, which the
  * plugin passes in with setActiveFile(): shortly after an edit stops, a
@@ -67,6 +74,27 @@ class RuleTemplateDialog;
  * changes. Closing or destroying the dialog cancels a running preview and
  * waits for it; nothing restarts it afterwards, not even an edit committed
  * while the dialog closes.
+ *
+ * Test… next to a pattern opens it in LogSquirl's Regex Lab, through the
+ * function the plugin passes in with setRegexLab(). One Lab is open for
+ * the editor at a time, and Test… is disabled meanwhile. Apply in the Lab
+ * writes the pattern into the rule it was opened for, as if typed there,
+ * also when another rule is selected or the rule has moved; Cancel, an
+ * Apply of the pattern as it was opened, a rule removed meanwhile, or a
+ * closed editor drop the answer. A rule has no match-case flag: the Lab
+ * gets "Match case" on, or off for a pattern that starts with (?i) (after
+ * any start-of-pattern items such as (*CRLF)), which the Lab gets without
+ * it; an applied pattern gets (?i) there when "Match case" came back off.
+ *
+ * A rule made from a Log Line (addRuleFromLine()) starts empty, in simple
+ * mode, with the line shown above the panel. Each click or mark in the line
+ * makes the rule again (ruleFromLine()): the text before the value, where
+ * the value ends, and the suggested key, unless the user changed the key.
+ * The line stays with its rule when rules move, and goes with it; it is
+ * shown only while that rule is selected. One line at a time: a rule made
+ * from another line takes its place. The line is editor state, never saved.
+ * While the Regex Lab is open, marks are not taken, as its answer may be
+ * for this rule.
  */
 class FooterEditor : public QDialog {
     Q_OBJECT
@@ -83,6 +111,11 @@ public:
     /// The footer's line limit, which the preview scans with too.
     void setMaxLines( int maxLines );
 
+    /// How Test… opens the Regex Lab, with this editor as the context. Empty,
+    /// as by default: the host has none, and Test… is disabled, saying that
+    /// it needs LogSquirl 26.11 or later.
+    void setRegexLab( OpenRegexLab openRegexLab );
+
     /// Stops the preview for good before closing.
     void done( int result ) override;
 
@@ -92,23 +125,22 @@ public:
     /// Append entries after the existing ones, as an import does.
     void appendEntries( const QList<FooterEntry>& entries );
 
-    /// How many patterns validation has compiled so far. Unchanged patterns
-    /// are not compiled again; tests check that with this.
-    int patternCompilations() const
-    {
-        return patternCompilations_;
-    }
+    /// Show the [From selected line…] button, which emits
+    /// ruleFromLineRequested(), or hide it. Hidden by default.
+    void offerRuleFromLine( bool offered );
 
-    /// How many times a rule has been validated so far. An edit validates
-    /// only the edited rule; tests check that with this.
-    int ruleValidations() const
-    {
-        return ruleValidations_;
-    }
+    /// Append a new, empty rule in simple mode, select it, and show @p line
+    /// above the panel to click or mark the value in. @p selectedLines is
+    /// how many Log Lines were selected, of which @p line is the first.
+    void addRuleFromLine( const QString& line, int selectedLines = 1 );
 
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.
     void applied();
+
+    /// Emitted when the user clicks [From selected line…]: the owner reads
+    /// the selected Log Line and calls addRuleFromLine(), or says why not.
+    void ruleFromLineRequested();
 
 private Q_SLOTS:
     void addEntry();
@@ -126,6 +158,10 @@ private Q_SLOTS:
     void showCurrentRule();
     void storePanelInCurrentRule();
     void ruleChanged( int row );
+    /// Open the selected rule's pattern in @p field in the Regex Lab.
+    void testPattern( PatternField field );
+    /// Make the rule from its line again, for the value marked in it.
+    void lineMarked( qsizetype start, qsizetype length );
 
 private:
     int currentRow() const;
@@ -133,45 +169,56 @@ private:
     /// Append @p entry as a new rule, select it and focus its key.
     void appendAndSelect( const FooterEntry& entry );
     void moveEntry( int from, int to );
+    /// Whether @p row is the rule made from the line the picker shows.
+    bool isLineRule( int row ) const;
+    /// Tell at the picker when the preview of the rule made from its line
+    /// finds its first match in another Log Line.
+    void showLineRulePreview( const FooterScanner::Preview& preview );
 
-    /// Validate one rule and store its problems in the model.
-    void validateRow( int row );
-    /// Validate the rules in rows @p first to @p last, e.g. new ones.
-    void validateRows( int first, int last );
-    /// List the problems of all rules, with their current row numbers, from
-    /// the problems stored in the model. Validates nothing.
-    void listProblems();
     /// Show a warning without blocking: opened with open().
     void showError( const QString& title, const QString& text, const QString& objectName );
 
+    /// The Regex Lab's answer for the pattern in @p field of @p rule, the
+    /// rule it was opened for, wherever it is now; @p opened is what the Lab
+    /// was opened with.
+    void regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                           const RegexLabPattern& opened,
+                           const std::optional<RegexLabPattern>& applied );
+    /// Note whether a Regex Lab opened by Test… awaits its answer, and offer
+    /// Test… accordingly.
+    void setRegexLabOpen( bool open );
+    /// Offer Test… only when the Regex Lab can be opened.
+    void updatePatternTest();
+
     /// Preview the selected rule, or show that none is.
     void schedulePreview( RulePreviewer::Start start = RulePreviewer::Start::AfterPause );
-    /// Show the listed problems below the list, at the panel's fields, and
-    /// allow OK and Apply only without any.
+    /// Show the check's listing below the list and the selected rule's
+    /// problems at the panel's fields, and allow OK and Apply only when the
+    /// rules can be saved.
     void showProblems();
-
-    /// Why a pattern does not compile, remembered for the dialog's lifetime,
-    /// so that validating compiles only patterns not seen before.
-    QString patternError( const QString& pattern );
-    QHash<QString, QString> patternErrors_;
-    /// The problem lines of each invalid rule, by row. Updated for the rule
-    /// being edited, and listed again when rows are inserted, removed or
-    /// moved, so an edit costs as much with one rule as with a thousand.
-    QMap<int, QStringList> problemLines_;
-    int patternCompilations_ = 0;
-    int ruleValidations_ = 0;
 
     RuleListModel* model_ = nullptr;
     RuleListView* list_ = nullptr;
     RuleDetailPanel* panel_ = nullptr;
     RulePreviewer* previewer_ = nullptr;
-    /// The dialog is closing: no more previews.
+    /// The dialog is closing: no more previews, no more Regex Lab answers.
     bool closing_ = false;
+    OpenRegexLab openRegexLab_;
+    /// A Regex Lab opened by Test… has not answered yet.
+    bool regexLabOpen_ = false;
 
     QToolButton* addButton_ = nullptr;
     QToolButton* templateButton_ = nullptr;
     /// Made on first use and kept, so each opening starts from reset().
     RuleTemplateDialog* templateDialog_ = nullptr;
+    QToolButton* ruleFromLineButton_ = nullptr;
+    /// The Log Line of the rule made from one, shown above the panel.
+    SelectedLinePicker* linePicker_ = nullptr;
+    /// That rule's row; invalid once it is removed or no rule has a line.
+    QPersistentModelIndex lineRule_;
+    /// The key last suggested from the line: replaced by the next one
+    /// unless the user changed it.
+    QString lineKey_;
     QToolButton* removeButton_ = nullptr;
     QToolButton* upButton_ = nullptr;
     QToolButton* downButton_ = nullptr;

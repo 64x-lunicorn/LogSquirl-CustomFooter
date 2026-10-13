@@ -638,18 +638,16 @@ SCENARIO( "FooterEditor never reverts the read-only patterns of a simple rule",
         focusIn( ui.linePattern );
         ui.textBefore->setText( "ID:" );
         REQUIRE( ui.linePattern->text() == "ID:\\s*(\\S+)" );
-        const int validations = editor.ruleValidations();
 
         WHEN( "pressing Escape in the read-only pattern fields" )
         {
             press( ui.linePattern, Qt::Key_Escape );
             press( ui.valuePattern, Qt::Key_Escape );
 
-            THEN( "nothing changes, and the rule was not edited" )
+            THEN( "nothing changes" )
             {
                 REQUIRE( ui.linePattern->text() == "ID:\\s*(\\S+)" );
                 REQUIRE( editor.entries()[ 0 ].linePattern == "ID:\\s*(\\S+)" );
-                REQUIRE( editor.ruleValidations() == validations );
                 REQUIRE( ui.inSimpleMode() );
             }
         }

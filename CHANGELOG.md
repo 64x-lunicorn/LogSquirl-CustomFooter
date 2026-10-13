@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Test a pattern in the Regex Lab** — **Test…** next to a rule's line
+  pattern and value pattern opens it in LogSquirl's Regex Lab. Apply in
+  the Lab writes the pattern into that rule as if typed, so validation and
+  the live preview follow; Cancel or closing the Lab changes nothing. The
+  Lab's Match case is on unless the pattern starts with `(?i)`, and
+  applying with Match case off puts `(?i)` in front. In simple mode the
+  generated line pattern can be tested; applying a changed one switches
+  the rule to Advanced. The pattern goes to the rule the Lab was opened
+  for, even if another rule is selected or the rule moved meanwhile, and
+  is dropped if that rule was removed or the editor closed. One Lab is
+  open at a time. Needs LogSquirl 26.11; on 26.10 the buttons are disabled
+  with the tooltip "Needs LogSquirl 26.11 or later".
+- **Go to the Log Line of a value** — double-click a value in the footer,
+  or choose "Go to Log Line" in its context menu (also reached with the
+  context menu key), and LogSquirl selects the line the value was found in
+  and scrolls to it in the tab in front. For a key that several rules
+  share, it is the line of the rule that supplied the shown value. The
+  line stays right as a growing log is scanned on, and comes from the new
+  scan after a truncation or rotation. If the line is no longer there, a
+  short "Could not go to Log Line …" tooltip says so. A value's tooltip
+  names its Log Line. A double-click copies the value too, as its first
+  click does. Needs LogSquirl 26.11; on 26.10 the values only copy, as
+  before.
+- **Rule from a selected line** — on LogSquirl 26.11, select the Log Line
+  with the value and choose *Plugins → Custom Footer → Rule from Selected
+  Line…*, or **From selected line…** in the rule editor. The editor opens
+  with a new rule in simple mode and shows the line: click where the value
+  starts or mark it, and the text before the value, where the value ends
+  and a key (`VIN:` → `VIN`) are filled in, with the extracted value in
+  the preview at once. Special characters before the value are matched
+  literally. A mark that makes no rule, e.g. because the text before the
+  value also appears earlier in the line, says why, and the editor says
+  when an earlier Log Line in the file supplies the value. Of several
+  selected lines the first is used. Without a selection or an open Log
+  File, a message says what to do. On LogSquirl 26.11 the editor moves to
+  *Plugins → Custom Footer → Edit Rules…*; on LogSquirl 26.10 the action is
+  not offered, and the menu stays *Plugins → Custom Footer…*.
+
+### Changed
+- **Footer session** — one module now owns the rules in the config
+  directory, the active file, the footer's controller and the rule
+  editor's lifetime, and its destructor defines the shutdown order: the
+  editor with its dialogs and preview first, then the footer's scan. The
+  plugin's C entry points only translate between LogSquirl and it. Nothing
+  changes for users.
+- **File follower** — the rule editor's live preview follows the active
+  file through a shared file follower, which the footer uses as well.
+  It behaves as before: it follows a growing, rotated or truncated file,
+  leaves half a second between two previews of a changing file, and
+  ignores notifications that are only the file being read.
+- **The footer follows the active file like the preview** — through the
+  same file follower. A file that changes while it is scanned is scanned
+  again half a second after that scan, as the preview does, instead of
+  right after it, so a busy log is never scanned back to back. The same
+  file made active again is scanned after the same pause. A change that
+  cannot alter the footer, such as a file left as it was, is not scanned.
+  A growing log is still scanned on from where the last scan stopped, and
+  not at all once every key has a value; a truncated or rotated file is
+  still scanned from its start.
+- **One rule check** decides whether a rule is usable, for the footer and
+  the rule editor alike. The footer skips exactly the rules the editor
+  marks, and reports them in the LogSquirl log in the editor's words, e.g.
+  `Rule 2: a rule with a line pattern needs a key` instead of
+  `Rule 2 (): no key`. Problems are listed in one order everywhere: key,
+  line pattern, value pattern, end character. The preview of a rule with
+  an invalid pattern says so in the same words, and the template dialog's
+  note about an alternative no longer counts rules the footer skips.
+- **Host functions of LogSquirl 26.11** — the plugin is built against the
+  plugin API of LogSquirl 26.11 and learns whether the running LogSquirl
+  offers the Regex Lab, Go to line and the selected Log Lines, which
+  upcoming features need. It still runs on LogSquirl 26.10, without them.
+  The LogSquirl log says which ones it found (`Custom Footer plugin ready.
+  Host functions: …`); nothing else changes for users.
+
+### Fixed
+- **The live preview kept an old value** — once the rule editor's preview
+  had skipped a change of the active file that could not alter it (e.g.
+  lines appended beyond the scan limit), it stopped following the file:
+  a later truncation or rotation was not previewed until the rule was
+  edited or another file opened. The preview now keeps following the file.
+- **The live preview missed a last line rewritten in place** — when the
+  active file ends in a line without a line break and that line was
+  rewritten at the same size, the preview kept showing the old line until
+  the file changed again. It is now previewed again.
+- **The live preview missed lines appended while it read the file** — a
+  line appended to the active file just as the preview finished reading
+  could be skipped as a change that cannot alter the preview, until the
+  file changed again. It is now previewed.
+
 ## [0.4.0] — 2026-10-01
 
 ### Added

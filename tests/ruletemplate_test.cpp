@@ -866,6 +866,21 @@ SCENARIO( "The alternative note counts only rules the scanner uses",
             REQUIRE( ui.note->isHidden() );
         }
     }
+
+    GIVEN( "an enabled rule for Version whose line pattern is invalid" )
+    {
+        // The scanner skips it, as the rule check decides.
+        FooterEditor editor( { { "Version", "Version=(", "", true, {} } } );
+        TemplateUi ui( editor );
+        editor.show();
+        ui.open();
+
+        THEN( "its key gets no note" )
+        {
+            ui.choose( "Version" );
+            REQUIRE( ui.note->isHidden() );
+        }
+    }
 }
 
 SCENARIO( "From template… keeps a mapping still being typed", "[ruletemplate][footereditor]" )

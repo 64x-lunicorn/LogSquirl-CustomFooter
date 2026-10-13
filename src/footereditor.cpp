@@ -19,13 +19,14 @@
 
 #include "footereditor.h"
 #include "footerconfig.h"
-#include "footerscanner.h"
 #include "ruledetailpanel.h"
+#include "rulefromline.h"
 #include "rulelistmodel.h"
 #include "rulelistview.h"
 #include "rulepreviewer.h"
 #include "rulepreviewview.h"
 #include "ruletemplatedialog.h"
+#include "selectedlinepicker.h"
 #include "simplerule.h"
 
 #include <QDialogButtonBox>
@@ -41,10 +42,68 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
-#include <algorithm>
-#include <utility>
-
 namespace custom_footer {
+
+namespace {
+
+/// The inline option that makes a whole pattern ignore case, the only way
+/// a rule says so.
+const QString ignoreCase = QStringLiteral( "(?i)" );
+
+/// How long the pattern's leading start-of-pattern items are, such as
+/// (*CRLF) or (*UTF): PCRE takes them only before everything else, (?i)
+/// included.
+qsizetype startItemsLength( const QString& pattern )
+{
+    qsizetype length = 0;
+    while ( pattern.mid( length ).startsWith( QStringLiteral( "(*" ) ) ) {
+        const auto end = pattern.indexOf( QLatin1Char( ')' ), length );
+        if ( end < 0 ) {
+            break;
+        }
+        length = end + 1;
+    }
+    return length;
+}
+
+/// A rule's pattern as the Regex Lab tests it: (?i) at its start, after
+/// any start-of-pattern items, becomes the Lab's Match case flag, as long
+/// as more of the pattern follows it.
+RegexLabPattern toRegexLab( const QString& pattern )
+{
+    const auto start = startItemsLength( pattern );
+    const auto rest = pattern.mid( start );
+    if ( rest.startsWith( ignoreCase ) && rest.size() > ignoreCase.size() ) {
+        return { pattern.left( start ) + rest.mid( ignoreCase.size() ), false };
+    }
+    return { pattern, true };
+}
+
+/// An applied pattern as a rule's pattern: without Match case, (?i) at its
+/// start, after any start-of-pattern items, unless it is there already or
+/// nothing would follow it.
+QString fromRegexLab( const RegexLabPattern& applied )
+{
+    const auto start = startItemsLength( applied.pattern );
+    const auto rest = applied.pattern.mid( start );
+    if ( applied.matchesCase || rest.isEmpty() || rest.startsWith( ignoreCase ) ) {
+        return applied.pattern;
+    }
+    return applied.pattern.left( start ) + ignoreCase + rest;
+}
+
+/// The pattern of @p entry in @p field.
+QString& patternOf( FooterEntry& entry, PatternField field )
+{
+    return field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+}
+
+const QString& patternOf( const FooterEntry& entry, PatternField field )
+{
+    return field == PatternField::Line ? entry.linePattern : entry.valuePattern;
+}
+
+} // namespace
 
 FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     : QDialog( parent )
@@ -97,6 +156,15 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
         tr( "Add a ready-made rule, e.g. for a version or an IP address" ) );
     toolLayout->addWidget( templateButton_ );
 
+    ruleFromLineButton_ = new QToolButton( listSide );
+    ruleFromLineButton_->setObjectName( "ruleFromLineButton" );
+    ruleFromLineButton_->setText( tr( "From selected line…" ) );
+    ruleFromLineButton_->setToolTip(
+        tr( "Add a rule made from the Log Line selected in LogSquirl: click or mark its value" ) );
+    // Only where the host can hand over the selected line.
+    ruleFromLineButton_->hide();
+    toolLayout->addWidget( ruleFromLineButton_ );
+
     removeButton_ = new QToolButton( listSide );
     removeButton_->setObjectName( "removeRuleButton" );
     removeButton_->setText( "−" ); // minus sign
@@ -135,8 +203,15 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
 
     listLayout->addLayout( toolLayout );
 
-    // ── Right: the selected rule ─────────────────────────────────────────
-    panel_ = new RuleDetailPanel( splitter );
+    // ── Right: the selected rule, below the line it was made from ────────
+    auto* ruleSide = new QWidget( splitter );
+    auto* ruleLayout = new QVBoxLayout( ruleSide );
+    ruleLayout->setContentsMargins( 0, 0, 0, 0 );
+    linePicker_ = new SelectedLinePicker( ruleSide );
+    linePicker_->hide();
+    ruleLayout->addWidget( linePicker_ );
+    panel_ = new RuleDetailPanel( ruleSide );
+    ruleLayout->addWidget( panel_, 1 );
 
     splitter->setStretchFactor( 0, 2 );
     splitter->setStretchFactor( 1, 3 );
@@ -155,6 +230,11 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     // ── Connections ──────────────────────────────────────────────────────
     connect( addButton_, &QToolButton::clicked, this, &FooterEditor::addEntry );
     connect( templateButton_, &QToolButton::clicked, this, &FooterEditor::addFromTemplate );
+    connect( ruleFromLineButton_, &QToolButton::clicked, this, [ this ] {
+        panel_->commitPendingEdit();
+        Q_EMIT ruleFromLineRequested();
+    } );
+    connect( linePicker_, &SelectedLinePicker::marked, this, &FooterEditor::lineMarked );
     connect( removeButton_, &QToolButton::clicked, this, &FooterEditor::removeEntry );
     connect( upButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryUp );
     connect( downButton_, &QToolButton::clicked, this, &FooterEditor::moveEntryDown );
@@ -166,16 +246,16 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     connect( list_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
              &FooterEditor::showCurrentRule );
     connect( panel_, &RuleDetailPanel::edited, this, &FooterEditor::storePanelInCurrentRule );
+    connect( panel_, &RuleDetailPanel::patternTestRequested, this, &FooterEditor::testPattern );
 
-    // Validation marks and row numbers follow every change of the rules.
-    // Moved rules keep their marks; validating again only renumbers them.
+    // The model's rule check is up to date with every signal of the model;
+    // after a change of the rows, only the listing is shown again, with the
+    // new rule numbers. Moved rules keep their marks.
     connect( model_, &RuleListModel::ruleChanged, this, &FooterEditor::ruleChanged );
-    connect( model_, &RuleListModel::rowsInserted, this,
-             [ this ]( const QModelIndex&, int first, int last ) { validateRows( first, last ); } );
-    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::listProblems );
-    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::listProblems );
-    connect( model_, &RuleListModel::modelReset, this,
-             [ this ] { validateRows( 0, model_->rowCount() - 1 ); } );
+    connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::showProblems );
+    connect( model_, &RuleListModel::modelReset, this, &FooterEditor::showProblems );
     connect( model_, &RuleListModel::rowsInserted, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsRemoved, this, &FooterEditor::updateButtons );
     connect( model_, &RuleListModel::rowsMoved, this, &FooterEditor::updateButtons );
@@ -190,6 +270,7 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     previewer_ = new RulePreviewer( this );
     connect( previewer_, &RulePreviewer::updating, panel_->previewView(),
              &RulePreviewView::showUpdating );
+    connect( previewer_, &RulePreviewer::previewed, this, &FooterEditor::showLineRulePreview );
     connect( previewer_, &RulePreviewer::previewed, panel_->previewView(),
              &RulePreviewView::showPreview );
     // Edits schedule it where they are stored, once per edit; not on every
@@ -209,6 +290,8 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
         panel_->commitPendingEdit();
         Q_EMIT applied();
     } );
+
+    updatePatternTest();
 
     // ── Populate ─────────────────────────────────────────────────────────
     model_->setEntries( entries );
@@ -230,6 +313,7 @@ FooterEditor::~FooterEditor()
     disconnect( model_, nullptr, this, nullptr );
     disconnect( list_, nullptr, this, nullptr );
     disconnect( list_->selectionModel(), nullptr, this, nullptr );
+    disconnect( linePicker_, nullptr, this, nullptr );
     if ( templateDialog_ ) {
         disconnect( templateDialog_, nullptr, this, nullptr );
     }
@@ -252,6 +336,24 @@ void FooterEditor::appendEntries( const QList<FooterEntry>& entries )
     }
 }
 
+void FooterEditor::offerRuleFromLine( bool offered )
+{
+    ruleFromLineButton_->setVisible( offered );
+}
+
+void FooterEditor::addRuleFromLine( const QString& line, int selectedLines )
+{
+    panel_->commitPendingEdit();
+    linePicker_->showLine( line, selectedLines );
+    lineKey_.clear();
+    const int row = model_->rowCount();
+    model_->appendEntries( { FooterEntry() } );
+    // Known before the rule is selected, which shows the line.
+    lineRule_ = model_->index( row, RuleListModel::KeyColumn );
+    selectRow( row );
+    linePicker_->focusLine();
+}
+
 void FooterEditor::setActiveFile( const QString& filePath )
 {
     previewer_->setActiveFile( filePath );
@@ -265,6 +367,12 @@ QString FooterEditor::activeFile() const
 void FooterEditor::setMaxLines( int maxLines )
 {
     previewer_->setMaxLines( maxLines );
+}
+
+void FooterEditor::setRegexLab( OpenRegexLab openRegexLab )
+{
+    openRegexLab_ = std::move( openRegexLab );
+    updatePatternTest();
 }
 
 void FooterEditor::done( int result )
@@ -292,13 +400,7 @@ void FooterEditor::addFromTemplate()
         connect( templateDialog_, &QDialog::accepted, this, &FooterEditor::addTemplateRule );
     }
     // Only rules the scanner uses make the new one an alternative.
-    QStringList keys;
-    for ( const auto& entry : model_->entries() ) {
-        if ( entry.enabled && !entry.linePattern.isEmpty() ) {
-            keys.append( entry.key );
-        }
-    }
-    templateDialog_->reset( keys );
+    templateDialog_->reset( model_->check().keysInUse() );
     // Not exec(): the dialog stays window-modal, and tests can drive it.
     templateDialog_->open();
 }
@@ -429,6 +531,7 @@ void FooterEditor::showCurrentRule()
         panel_->setProblems( model_->problems( row ) );
     }
     updateButtons();
+    linePicker_->setVisible( isLineRule( row ) );
 
     // Another rule: no need to wait for typing to pause. Coalesced with the
     // change that follows, e.g. the removal of the rule selected before.
@@ -441,9 +544,15 @@ void FooterEditor::storePanelInCurrentRule()
     if ( row < 0 ) {
         return;
     }
-    model_->setEntry( row, panel_->entry() );
-    model_->setUnfinishedSimpleRule( row, panel_->unfinishedSimpleRule() );
-    validateRow( row );
+    const auto before = model_->entry( row );
+    const auto edited = panel_->entry();
+    model_->setEntry( row, edited, panel_->unfinishedSimpleRule() );
+    if ( isLineRule( row )
+         && ( edited.linePattern != before.linePattern
+              || edited.valuePattern != before.valuePattern ) ) {
+        // The hint about the last mark no longer describes the rule.
+        linePicker_->showRuleEdited();
+    }
     showProblems();
     schedulePreview();
 }
@@ -455,13 +564,120 @@ void FooterEditor::ruleChanged( int row )
     if ( row == currentRow() ) {
         panel_->showEnabled( model_->entry( row ).enabled );
     }
-    validateRow( row );
     showProblems();
     // Another rule of the key may supply its value now.
     schedulePreview();
 }
 
+void FooterEditor::testPattern( PatternField field )
+{
+    panel_->commitPendingEdit();
+    const int row = currentRow();
+    if ( row < 0 || !openRegexLab_ || regexLabOpen_ || closing_ ) {
+        return;
+    }
+    const auto pattern = toRegexLab( patternOf( model_->entry( row ), field ) );
+    // Follows the rule when rules move, and is invalid once it is removed.
+    const QPersistentModelIndex rule( model_->index( row, RuleListModel::KeyColumn ) );
+
+    setRegexLabOpen( true );
+    // The host never answers once this editor is destroyed.
+    const bool opened = openRegexLab_(
+        pattern, this,
+        [ this, rule, field, pattern ]( const std::optional<RegexLabPattern>& applied ) {
+            regexLabAnswered( rule, field, pattern, applied );
+        } );
+    if ( !opened ) {
+        setRegexLabOpen( false );
+    }
+}
+
+void FooterEditor::lineMarked( qsizetype start, qsizetype length )
+{
+    const int row = currentRow();
+    if ( !isLineRule( row ) ) {
+        return;
+    }
+    if ( regexLabOpen_ ) {
+        // Its answer may write a pattern into this very rule: the rule is
+        // left to it, as Test… is.
+        linePicker_->showMarkIgnored(
+            tr( "The Regex Lab is open: apply or cancel it there first, then click or mark the "
+                "value again." ) );
+        return;
+    }
+    const auto made = ruleFromLine( linePicker_->line(), start, length );
+    linePicker_->showRule( made );
+    if ( !made.isRule() ) {
+        // The rule stays as the last mark made it.
+        return;
+    }
+    panel_->commitPendingEdit();
+    auto entry = model_->entry( row );
+    if ( entry.key.isEmpty() || entry.key == lineKey_ ) {
+        entry.key = made.key;
+    }
+    lineKey_ = made.key;
+    applySimpleRule( made.rule, entry );
+    model_->setEntry( row, entry );
+    // Shown again, in simple mode, and previewed soon.
+    showCurrentRule();
+    showProblems();
+}
+
 // ── Private helpers ──────────────────────────────────────────────────────
+
+void FooterEditor::regexLabAnswered( const QPersistentModelIndex& rule, PatternField field,
+                                     const RegexLabPattern& opened,
+                                     const std::optional<RegexLabPattern>& applied )
+{
+    setRegexLabOpen( false );
+    // Cancelled, the editor closed (its rules are saved or dropped already),
+    // or the rule removed: nothing to write the pattern into. Applied as it
+    // was opened: nothing to change, not even edits made meanwhile.
+    if ( !applied || closing_ || !rule.isValid()
+         || ( applied->pattern == opened.pattern && applied->matchesCase == opened.matchesCase ) ) {
+        return;
+    }
+    const auto pattern = fromRegexLab( *applied );
+    const int row = rule.row();
+    if ( row == currentRow() ) {
+        // As if typed: the panel stores it, and the check and the preview follow.
+        panel_->setPattern( field, pattern );
+        return;
+    }
+    auto entry = model_->entry( row );
+    auto& target = patternOf( entry, field );
+    if ( target == pattern ) {
+        return;
+    }
+    target = pattern;
+    // A pattern written by hand: no longer an unfinished simple rule.
+    model_->setEntry( row, entry );
+    showProblems();
+    // Another rule of the key may supply its value now.
+    schedulePreview();
+}
+
+void FooterEditor::setRegexLabOpen( bool open )
+{
+    regexLabOpen_ = open;
+    updatePatternTest();
+}
+
+void FooterEditor::updatePatternTest()
+{
+    if ( !openRegexLab_ ) {
+        panel_->setPatternTestUnavailable( tr( "Needs LogSquirl 26.11 or later" ) );
+    }
+    else if ( regexLabOpen_ ) {
+        panel_->setPatternTestUnavailable(
+            tr( "The Regex Lab is open: apply or cancel it there first" ) );
+    }
+    else {
+        panel_->setPatternTestUnavailable( {} );
+    }
+}
 
 int FooterEditor::currentRow() const
 {
@@ -485,6 +701,39 @@ void FooterEditor::appendAndSelect( const FooterEntry& entry )
     panel_->focusKey();
 }
 
+bool FooterEditor::isLineRule( int row ) const
+{
+    return row >= 0 && lineRule_.isValid() && lineRule_.row() == row;
+}
+
+void FooterEditor::showLineRulePreview( const FooterScanner::Preview& preview )
+{
+    // The preview is always of the selected rule.
+    if ( !isLineRule( currentRow() ) ) {
+        return;
+    }
+    if ( preview.status != FooterScanner::Preview::Status::Scanned || !preview.value ) {
+        linePicker_->clearEarlierMatch();
+        return;
+    }
+    // The preview's line is as matched: without a line break, and only the
+    // start of a long line.
+    auto matched = QStringView( preview.line );
+    auto shown = QStringView( linePicker_->line() );
+    if ( matched.endsWith( QLatin1Char( '\r' ) ) ) {
+        matched.chop( 1 );
+    }
+    if ( shown.endsWith( QLatin1Char( '\r' ) ) ) {
+        shown.chop( 1 );
+    }
+    // Both may be only the start of a long line.
+    if ( !matched.isEmpty() && ( shown.startsWith( matched ) || matched.startsWith( shown ) ) ) {
+        linePicker_->clearEarlierMatch();
+        return;
+    }
+    linePicker_->showEarlierMatch( preview.lineNumber, preview.value->value );
+}
+
 void FooterEditor::moveEntry( int from, int to )
 {
     // The selection moves with the rule, and the panel keeps showing it.
@@ -492,83 +741,12 @@ void FooterEditor::moveEntry( int from, int to )
     list_->scrollTo( model_->index( to, RuleListModel::KeyColumn ) );
 }
 
-void FooterEditor::validateRow( int row )
-{
-    ++ruleValidations_;
-    const auto& entry = model_->entry( row );
-
-    // Rules sharing a key are alternatives. A rule without a line pattern
-    // is incomplete and ignored, but one with a pattern needs a key.
-    RuleProblems problems;
-    if ( entry.enabled && !entry.linePattern.isEmpty() && entry.key.trimmed().isEmpty() ) {
-        problems.key = tr( "a rule with a line pattern needs a key" );
-    }
-    const auto patternProblem = [ this ]( const QString& pattern, const QString& what ) {
-        const auto error = patternError( pattern );
-        return error.isEmpty() ? QString() : tr( "%1: %2" ).arg( what, error );
-    };
-    // A simple rule without a usable end character has no patterns yet.
-    if ( const auto unfinished = model_->unfinishedSimpleRule( row ) ) {
-        problems.endCharacter = endCharacterProblem( *unfinished );
-    }
-    problems.linePattern = patternProblem( entry.linePattern, tr( "invalid line pattern" ) );
-    problems.valuePattern = patternProblem( entry.valuePattern, tr( "invalid value pattern" ) );
-    model_->setProblems( row, problems );
-
-    QStringList lines;
-    for ( const auto& problem :
-          { problems.key, problems.endCharacter, problems.linePattern, problems.valuePattern } ) {
-        if ( !problem.isEmpty() ) {
-            lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
-        }
-    }
-    if ( lines.isEmpty() ) {
-        problemLines_.remove( row );
-    }
-    else {
-        problemLines_.insert( row, lines );
-    }
-}
-
-void FooterEditor::validateRows( int first, int last )
-{
-    for ( int row = first; row <= last; ++row ) {
-        validateRow( row );
-    }
-    // Rows after the new ones moved down.
-    listProblems();
-}
-
-void FooterEditor::listProblems()
-{
-    problemLines_.clear();
-    for ( int row = 0; row < model_->rowCount(); ++row ) {
-        const auto problems = model_->problems( row );
-        if ( problems.isEmpty() ) {
-            continue;
-        }
-        QStringList lines;
-        for ( const auto& problem : { problems.key, problems.endCharacter, problems.linePattern,
-                                      problems.valuePattern } ) {
-            if ( !problem.isEmpty() ) {
-                lines.append( tr( "Rule %1: %2" ).arg( row + 1 ).arg( problem ) );
-            }
-        }
-        problemLines_.insert( row, lines );
-    }
-    showProblems();
-}
-
 void FooterEditor::showProblems()
 {
-    QStringList lines;
-    for ( const auto& ruleLines : std::as_const( problemLines_ ) ) {
-        lines += ruleLines;
-    }
-    const bool valid = problemLines_.isEmpty();
-
+    const auto& check = model_->check();
+    const bool valid = check.canSave();
     panel_->setProblems( model_->problems( currentRow() ) );
-    problemLabel_->setText( lines.join( '\n' ) );
+    problemLabel_->setText( check.listing().join( '\n' ) );
     problemLabel_->setVisible( !valid );
     buttonBox_->button( QDialogButtonBox::Ok )->setEnabled( valid );
     buttonBox_->button( QDialogButtonBox::Apply )->setEnabled( valid );
@@ -585,31 +763,20 @@ void FooterEditor::schedulePreview( RulePreviewer::Start start )
         panel_->previewView()->showNoRule();
         return;
     }
-    // A rule without a pattern because of a problem, e.g. an unfinished
-    // simple rule: the problem says more than "no line pattern".
-    const auto problems = model_->problems( row );
-    if ( model_->entry( row ).linePattern.isEmpty() && !problems.isEmpty() ) {
+    // A rule that cannot match anything, e.g. with an invalid pattern or
+    // as an unfinished simple rule: the check's problem says why, and
+    // nothing is scanned.
+    const auto problem = model_->problems( row ).preventingMatches();
+    if ( !problem.isEmpty() ) {
         previewer_->clear();
-        for ( const auto& problem : { problems.endCharacter, problems.key, problems.linePattern,
-                                      problems.valuePattern } ) {
-            if ( !problem.isEmpty() ) {
-                panel_->previewView()->showRuleProblem( problem );
-                break;
-            }
+        panel_->previewView()->showRuleProblem( problem );
+        if ( isLineRule( row ) ) {
+            // Nothing matches first now.
+            linePicker_->clearEarlierMatch();
         }
         return;
     }
     previewer_->schedule( model_->entries(), row, start );
-}
-
-QString FooterEditor::patternError( const QString& pattern )
-{
-    auto known = patternErrors_.constFind( pattern );
-    if ( known == patternErrors_.constEnd() ) {
-        ++patternCompilations_;
-        known = patternErrors_.insert( pattern, FooterScanner::patternError( pattern ) );
-    }
-    return known.value();
 }
 
 } // namespace custom_footer

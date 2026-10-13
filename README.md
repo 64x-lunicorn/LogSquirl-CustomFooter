@@ -214,6 +214,12 @@ self-hosted runner prints no Runner Image section.
 The iOS crash log templates fit the text form of a crash report (a
 `.crash` file, or the translated report at the top of an `.ips` file),
 from macOS too; the JSON of an untranslated `.ips` file is not matched.
+| Java and Spring Boot | Application | `Application` | The application of the Spring Boot start line, `Starting MyApp v1.2.0 using Java 17.0.8 with PID 4242 (…)` → `MyApp`, in the wording of Spring Boot 2 and 3, also `Starting AOT-processed MyApp`. Not `Starting service [Tomcat]` or other lines that start something. | Advanced |
+| Java and Spring Boot | Application version | `Application version` | The version after `v` in the Spring Boot start line (`v1.2.0` → `1.2.0`); none if the application has no version | Advanced |
+| Java and Spring Boot | Java version | `Java version` | The word after `using Java` (`using Java 17.0.8`), in the start line of Spring Boot 2.4 and later | Simple |
+| Java and Spring Boot | Host | `Host` | The host between `on` and `with PID` in the Spring Boot 2 start line (`… on myhost with PID 4242`); Spring Boot 3 no longer logs it | Advanced |
+| Java and Spring Boot | Active profile | `Active profile` | The active Spring profiles: `The following 1 profile is active: "prod"` → `prod`; several as listed (`"dev", "local"`, or `dev,local` before Spring Boot 2.7). Not the default profile of `No active profile set, falling back to …`. | Advanced |
+| Java and Spring Boot | JRE version | `JRE version` | The runtime version in `(build …)` of the `# JRE version:` line of a JVM crash log (`hs_err_pid*.log`), `… (build 17.0.8+7)` → `17.0.8+7`; none if the JVM crashed while starting and left it empty | Advanced |
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also

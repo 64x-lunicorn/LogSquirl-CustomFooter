@@ -86,6 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode, and App version (`Version:`, up to the end of the line, as in
   `1.0 (1)`) in advanced mode, which does not take `OS Version:` or
   another `… Version:` when the app's version is empty.
+- **Java and Spring Boot template group** — from the Spring Boot start
+  line (`Starting MyApp v1.2.0 using Java 17.0.8 …`), in the wording of
+  Spring Boot 2 and 3: Application, Application version, Java version
+  (simple mode, after `using Java`) and Host (Spring Boot 2 only, as
+  Spring Boot 3 no longer logs it). Active profile, from `The following …
+  active:`, one profile without its quotes. JRE version, the runtime
+  version in `(build …)` of the `# JRE version:` line of a JVM crash log.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

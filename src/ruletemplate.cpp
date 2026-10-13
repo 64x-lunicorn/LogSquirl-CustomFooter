@@ -39,6 +39,15 @@ SimpleRule simple( const QString& textBefore, ValueEnd valueEnd = ValueEnd::Whit
     return rule;
 }
 
+/// A simple rule whose value follows @p textBefore and ends before
+/// @p endCharacter.
+SimpleRule simpleUpTo( const QString& textBefore, const QString& endCharacter )
+{
+    auto rule = simple( textBefore, ValueEnd::Character );
+    rule.endCharacter = endCharacter;
+    return rule;
+}
+
 /// General: values most logs have, and `key=value` for any other.
 QList<RuleTemplate> generalTemplates()
 {
@@ -312,11 +321,8 @@ QList<RuleTemplate> androidTemplates()
     // (`[Pixel 7]`); the `[` before the key keeps out longer keys that end
     // the same (`ro.product.vendor.model`).
     const auto getprop = []( const QString& property ) {
-        SimpleRule rule;
-        rule.textBefore = QLatin1Char( '[' ) + property + QStringLiteral( "]: [" );
-        rule.valueEnd = ValueEnd::Character;
-        rule.endCharacter = QStringLiteral( "]" );
-        return rule;
+        return simpleUpTo( QLatin1Char( '[' ) + property + QStringLiteral( "]: [" ),
+                           QStringLiteral( "]" ) );
     };
     templates.append( { tr( "Device model" ),
                         tr( "The model from getprop, e.g. [ro.product.model]: [Pixel 7]" ),
@@ -344,11 +350,6 @@ QList<RuleTemplate> androidTemplates()
 QList<RuleTemplate> testRunTemplates()
 {
     QList<RuleTemplate> templates;
-    const auto upToComma = []( const QString& textBefore ) {
-        auto rule = simple( textBefore, ValueEnd::Character );
-        rule.endCharacter = QStringLiteral( "," );
-        return rule;
-    };
 
     // pytest starts a run with `platform linux -- Python 3.12.3,
     // pytest-8.3.2, pluggy-1.5.0`, once per run. The versions follow a fixed
@@ -361,13 +362,13 @@ QList<RuleTemplate> testRunTemplates()
                         tr( "The Python version in the pytest header, e.g. "
                             "platform linux -- Python 3.12.3, pytest-8.3.2" ),
                         QStringLiteral( "Python" ),
-                        upToComma( QStringLiteral( "-- Python " ) ),
+                        simpleUpTo( QStringLiteral( "-- Python " ), QStringLiteral( "," ) ),
                         {} } );
     templates.append( { tr( "pytest version" ),
                         tr( "The pytest version in the pytest header, e.g. "
                             "platform linux -- Python 3.12.3, pytest-8.3.2" ),
                         QStringLiteral( "pytest" ),
-                        upToComma( QStringLiteral( ", pytest-" ) ),
+                        simpleUpTo( QStringLiteral( ", pytest-" ), QStringLiteral( "," ) ),
                         {} } );
 
     // The summary pytest ends a run with, once per run: counts such as
@@ -762,11 +763,6 @@ QList<RuleTemplate> automotiveTemplates()
 QList<RuleTemplate> databaseTemplates()
 {
     QList<RuleTemplate> templates;
-    const auto upTo = []( const QString& textBefore, const QString& endCharacter ) {
-        auto rule = simple( textBefore, ValueEnd::Character );
-        rule.endCharacter = endCharacter;
-        return rule;
-    };
 
     // PostgreSQL 10 and later log `starting PostgreSQL 16.1 (Debian
     // 16.1-1.pgdg120+1) on x86_64-pc-linux-gnu, ...` once per start; the
@@ -793,7 +789,7 @@ QList<RuleTemplate> databaseTemplates()
                         tr( "The quoted version after Version: in the MySQL or MariaDB ready "
                             "line, e.g. Version: '8.0.36'" ),
                         QStringLiteral( "MySQL version" ),
-                        upTo( QStringLiteral( "Version: '" ), QStringLiteral( "'" ) ),
+                        simpleUpTo( QStringLiteral( "Version: '" ), QStringLiteral( "'" ) ),
                         {} } );
 
     // Redis 4 and later log `Redis version=7.2.4, bits=64, commit=...`
@@ -801,7 +797,7 @@ QList<RuleTemplate> databaseTemplates()
     templates.append( { tr( "Redis version" ),
                         tr( "The version after Redis version=, e.g. Redis version=7.2.4, bits=64" ),
                         QStringLiteral( "Redis version" ),
-                        upTo( QStringLiteral( "Redis version=" ), QStringLiteral( "," ) ),
+                        simpleUpTo( QStringLiteral( "Redis version=" ), QStringLiteral( "," ) ),
                         {} } );
 
     return templates;

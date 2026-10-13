@@ -154,6 +154,60 @@ QList<RuleTemplate> networkTemplates()
           simple( QStringLiteral( "IP:" ) ),
           {} } );
 
+    // A MAC address after a text too, but advanced, as only its shape
+    // tells it from the next word: six pairs of hex digits separated by `:`
+    // or `-`, the same separator throughout (the backreference `\2`), or
+    // three groups of four separated by `.`, as Cisco writes them; either
+    // case. The pattern starts with the text, `MAC:`, matched literally,
+    // and then optional whitespace, as a simple rule would; users adjust
+    // it to their log (`link/ether`, `address is`). Not followed by a word
+    // character, or by a separator and one, so a longer address, an EUI-64
+    // or mixed separators are no match rather than cut short; a `,` or a
+    // `.` ending a sentence may follow.
+    templates.append(
+        { tr( "MAC address" ),
+          tr( "The address after MAC:, e.g. MAC: 52:54:00:12:34:56, 00-1A-2B-3C-4D-5E or "
+              "0050.56a1.b2c3; adjust the text to your log" ),
+          QStringLiteral( "MAC address" ),
+          {},
+          QStringLiteral( "MAC:\\s*("
+                          "[0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}(?:\\2[0-9A-Fa-f]{2}){4}"
+                          "|[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}"
+                          ")(?!\\w|[:.-]\\w)" ) } );
+
+    // An IPv6 address after a text to adjust, `IPv6:` at the start of the
+    // pattern. Its shape is the IPv6address rule of RFC 3986, one
+    // alternative per place of the `::`: eight groups of one to four hex
+    // digits, fewer with one `::` standing for the groups left out, and
+    // the last two groups may be an IPv4 address (`::ffff:192.0.2.10`,
+    // `64:ff9b::192.0.2.33`). Not followed by a word character, by `:`
+    // and another `:` or a word character, or by `.` and a word character,
+    // so a ninth group, a second `::` or a truncated IPv4 address is no
+    // match rather than cut short. A prefix length (`/64`), a zone
+    // (`%eth0`) or a `:` ending a phrase is left out of the value.
+    {
+        const QString h16 = QStringLiteral( "[0-9A-Fa-f]{1,4}" );
+        const QString octet = QStringLiteral( "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)" );
+        const QString ls32 = QStringLiteral( "(?:%1:%1|(?:%2\\.){3}%2)" ).arg( h16, octet );
+        const QString address = QStringLiteral( "(?:(?:%1:){6}%2"
+                                                "|::(?:%1:){5}%2"
+                                                "|(?:%1)?::(?:%1:){4}%2"
+                                                "|(?:(?:%1:)?%1)?::(?:%1:){3}%2"
+                                                "|(?:(?:%1:){0,2}%1)?::(?:%1:){2}%2"
+                                                "|(?:(?:%1:){0,3}%1)?::%1:%2"
+                                                "|(?:(?:%1:){0,4}%1)?::%2"
+                                                "|(?:(?:%1:){0,5}%1)?::%1"
+                                                "|(?:(?:%1:){0,6}%1)?::)" )
+                                    .arg( h16, ls32 );
+        templates.append(
+            { tr( "IPv6 address" ),
+              tr( "The address after IPv6:, e.g. IPv6: 2001:db8::1 or ::ffff:192.0.2.10; "
+                  "adjust the text to your log" ),
+              QStringLiteral( "IPv6 address" ),
+              {},
+              QStringLiteral( "IPv6:\\s*(%1)(?!\\w|:[\\w:]|\\.\\w)" ).arg( address ) } );
+    }
+
     return templates;
 }
 

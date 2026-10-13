@@ -310,7 +310,8 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
             REQUIRE( names( "General" )
                      == QStringList{ "Version", "Build number", "Serial number", "Environment",
                                      "User", "Log start", "key=value" } );
-            REQUIRE( names( "Network" ) == QStringList{ "IPv4 address" } );
+            REQUIRE( names( "Network" )
+                     == QStringList{ "IPv4 address", "MAC address", "IPv6 address" } );
         }
 
         THEN( "each is in a group, the templates of a group next to each other, General first" )

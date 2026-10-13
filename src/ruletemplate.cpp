@@ -195,9 +195,12 @@ QList<RuleTemplate> networkTemplates()
     // match rather than cut short. A prefix length (`/64`), a zone
     // (`%eth0`) or a `:` ending a phrase is left out of the value.
     {
+        // The names are those of the RFC's rules: a group of hex digits,
+        // a number from 0 to 255 without leading zeros, and the last 32
+        // bits, two groups or an IPv4 address.
         const QString h16 = QStringLiteral( "[0-9A-Fa-f]{1,4}" );
-        const QString octet = QStringLiteral( "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)" );
-        const QString ls32 = QStringLiteral( "(?:%1:%1|(?:%2\\.){3}%2)" ).arg( h16, octet );
+        const QString decOctet = QStringLiteral( "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)" );
+        const QString ls32 = QStringLiteral( "(?:%1:%1|(?:%2\\.){3}%2)" ).arg( h16, decOctet );
         const QString address = QStringLiteral( "(?:(?:%1:){6}%2"
                                                 "|::(?:%1:){5}%2"
                                                 "|(?:%1)?::(?:%1:){4}%2"

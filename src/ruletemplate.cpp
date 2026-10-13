@@ -340,6 +340,59 @@ QList<RuleTemplate> androidTemplates()
     return templates;
 }
 
+/// Test run: the header and the summary of a pytest run.
+QList<RuleTemplate> testRunTemplates()
+{
+    QList<RuleTemplate> templates;
+    const auto upToComma = []( const QString& textBefore ) {
+        auto rule = simple( textBefore, ValueEnd::Character );
+        rule.endCharacter = QStringLiteral( "," );
+        return rule;
+    };
+
+    // pytest starts a run with `platform linux -- Python 3.12.3,
+    // pytest-8.3.2, pluggy-1.5.0`, once per run. The versions follow a fixed
+    // text and end at the comma, or at the end of the line if none follows.
+    // `-- Python` and `, pytest-` with the text around them keep out a
+    // lower-case interpreter path (`-- /usr/bin/python3`) and temporary
+    // paths such as `/tmp/pytest-of-user/pytest-3`. On PyPy the PyPy
+    // version is part of the value (`3.9.10[pypy-7.3.8-final]`).
+    templates.append( { tr( "Python version" ),
+                        tr( "The Python version in the pytest header, e.g. "
+                            "platform linux -- Python 3.12.3, pytest-8.3.2" ),
+                        QStringLiteral( "Python" ),
+                        upToComma( QStringLiteral( "-- Python" ) ),
+                        {} } );
+    templates.append( { tr( "pytest version" ),
+                        tr( "The pytest version in the pytest header, e.g. "
+                            "platform linux -- Python 3.12.3, pytest-8.3.2" ),
+                        QStringLiteral( "pytest" ),
+                        upToComma( QStringLiteral( ", pytest-" ) ),
+                        {} } );
+
+    // The summary pytest ends a run with, once per run: counts such as
+    // `3 failed, 120 passed` or `no tests ran`, `in`, and the time in
+    // seconds (`12.30s`, before pytest 5.1 `12.30 seconds`), with the
+    // duration after a run longer than a minute (`336.42s (0:05:36)`).
+    // The count words are lower case, one or two (`5 subtests passed`
+    // from pytest-subtests). The `=` around it, which `-q` leaves out,
+    // and spaces at the ends are not part of the value. It has no text
+    // before it, so the whole line must have this shape; other separators
+    // (`= FAILURES =`) and unittest's `Ran 120 tests in 12.300s` do not.
+    templates.append(
+        { tr( "Test result" ),
+          tr( "The summary at the end of a pytest run, e.g. 3 failed, 120 passed in 12.3s; "
+              "meant for one run per file" ),
+          QStringLiteral( "Test result" ),
+          {},
+          QStringLiteral( "^=*\\s*("
+                          "(?:\\d+ [a-z]+(?: [a-z]+)?(?:, \\d+ [a-z]+(?: [a-z]+)?)*|no tests ran)"
+                          " in \\d+(?:\\.\\d+)?(?:s| seconds)(?: \\(\\d+:\\d{2}:\\d{2}\\))?"
+                          ")\\s*=*\\s*$" ) } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -359,6 +412,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "Network" ), networkTemplates() );
     appendGroup( templates, tr( "Linux and boot" ), linuxTemplates() );
     appendGroup( templates, tr( "Android" ), androidTemplates() );
+    appendGroup( templates, tr( "Test run" ), testRunTemplates() );
 
     return templates;
 }

@@ -162,21 +162,25 @@ changes nothing.
 
 ### Rule templates
 
-**From template…** next to the add button adds a ready-made rule to adjust
-instead of writing one. The new rule goes after the others and is selected;
-no existing rule changes. A template only makes new rules: a rule made from
-one earlier keeps its patterns and key when the template changes.
+**From template…** next to the add button adds ready-made rules to adjust
+instead of writing them. The templates are listed under their group; check
+the ones you want, or a whole group to check all its templates (Space or a
+double-click checks one too), and click **Add Rules**. Each checked
+template becomes a new rule, after the existing rules and in the order the
+dialog lists them, and the first new rule is selected; no existing rule
+changes. A template only makes new rules: a rule made from one earlier
+keeps its patterns and key when the template changes.
 
-| Template | Key | Finds | Mode |
-|----------|-----|-------|------|
-| Version | `Version` | The number after `version` or `ver` in any case, also after `_` or in camel case (`app_version=1.2.3`, `appVersion: 2.1.0`), with optional quotes, `:`, `=`, `>` or `.` and `v` between (`Version: v2.0.1-rc1` → `2.0.1-rc1`, `{"version": "1.2.3"}`, `<version>1.2.3`, `Ver. 2.1`), or after a `v` starting a word when it has a dot (`v1.2.3`). A suffix like `-rc1`, `-beta.2` or `+build.5` is part of it; a date is not. The `version` of an XML declaration (`<?xml version="1.0"`) is skipped. | Advanced |
-| Build number | `Build` | The word after `Build:` (`Build: 1234`) | Simple |
-| Serial number | `Serial number` | The word after `Serial number:` | Simple |
-| IPv4 address | `IP address` | The word after `IP:` (`IP: 192.168.1.20`), not the first address in a line, which in a log with clients and servers is an arbitrary one | Simple |
-| Environment | `Environment` | The word after `env:` (`env: prod`, `env: staging`) | Simple |
-| User | `User` | The word after `user:` (`user: alice`) | Simple |
-| Log start | `Log start` | When the log starts: the first date and time in the file, as the first match counts. ISO 8601: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Truncated fields such as `10:30:5` or `+01:0` are not matched; a `:` after a complete timestamp (`10:30:00: started`) is fine. | Advanced |
-| `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Also as a flag, `-user=` or `--user=`. Not in a longer key (`superuser=`, `a.user=`, `my-user=`), and `user= x` has no value. | Advanced |
+| Group | Template | Key | Finds | Mode |
+|-------|----------|-----|-------|------|
+| General | Version | `Version` | The number after `version` or `ver` in any case, also after `_` or in camel case (`app_version=1.2.3`, `appVersion: 2.1.0`), with optional quotes, `:`, `=`, `>` or `.` and `v` between (`Version: v2.0.1-rc1` → `2.0.1-rc1`, `{"version": "1.2.3"}`, `<version>1.2.3`, `Ver. 2.1`), or after a `v` starting a word when it has a dot (`v1.2.3`). A suffix like `-rc1`, `-beta.2` or `+build.5` is part of it; a date is not. The `version` of an XML declaration (`<?xml version="1.0"`) is skipped. | Advanced |
+| General | Build number | `Build` | The word after `Build:` (`Build: 1234`) | Simple |
+| General | Serial number | `Serial number` | The word after `Serial number:` | Simple |
+| General | Environment | `Environment` | The word after `env:` (`env: prod`, `env: staging`) | Simple |
+| General | User | `User` | The word after `user:` (`user: alice`) | Simple |
+| General | Log start | `Log start` | When the log starts: the first date and time in the file, as the first match counts. ISO 8601: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Truncated fields such as `10:30:5` or `+01:0` are not matched; a `:` after a complete timestamp (`10:30:00: started`) is fine. | Advanced |
+| General | `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Also as a flag, `-user=` or `--user=`. Not in a longer key (`superuser=`, `a.user=`, `my-user=`), and `user= x` has no value. | Advanced |
+| Network | IPv4 address | `IP address` | The word after `IP:` (`IP: 192.168.1.20`), not the first address in a line, which in a log with clients and servers is an arbitrary one | Simple |
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also
@@ -184,10 +188,12 @@ end a longer word (`ClientIP:`, `superuser:`), so make it as long as needed
 to say which value you mean. Version does not count `version` inside
 another word (`conversion`, `server`), and so also misses a lower-case
 `appversion`; `app_version` and `appVersion` are found. For `key=value`,
-give the key without `=` (a trailing `=` is dropped); for lists separated
-by `;` or `,`, change `(\S+)` in the pattern to `([^;]+)`. If an enabled
-rule with a line pattern already has the template's key, the dialog says
-so: the new rule becomes an alternative for that key.
+give the key without `=` (a trailing `=` is dropped); while it is checked,
+the dialog asks for the key and **Add Rules** stays disabled until one is
+given. For lists separated by `;` or `,`, change `(\S+)` in the pattern to
+`([^;]+)`. If an enabled rule with a line pattern already has the key of a
+checked template, the dialog names every such key: each new rule with one
+of them becomes an alternative for that key.
 
 ### Rule from a selected line
 

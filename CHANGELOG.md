@@ -50,6 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   User, the word after `user:`. Adjust the text to your log.
 
 ### Changed
+- **Template groups, and several templates at once** — **From template…**
+  lists the templates under their group: Version, Build number, Serial
+  number, Environment, User, Log start and `key=value` under *General*,
+  IPv4 address under *Network*. Templates are checked instead of picked one at
+  a time; checking a group checks all its templates. **Add Rules** adds
+  one new rule per checked template, after the existing rules and in the
+  order the dialog lists them, and selects the first new one; existing
+  rules are not changed. While `key=value` is checked, the dialog asks for
+  its key and **Add Rules** stays disabled until one is given. The note
+  about a key already in use names every checked template's key that an
+  enabled rule with a line pattern has. The developer guide states the
+  rule every template follows: it finds a value that holds for the whole
+  file.
 - **IPv4 address template** — finds the address after `IP:` in simple
   mode instead of the first address in a line, which in a log with clients
   and servers is an arbitrary one. Adjust the text so it says which

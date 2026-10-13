@@ -532,7 +532,7 @@ hidden global test state.
 | **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
 | **RuleFromLine** | `rulefromline.h/.cpp` | Makes a simple rule and a key from a sample line and the value marked in it |
 | **SelectedLinePicker** | `selectedlinepicker.h/.cpp` | The editor's view of the Log Line a rule is made from: click or mark the value |
-| **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values, and the dialog choosing one |
+| **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values in groups, and the dialog checking those to add |
 
 ## Scanning Algorithm
 
@@ -923,8 +923,14 @@ with the message open), and the 26.11 FakeHost scenarios in
 ### Rule templates
 
 `ruletemplate.h` is a data table, `ruleTemplates()`: each `RuleTemplate`
-has a name, a one-line description, a key, and either a `SimpleRule` or an
-advanced `linePattern` with the value as group 1. `entry()` builds the
+has a name, a one-line description, a key, either a `SimpleRule` or an
+advanced `linePattern` with the value as group 1, and its group.
+`makeTemplates()` builds the table from one function per group
+(`generalTemplates()`, `networkTemplates()`, …), each returning its
+templates in order; `appendGroup()` sets their `group`, so the rows of a
+group's function leave it out. The order of the `appendGroup()` calls is
+the order of the groups in the dialog, and the templates of a group are
+next to each other in `ruleTemplates()`. `entry()` builds the
 rule: a simple template goes through `applySimpleRule()`, so its patterns
 are exactly what simple mode generates and it opens in simple mode; an
 advanced one keeps its pattern and opens in advanced mode. A template
@@ -948,18 +954,38 @@ atomic group followed by `(?!\d|:\d)`, so a truncated field (`10:30:5`,
 `+01:0`) fails instead of backtracking to a shorter match, while a `:`
 after a complete timestamp, as in `10:30:00: started`, is fine. Each template is tested
 with lines it must find and lines it must not, through `FooterScanner`
-(`tests/ruletemplate_test.cpp`). A new template is a row in
-`makeTemplates()` plus such samples.
+(`tests/ruletemplate_test.cpp`). A new template is a row in its group's
+function plus such samples; a new group is a function returning its
+templates and one `appendGroup()` line in `makeTemplates()`.
 
-`RuleTemplateDialog` lists name and description in a `QTreeWidget`, with a
-key field enabled only for a template that asks for one; OK is enabled
-once `entry()` has a key, and a hint says a typed trailing `=` is dropped.
-It gets the keys of the rules the scanner uses, `RuleCheck::keysInUse()`,
-in `reset()` and shows a note when the new rule's key is one of
-them: the rule is still added, as an alternative. `FooterEditor::addFromTemplate()` commits the panel's
-pending edit, keeps one dialog, calls `reset()` and `open()` (not `exec()`,
-so tests click through it), and on `accepted` appends `entry()` and selects
-it, like the add button, without touching other rows.
+Every template follows one rule: **a template finds a value that holds
+for the whole file.** The footer shows one value per key, taken from the
+first line that matches, so a template is for a value such as a version,
+a serial number or a device name, not for one that changes from line to
+line. A template that matches by shape alone, without text before the
+value, is only for values unique by nature (a VIN, a build fingerprint);
+anything else needs text before the value, so that the first match is
+the value meant and not some other value of the same shape.
+
+`RuleTemplateDialog` lists the templates in a `QTreeWidget`: a top-level
+item per group, `Qt::ItemIsAutoTristate`, with a checkable child per
+template showing name and description and holding its index in
+`ruleTemplates()` as `Qt::UserRole`. Checking a group checks its
+templates, and some of them checked shows it partly checked. A
+double-click on a template toggles it; Space does so through the
+delegate, and Enter reaches the default button. The key field is enabled
+while a checked template asks for a key; `entries()` gives one rule per
+checked template in list order, and OK is enabled once there is at least
+one and each has a key. A hint says a typed trailing `=` is dropped. The
+dialog gets the keys of the rules the scanner uses,
+`RuleCheck::keysInUse()`, in `reset()`, which also unchecks everything,
+and its note names every key of a checked template that is one of them:
+those rules are still added, as alternatives.
+`FooterEditor::addFromTemplate()` commits the panel's pending edit, keeps
+one dialog, calls `reset()` and `open()` (not `exec()`, so tests click
+through it), and on `accepted` appends `entries()` after the existing
+rules and selects the first new one, like the add button, without
+touching other rows.
 
 ## Configuration Storage
 

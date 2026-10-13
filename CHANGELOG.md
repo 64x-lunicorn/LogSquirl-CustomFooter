@@ -79,6 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Commit, from `HEAD is now at <sha>`, the first checkout counting;
   GitLab Runner version, from `Running with gitlab-runner <version>`; and
   from Jenkins, Started by, the user's name from `Started by user <name>`.
+- **iOS crash log template group** — four templates for the header of an
+  Apple crash report: Hardware model (`Hardware Model:`), OS version
+  (`OS Version:`, up to the end of the line, as in `iPhone OS 17.2
+  (21C62)`) and Incident identifier (`Incident Identifier:`) in simple
+  mode, and App version (`Version:`, up to the end of the line, as in
+  `1.0 (1)`) in advanced mode, which does not take `OS Version:` or
+  another `… Version:` when the app's version is empty.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

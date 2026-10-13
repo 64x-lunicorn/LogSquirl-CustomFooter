@@ -206,6 +206,14 @@ several runs, the footer shows the versions and the result of the first.
 
 The runner image templates fit job logs of GitHub-hosted runners; a
 self-hosted runner prints no Runner Image section.
+| iOS crash log | Hardware model | `Hardware model` | The word after `Hardware Model:` (`Hardware Model: iPhone15,5` → `iPhone15,5`) | Simple |
+| iOS crash log | OS version | `OS version` | The rest of the line after `OS Version:` (`OS Version: iPhone OS 17.2 (21C62)` → `iPhone OS 17.2 (21C62)`, also `macOS 14.6.1 (23G93)`) | Simple |
+| iOS crash log | Incident identifier | `Incident identifier` | The word after `Incident Identifier:`, the report's UUID | Simple |
+| iOS crash log | App version | `App version` | The rest of the line after `Version:` (`Version: 1.0 (1)` → `1.0 (1)`, the app's CFBundleVersion and CFBundleShortVersionString), not after a word and a space, so `OS Version:`, `Baseband Version:` and `Report Version:` are not taken when the app's `Version:` is empty | Advanced |
+
+The iOS crash log templates fit the text form of a crash report (a
+`.crash` file, or the translated report at the top of an `.ips` file),
+from macOS too; the JSON of an untranslated `.ips` file is not matched.
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also

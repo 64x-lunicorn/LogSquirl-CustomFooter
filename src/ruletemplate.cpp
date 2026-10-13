@@ -522,7 +522,9 @@ QList<RuleTemplate> javaTemplates()
     // and the host are single words in it. The application and its version
     // are only taken from a `Starting` that ends in this shape, up to `with
     // PID` and a digit, so `Starting service [Tomcat]` and `Starting Servlet
-    // engine:` in the same log are not.
+    // engine:` in the same log are not. startHead is the line up to the
+    // application, startTail the part after its version.
+    const QString startHead = QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?" );
     const QString startTail = QStringLiteral( "(?:using Java \\S+ )?(?:on \\S+ )?with PID \\d" );
     templates.append(
         { tr( "Application" ),
@@ -530,15 +532,14 @@ QList<RuleTemplate> javaTemplates()
               "Java 17 with PID 42" ),
           QStringLiteral( "Application" ),
           {},
-          QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?(\\S+) (?=(?:v\\S+ )?" ) + startTail
+          startHead + QStringLiteral( "(\\S+) (?=(?:v\\S+ )?" ) + startTail
               + QStringLiteral( ")" ) } );
     templates.append(
         { tr( "Application version" ),
           tr( "The version after v in the Spring Boot start line, e.g. Starting MyApp v1.2.0" ),
           QStringLiteral( "Application version" ),
           {},
-          QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?\\S+ v(\\S+) (?=" ) + startTail
-              + QStringLiteral( ")" ) } );
+          startHead + QStringLiteral( "\\S+ v(\\S+) (?=" ) + startTail + QStringLiteral( ")" ) } );
 
     // The Java version follows a fixed text, also in Spring Boot 3, which
     // has no host.
@@ -557,8 +558,8 @@ QList<RuleTemplate> javaTemplates()
               "42" ),
           QStringLiteral( "Host" ),
           {},
-          QStringLiteral( "(?<!\\S)Starting (?:AOT-processed )?\\S+ (?:v\\S+ )?"
-                          "(?:using Java \\S+ )?on (\\S+) with PID \\d" ) } );
+          startHead
+              + QStringLiteral( "\\S+ (?:v\\S+ )?(?:using Java \\S+ )?on (\\S+) with PID \\d" ) } );
 
     // Since Spring Boot 2.7: `The following 1 profile is active: "prod"` or
     // `The following 2 profiles are active: "dev", "local"`; before that

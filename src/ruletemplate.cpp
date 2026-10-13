@@ -393,6 +393,70 @@ QList<RuleTemplate> testRunTemplates()
     return templates;
 }
 
+/// CI: build logs of GitHub Actions, GitLab and Jenkins.
+QList<RuleTemplate> ciTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // GitHub Actions names the runner image in the "Runner Image" section of
+    // "Set up job", the first step of every job log: `Image: ubuntu-24.04`.
+    // Self-hosted runners print no such section, so there a later `Image:`
+    // may be found instead.
+    templates.append(
+        { tr( "Runner image" ),
+          tr( "The GitHub Actions runner image after Image:, e.g. Image: ubuntu-24.04" ),
+          QStringLiteral( "Runner image" ),
+          simple( QStringLiteral( "Image:" ) ),
+          {} } );
+
+    // The image's version is the `Version:` right after `Image:`. It is
+    // advanced because the "Runner Image Provisioner" section before it has
+    // a `Version:` too (`Version: 20261002.596`): the image's version has
+    // three parts, a date and two numbers (`20261004.327.1`), the
+    // provisioner's two. Not after a letter, digit or `_`, so `UCRTVersion:`
+    // does not count, and not followed by a word character or `.`.
+    templates.append(
+        { tr( "Runner image version" ),
+          tr( "The GitHub Actions runner image version after Version:, e.g. "
+              "Version: 20261004.327.1" ),
+          QStringLiteral( "Runner image version" ),
+          {},
+          QStringLiteral( "(?<!\\w)Version:\\s*(\\d{8}\\.\\d+\\.\\d+)(?![\\w.])" ) } );
+
+    // Git prints the abbreviated commit it checked out after `HEAD is now
+    // at`, as actions/checkout does for a pull request. A log with several
+    // checkouts has the line more than once; the first one counts.
+    templates.append( { tr( "Commit" ),
+                        tr( "The commit after HEAD is now at, e.g. HEAD is now at aa5a02d; "
+                            "the first checkout in the log counts" ),
+                        QStringLiteral( "Commit" ),
+                        simple( QStringLiteral( "HEAD is now at" ) ),
+                        {} } );
+
+    // The first line of a GitLab job log: `Running with gitlab-runner
+    // 16.2.0 (782e15da)`. The word after it is the version.
+    templates.append(
+        { tr( "GitLab Runner version" ),
+          tr( "The version after Running with gitlab-runner, e.g. Running with gitlab-runner "
+              "16.2.0" ),
+          QStringLiteral( "GitLab Runner version" ),
+          simple( QStringLiteral( "Running with gitlab-runner" ) ),
+          {} } );
+
+    // Jenkins starts a build's console output with its cause. For a build
+    // started by hand that is `Started by user` and the user's full name,
+    // which may have spaces, so the value ends at the end of the line.
+    // `Started by timer` or `Started by an SCM change` give no value.
+    templates.append(
+        { tr( "Started by" ),
+          tr( "The Jenkins user after Started by user, e.g. Started by user Jane Doe" ),
+          QStringLiteral( "Started by" ),
+          simple( QStringLiteral( "Started by user" ), ValueEnd::EndOfLine ),
+          {} } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -413,6 +477,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "Linux and boot" ), linuxTemplates() );
     appendGroup( templates, tr( "Android" ), androidTemplates() );
     appendGroup( templates, tr( "Test run" ), testRunTemplates() );
+    appendGroup( templates, tr( "CI" ), ciTemplates() );
 
     return templates;
 }

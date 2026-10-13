@@ -65,11 +65,13 @@ SelectedLinePicker::SelectedLinePicker( QWidget* parent )
     connect( line_, &QLineEdit::selectionChanged, this, &SelectedLinePicker::markChanged );
 }
 
-void SelectedLinePicker::showLine( const QString& line, int selectedLines )
+void SelectedLinePicker::showLine( const QString& line, int selectedLines,
+                                   const FooterScanner::Encoding& encoding )
 {
+    encoding_ = encoding;
     {
         const QSignalBlocker blocker( line_ );
-        const auto shown = footerReadLength( line );
+        const auto shown = footerReadLength( line, encoding );
         line_->setText( line.left( shown ) );
         line_->setCursorPosition( 0 );
         cutNote_->setVisible( shown < line.size() );
@@ -89,6 +91,11 @@ void SelectedLinePicker::showLine( const QString& line, int selectedLines )
 QString SelectedLinePicker::line() const
 {
     return line_->text();
+}
+
+FooterScanner::Encoding SelectedLinePicker::encoding() const
+{
+    return encoding_;
 }
 
 void SelectedLinePicker::showRule( const RuleFromLine& rule )

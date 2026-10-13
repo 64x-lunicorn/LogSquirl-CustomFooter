@@ -26,9 +26,11 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
+#include "footerscanner.h"
 #include "footersession.h"
 #include "hostfunctions.h"
 #include "rulelistmodel.h"
@@ -36,9 +38,7 @@
 
 #include <QApplication>
 #include <QComboBox>
-#include <QCoreApplication>
 #include <QDialogButtonBox>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -47,7 +47,6 @@
 #include <QPushButton>
 #include <QTableView>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QToolButton>
 
 #include <memory>
@@ -57,21 +56,6 @@
 using namespace custom_footer;
 
 namespace {
-
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 void writeFile( const QString& path, const QString& content )
 {
@@ -90,6 +74,25 @@ Widget* child( QObject& parent, const char* name )
 }
 
 const QString kVinLine = "2026-10-12 08:15:02.123 INFO VIN: WDB1234567 speed=5";
+
+/// A line of a UTF-16 file longer than the footer reads of it: "WITHIN"
+/// ends at its 32768th code unit, the last the footer reads, "BEYOND"
+/// after it, though well within 64 KiB of UTF-8.
+const QString kLongUtf16Line
+    = QString( 32768 - 10, QLatin1Char( 'x' ) ) + " a: WITHIN b: BEYOND speed=5";
+
+/// @p text as a UTF-16LE file with its byte order mark.
+void writeUtf16File( const QString& path, const QString& text )
+{
+    QByteArray bytes( "\xFF\xFE", 2 );
+    for ( const QChar unit : text ) {
+        bytes += static_cast<char>( unit.unicode() & 0xFF );
+        bytes += static_cast<char>( unit.unicode() >> 8 );
+    }
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    REQUIRE( file.write( bytes ) == bytes.size() );
+}
 
 /// The editor's widgets for a rule from a line, found as the user sees them.
 struct FromLineUi {
@@ -459,6 +462,27 @@ SCENARIO( "The rule editor shows only the part of a long Log Line the footer rea
             }
         }
     }
+
+    WHEN( "a rule is made from a long line of a UTF-16 file" )
+    {
+        editor.addRuleFromLine( kLongUtf16Line, 1, { FooterScanner::Encoding::Form::Utf16LE, 2 } );
+
+        THEN( "its first 64 KiB of UTF-16 are shown, 32768 code units, with the note" )
+        {
+            REQUIRE( ui.line->text() == kLongUtf16Line.left( 32768 ) );
+            REQUIRE( cut->isVisibleTo( &editor ) );
+        }
+
+        AND_WHEN( "the value within them is marked" )
+        {
+            ui.mark( "WITHIN" );
+
+            THEN( "the rule is made" )
+            {
+                REQUIRE( ui.textBefore->text() == "a:" );
+            }
+        }
+    }
 }
 
 SCENARIO( "The rule editor says when an earlier Log Line supplies the rule's value",
@@ -701,6 +725,82 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
                 FromLineUi ui( *editor );
                 REQUIRE( ui.line->text() == kVinLine );
                 REQUIRE( ui.hint->text().contains( "3 Log Lines are selected" ) );
+            }
+        }
+    }
+
+    GIVEN( "a host with a long Log Line selected in a UTF-16 file" )
+    {
+        const auto utf16Log = logDir.path() + "/utf16.log";
+        writeUtf16File( utf16Log, kLongUtf16Line + "\n" );
+        selection.lines = QStringList{ kLongUtf16Line };
+        FooterSession session( configDir.path(), &footer, selection.host() );
+        session.setActiveFile( utf16Log );
+
+        WHEN( "a rule is made from the selected line" )
+        {
+            QPointer<FooterEditor> editor = session.ruleFromSelectedLine( &window );
+            REQUIRE( editor );
+            FromLineUi ui( *editor );
+
+            THEN( "only the part the footer reads of the UTF-16 file is shown" )
+            {
+                REQUIRE( ui.line->text() == kLongUtf16Line.left( 32768 ) );
+                REQUIRE(
+                    child<QLabel>( *editor, "selectedLineCutNote" )->isVisibleTo( editor.data() ) );
+            }
+
+            AND_WHEN( "the value within it is marked and the editor is accepted" )
+            {
+                ui.mark( "WITHIN" );
+                editor->accept();
+
+                THEN( "the rule is saved and the footer shows the value" )
+                {
+                    REQUIRE( FooterConfig::loadEntries( configDir.path() ).size() == 2 );
+                    REQUIRE( processUntil( [ &footer ] {
+                        for ( const auto& value : footer.values() ) {
+                            if ( value.key == "a" && value.value == "WITHIN" ) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    } ) );
+                }
+            }
+        }
+
+        WHEN( "the editor's button is clicked with the open editor" )
+        {
+            QPointer<FooterEditor> editor = session.openEditor( &window );
+            child<QToolButton>( *editor, "ruleFromLineButton" )->click();
+
+            THEN( "the line is shown as the footer reads the UTF-16 file too" )
+            {
+                REQUIRE( FromLineUi( *editor ).line->text() == kLongUtf16Line.left( 32768 ) );
+            }
+        }
+    }
+
+    GIVEN( "a host with the same long Log Line selected in a UTF-8 file" )
+    {
+        const auto utf8Log = logDir.path() + "/utf8.log";
+        writeFile( utf8Log, kLongUtf16Line + "\n" );
+        selection.lines = QStringList{ kLongUtf16Line };
+        FooterSession session( configDir.path(), &footer, selection.host() );
+        session.setActiveFile( utf8Log );
+
+        WHEN( "a rule is made from the selected line, and the value past 32768 units is marked" )
+        {
+            QPointer<FooterEditor> editor = session.ruleFromSelectedLine( &window );
+            REQUIRE( editor );
+            FromLineUi ui( *editor );
+            ui.mark( "BEYOND" );
+
+            THEN( "all of the line is shown, and the value makes a rule, as before" )
+            {
+                REQUIRE( ui.line->text() == kLongUtf16Line );
+                REQUIRE( ui.textBefore->text() == "b:" );
             }
         }
     }

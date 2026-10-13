@@ -341,10 +341,11 @@ void FooterEditor::offerRuleFromLine( bool offered )
     ruleFromLineButton_->setVisible( offered );
 }
 
-void FooterEditor::addRuleFromLine( const QString& line, int selectedLines )
+void FooterEditor::addRuleFromLine( const QString& line, int selectedLines,
+                                    const FooterScanner::Encoding& encoding )
 {
     panel_->commitPendingEdit();
-    linePicker_->showLine( line, selectedLines );
+    linePicker_->showLine( line, selectedLines, encoding );
     lineKey_.clear();
     const int row = model_->rowCount();
     model_->appendEntries( { FooterEntry() } );
@@ -612,7 +613,7 @@ void FooterEditor::lineMarked( qsizetype start, qsizetype length )
                 "value again." ) );
         return;
     }
-    const auto made = ruleFromLine( linePicker_->line(), start, length );
+    const auto made = ruleFromLine( linePicker_->line(), start, length, linePicker_->encoding() );
     linePicker_->showRule( made );
     if ( !made.isRule() ) {
         // The rule stays as the last mark made it.

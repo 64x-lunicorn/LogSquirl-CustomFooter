@@ -23,6 +23,7 @@
 #include "footercontroller.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
+#include "footerscanner.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -245,8 +246,7 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     QObject::connect( editor, &FooterEditor::ruleFromLineRequested, editor, [ this, editor ] {
         guarded( host_, "making a rule from the selected line", [ this, editor ] {
             if ( const auto selected = selectedLinesOrSayWhy( editor ) ) {
-                editor->addRuleFromLine( selected->lines.first(),
-                                         static_cast<int>( selected->lines.size() ) );
+                addRuleFromLine( *editor, *selected );
             }
         } );
     } );
@@ -279,8 +279,16 @@ FooterEditor* FooterSession::ruleFromSelectedLine( QWidget* over )
     }
     // Opened, or the open one brought forward with its edits.
     auto* editor = openEditor( over );
-    editor->addRuleFromLine( selected->lines.first(), static_cast<int>( selected->lines.size() ) );
+    addRuleFromLine( *editor, *selected );
     return editor;
+}
+
+void FooterSession::addRuleFromLine( FooterEditor& editor, const SelectedLogLines& selected )
+{
+    // Only the first bytes are read, for a byte order mark, as the
+    // footer's scan tells the encoding.
+    editor.addRuleFromLine( selected.lines.first(), static_cast<int>( selected.lines.size() ),
+                            FooterScanner::Encoding::ofFile( activeFile_ ) );
 }
 
 std::optional<SelectedLogLines> FooterSession::selectedLinesOrSayWhy( QWidget* messageOver )

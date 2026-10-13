@@ -268,8 +268,13 @@ the UI thread.
 [Rule from a selected line](#rule-from-a-selected-line): it reads
 `HostFunctions::selectedLogLines()` at once (`selectedLinesOrSayWhy()`),
 opens the editor as `openEditor()` does (or brings the open one forward,
-edits kept) and calls `FooterEditor::addRuleFromLine()` with the first line.
-Without a selection it opens no editor and shows a message instead: a
+edits kept) and calls `FooterEditor::addRuleFromLine()` with the first line
+and the encoding the footer reads the active file in
+(`FooterScanner::Encoding::ofFile()`, which reads the file's first two
+bytes for a byte order mark; UTF-8 when it cannot be read), as that
+decides how much of a long line the footer reads. The host hands over
+text, not the encoding; once it says which encoding it uses (#60), that
+value takes the place of `ofFile()`. Without a selection it opens no editor and shows a message instead: a
 `QMessageBox` opened with `open()`, never `exec()`, over the open editor or
 else over the given window, tracked by the session, shown once however
 often it is asked for, and deleted in the destructor right after the
@@ -550,6 +555,28 @@ hidden global test state.
 3. Read the log file line by line, up to `maxLines` lines and at most
    64 MiB, even inside a single huge line. Lines longer than 64 KiB are
    matched against their first 64 KiB.
+   **Encoding:** a scan from the start of a file tells how its bytes are
+   text from its first bytes (`FooterScanner::Encoding::detect()`), as
+   LogSquirl does for a byte order mark: `FF FE` makes it UTF-16LE,
+   `FE FF` UTF-16BE. A UTF-32 mark (`FF FE 00 00`, `00 00 FE FF`), which
+   LogSquirl checks first, is not taken for UTF-16. In UTF-16, lines start
+   after the mark and are decoded as UTF-16 of its byte order. A line ends
+   only at a line feed that is a whole code unit: `0A 00` (LE) or `00 0A`
+   (BE) at an even offset from the mark, so the `0A` byte in U+010A "Ċ" or
+   U+0A00 ends no line. (LogSquirl's `IndexingBlock::isDelimiter` checks
+   only that the other byte is `00`, not the offset; LogSquirl#804.)
+   `\r\n` and the limits count in code units and bytes
+   as for UTF-8. Every other file is read as before: split at the byte
+   `0x0A` and decoded as UTF-8, a UTF-8 mark in the first line but dropped
+   from its text by the decoding, and a UTF-16 file without a mark as
+   bytes. The encoding is kept in the scan's `Progress`, and a continued
+   scan reads on in it; its offsets are always on code unit boundaries, and
+   half a code unit at the end of a file being written is left for the
+   next scan. Encodings LogSquirl guesses or the user chooses need the host
+   to say which one it uses (#60); `Encoding` is where that will come in.
+   `forEachLine()` is the one place that splits and decodes lines, for the
+   scan and the preview alike. `tests/footerscanner_utf16_test.cpp` covers
+   UTF-16 files, also across continued scans and in the live preview.
 4. For each line, check every rule whose key has no value yet:
    - **Stage 1 — Line Pattern**: If `linePattern` matches the line, proceed.
    - **Stage 2 — Value Pattern** (optional): If `valuePattern` is set, apply
@@ -562,8 +589,9 @@ hidden global test state.
    index of the rule that supplied it, and `lineNumber`, the Log Line it
    was found in, counting from 1 as LogSquirl does (a line ends at `\n`,
    so `\r\n` ends one line and a lone `\r` does not end one, as in the
-   host; a UTF-8 byte order mark belongs to the first line; a last line
-   without a line break counts too; 0 where unknown). As a key keeps the first value found, its line is the
+   host; a UTF-8 byte order mark belongs to the first line, a UTF-16 one
+   to none; a last line without a line break counts too; 0 where
+   unknown). As a key keeps the first value found, its line is the
    line of the shown value, also for rules sharing a key.
    `FooterScanner::footerValues()` hands them to the widget in rule order,
    for display, tooltips and going to the line. The preview's values carry
@@ -819,9 +847,9 @@ shutdown) and checks the disabled buttons after `init()`.
 
 ### Rule from a selected line
 
-`rulefromline.h` holds two free functions, independent of the editor:
+`rulefromline.h` holds three free functions, independent of the editor:
 
-- **`ruleFromLine( line, start, length )`** makes the `SimpleRule` that
+- **`ruleFromLine( line, start, length, encoding )`** makes the `SimpleRule` that
   finds the value marked in a sample line, with `suggestedKey()` of its
   text and the value itself, or says why it makes none (`MarkProblem`).
   The mark loses the whitespace around it; a length of 0 is a click and
@@ -838,8 +866,8 @@ shutdown) and checks the disabled buttons after `init()`.
   right after the value (if `endCharacterProblem()` accepts it), and the
   end of the line. Each candidate is **verified** as the scanner would run
   it: compiled the same way, `isValid()` checked, and matched once against
-  the part of the line the scanner reads (its first
-  `FooterScanner::kMaxLineBytes` in UTF-8); its first match must capture
+  the part of the line the scanner reads (`footerReadLength()`, below);
+  its first match must capture
   exactly the marked value at its position. If a match starts before the
   text's position, the text occurs earlier and the rule would find an
   earlier value: `TextBeforeEarlier`, which the picker explains. Other
@@ -852,6 +880,14 @@ shutdown) and checks the disabled buttons after `init()`.
   warnings. Escaping is
   `simpleLinePattern()`'s, so special characters, tabs and Unicode before
   the value are matched literally.
+- **`footerReadLength( line, encoding )`** is how much of the line the
+  footer reads, in UTF-16 units: its first `FooterScanner::kMaxLineBytes`
+  (64 KiB) in the file's encoding, cut at a character boundary. In UTF-8
+  (the default, also for single-byte files) it counts each character's
+  UTF-8 bytes, so 65536 ASCII characters or 21845 CJK ones; in UTF-16 it
+  is 32768 code units whatever the characters, one less where a surrogate
+  pair straddles the limit. The `encoding` is a value given by the caller,
+  never told from a file here, so that the host can report it (#60).
 - **`suggestedKey( textBefore )`** is the text's longest word, the last of
   equally long ones, where a word is letters and digits of any script and
   `_`, with `.` and `-` inside it: `VIN:` → `VIN`, `[sensor.temp](°C):` →
@@ -859,12 +895,14 @@ shutdown) and checks the disabled buttons after `init()`.
   letters outside the BMP count. Empty without a letter or digit; the rule
   check then marks the missing key once a pattern exists.
 
-In the editor, `addRuleFromLine( line, selectedLines )` appends an empty
+In the editor, `addRuleFromLine( line, selectedLines, encoding )` appends an empty
 `FooterEntry` (no pattern yet, so it blocks nothing), selects it, and shows
 the line in a `SelectedLinePicker` above the detail panel: a read-only,
 fixed-font `QLineEdit` (no 32767-character limit) and a hint. Of a long
 line it shows only the part the footer reads, `footerReadLength()` (the
-first 64 KiB in UTF-8, cut at a character boundary), with a note that the
+first 64 KiB in the file's encoding, cut at a character boundary; the
+picker keeps the encoding with the line, and each mark makes the rule with
+it), with a note that the
 rest is cut off: the rest can make no rule, and a `QLineEdit` lays out and
 paints its whole text on every click, which took about half a second per
 click with the host's 1 MiB. The shown text is the start of the line, so
@@ -1054,3 +1092,7 @@ forward-compatible changes.  See the README for format examples.
    The suite runs on Qt's offscreen platform: `tests/tests_main.cpp` sets
    `QT_QPA_PLATFORM=offscreen` unless it is already set, so widget tests
    (tooltips, `QFileDialog`) behave the same on every desktop and in CI.
+   A test that waits for a worker, a timer or a file system event uses
+   `processUntil()` from `tests/eventloopwait.h`: it processes events
+   until a condition holds, for at most a bound (10 s unless the test
+   passes another), so a hung worker fails the test instead of hanging it.

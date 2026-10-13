@@ -27,6 +27,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "followerfakes.h"
 #include "footerconfig.h"
 #include "footercontroller.h"
@@ -36,9 +37,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
-#include <QThread>
 
-#include <functional>
 #include <memory>
 
 using namespace custom_footer;
@@ -52,22 +51,6 @@ void writeFile( const QString& path, const QByteArray& content, bool append = fa
     QFile file( path );
     REQUIRE( file.open( append ? QIODevice::Append : QIODevice::WriteOnly ) );
     REQUIRE( file.write( content ) == content.size() );
-}
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-bool processUntil( const std::function<bool()>& done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
 }
 
 /// Process events until every scan started has finished, shown or dropped.

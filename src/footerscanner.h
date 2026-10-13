@@ -50,7 +50,8 @@ namespace custom_footer {
  * Every value found carries the Log Line it was found in
  * (FooterValue::lineNumber), counting from 1 in the whole file as the host
  * does: a line ends with "\n", so a "\r\n" ends one line too, and a last
- * line without a line break counts as well.
+ * line without a line break counts as well. In a UTF-16 file with a byte
+ * order mark, "\n" is a whole code unit (Encoding).
  */
 class FooterScanner {
 public:
@@ -70,10 +71,59 @@ public:
     /// Found values by key, each with its raw value and rule.
     using Values = QMap<QString, FooterValue>;
 
+    /**
+     * How a file's bytes are text: how wide a code unit is, which code unit
+     * ends a line, how a line is decoded, and where the first line starts.
+     *
+     * A scan from the start of a file tells it from the file's first bytes
+     * (detect()), as LogSquirl does for a byte order mark: a UTF-16 mark
+     * makes the file UTF-16 of that byte order, the mark not part of the
+     * first line. Any other file is read as UTF-8: also one with a UTF-8
+     * mark, which is in the first line but not in its decoded text, and a
+     * single-byte or a UTF-16 file without a mark. (A continued scan keeps
+     * the encoding it was made with, in its progress.)
+     */
+    struct Encoding {
+        enum class Form {
+            Utf8,    ///< Lines end at the byte 0x0A.
+            Utf16LE, ///< Lines end at the code unit 0x000A, low byte first.
+            Utf16BE, ///< Lines end at the code unit 0x000A, high byte first.
+        };
+        Form form = Form::Utf8;
+        /// Bytes of a byte order mark before the first line, not part of it.
+        qint64 textStart = 0;
+
+        /// The encoding of a file starting with @p start.
+        static Encoding detect( const QByteArray& start );
+
+        /// The encoding of the file at @p filePath, told from its first
+        /// bytes (detect()); UTF-8 if it cannot be read.
+        static Encoding ofFile( const QString& filePath );
+
+        /// Bytes per code unit: 1 or 2.
+        int unitBytes() const
+        {
+            return form == Form::Utf8 ? 1 : 2;
+        }
+
+        /// Whether the code unit at @p at is @p unit (an ASCII character).
+        bool isUnit( const char* at, char unit ) const;
+
+        /// The text of @p bytes, whole code units of a line.
+        QString decode( const QByteArray& bytes ) const;
+
+        bool operator==( const Encoding& other ) const
+        {
+            return form == other.form && textStart == other.textStart;
+        }
+    };
+
     /// How far a file has been scanned, to continue there once it has grown.
     struct Progress {
+        /// How the file is read, told when it was scanned from its start.
+        Encoding encoding;
         /// End of the last complete line scanned, or where the scan limit
-        /// stopped the scan inside a line.
+        /// stopped the scan inside a line; after a byte order mark at least.
         qint64 offset = 0;
         int lines = 0;       ///< Complete lines scanned.
         Values values;       ///< Found in those lines.

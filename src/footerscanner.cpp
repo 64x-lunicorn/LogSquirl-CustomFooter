@@ -22,6 +22,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QStringDecoder>
 
 #include <algorithm>
 #include <utility>
@@ -47,13 +48,66 @@ enum class ReadResult {
     Stopped, ///< Cancelled, or stopAt was passed inside a line.
 };
 
-/// A line without its line break, and at most maxBytes long.
-void trimLine( QByteArray& line, qint64 maxBytes )
+using Encoding = FooterScanner::Encoding;
+
+/// A line without its line break, and at most maxBytes long: whole code
+/// units, as maxBytes is a multiple of a code unit.
+void trimLine( QByteArray& line, const Encoding& encoding, qint64 maxBytes )
 {
-    while ( line.endsWith( '\n' ) || line.endsWith( '\r' ) ) {
-        line.chop( 1 );
+    const int unit = encoding.unitBytes();
+    while ( line.size() >= unit ) {
+        const char* last = line.constData() + line.size() - unit;
+        if ( !encoding.isUnit( last, '\n' ) && !encoding.isUnit( last, '\r' ) ) {
+            break;
+        }
+        line.chop( unit );
     }
     line.truncate( maxBytes );
+}
+
+/// Whether no whole code unit is left to read: at the end of the file, or
+/// before half a code unit still being written.
+bool atTextEnd( const QFile& file, const Encoding& encoding )
+{
+    const int unit = encoding.unitBytes();
+    return unit == 1 ? file.atEnd() : file.bytesAvailable() < unit;
+}
+
+/// Read the next piece of a line, of at most maxBytes, whole code units:
+/// up to and including the line feed if there is one within maxBytes.
+/// terminated tells whether it ends with the line feed.
+QByteArray readPiece( QFile& file, const Encoding& encoding, qint64 maxBytes, bool& terminated )
+{
+    const int unit = encoding.unitBytes();
+    if ( unit == 1 ) {
+        auto piece = file.readLine( maxBytes );
+        terminated = piece.endsWith( '\n' );
+        return piece;
+    }
+
+    // A line feed counts as a whole code unit only, so the bytes are looked
+    // at unit by unit, and only whole units are taken. In chunks, so that a
+    // short line costs little more than its own bytes.
+    constexpr qint64 chunkBytes = 1024;
+    QByteArray piece;
+    terminated = false;
+    while ( !terminated && piece.size() < maxBytes ) {
+        const auto ahead = file.peek( qMin( chunkBytes, maxBytes - piece.size() ) );
+        const auto whole = ahead.size() - ahead.size() % unit;
+        if ( whole == 0 ) {
+            break;
+        }
+        auto size = whole;
+        for ( qsizetype at = 0; at < whole; at += unit ) {
+            if ( encoding.isUnit( ahead.constData() + at, '\n' ) ) {
+                size = at + unit;
+                terminated = true;
+                break;
+            }
+        }
+        piece += file.read( size );
+    }
+    return piece;
 }
 
 /// Read one line of at most maxBytes, skipping the rest of a longer one.
@@ -61,27 +115,30 @@ void trimLine( QByteArray& line, qint64 maxBytes )
 /// with the end of the file. Skipping the rest of a line stops once the file
 /// position reaches stopAt, or when the scan is cancelled, so that a huge
 /// line is not read to its end; line then holds the start read so far.
-ReadResult readBoundedLine( QFile& file, qint64 maxBytes, qint64 stopAt,
+/// Only whole code units are read: half a code unit at the end of a file
+/// being written is left for a later scan.
+ReadResult readBoundedLine( QFile& file, const Encoding& encoding, qint64 maxBytes, qint64 stopAt,
                             const std::atomic_bool* cancelled, QByteArray& line, bool& terminated )
 {
-    if ( file.atEnd() ) {
+    if ( atTextEnd( file, encoding ) ) {
         return ReadResult::End;
     }
 
-    line = file.readLine( maxBytes + 1 );
-    terminated = line.endsWith( '\n' );
-    bool complete = terminated || file.atEnd();
+    // One code unit more than maxBytes, to read a line of maxBytes and its
+    // line feed at once.
+    const auto pieceBytes = maxBytes + encoding.unitBytes();
+    line = readPiece( file, encoding, pieceBytes, terminated );
+    bool complete = terminated || atTextEnd( file, encoding );
     while ( !complete ) {
         if ( file.pos() >= stopAt || isCancelled( cancelled ) ) {
-            trimLine( line, maxBytes );
+            trimLine( line, encoding, maxBytes );
             return ReadResult::Stopped;
         }
-        const auto rest = file.readLine( maxBytes + 1 );
-        terminated = rest.endsWith( '\n' );
-        complete = rest.isEmpty() || terminated || file.atEnd();
+        const auto rest = readPiece( file, encoding, pieceBytes, terminated );
+        complete = rest.isEmpty() || terminated || atTextEnd( file, encoding );
     }
 
-    trimLine( line, maxBytes );
+    trimLine( line, encoding, maxBytes );
     return ReadResult::Line;
 }
 
@@ -89,6 +146,14 @@ ReadResult readBoundedLine( QFile& file, qint64 maxBytes, qint64 stopAt,
 QByteArray readAt( QFile& file, qint64 offset, qint64 size )
 {
     return file.seek( offset ) ? file.read( size ) : QByteArray();
+}
+
+/// The encoding of a file, told from its first bytes.
+FooterScanner::Encoding encodingOf( QFile& file )
+{
+    // Enough for a byte order mark.
+    constexpr qint64 markBytes = 4; // a UTF-32 mark, to tell it from UTF-16's
+    return FooterScanner::Encoding::detect( readAt( file, 0, markBytes ) );
 }
 
 /// A raw value as shown: the display value of the first mapping of exactly
@@ -125,8 +190,9 @@ struct LinePosition {
 /**
  * Read the lines of a file from position.offset, within the scan limits, and
  * pass each to onLine( line, kind, lineNumber ), which returns whether to
- * read on. The one place that decides how lines are read, counted and
- * limited, for the footer's scans and the editor's previews alike.
+ * read on. The one place that decides how lines are read, split, decoded,
+ * counted and limited, for the footer's scans and the editor's previews
+ * alike: in the given encoding, from an offset on a code unit boundary.
  *
  * A complete line advances the position past it. A last line without a
  * line break is passed but not counted. A line the scan limit stopped in is
@@ -134,7 +200,7 @@ struct LinePosition {
  * more lines are read. Returns false when cancelled.
  */
 template <typename OnLine>
-bool forEachLine( QFile& file, LinePosition& position, int maxLines,
+bool forEachLine( QFile& file, const Encoding& encoding, LinePosition& position, int maxLines,
                   const std::atomic_bool* cancelled, OnLine&& onLine )
 {
     if ( !file.seek( position.offset ) ) {
@@ -147,8 +213,8 @@ bool forEachLine( QFile& file, LinePosition& position, int maxLines,
             return false;
         }
         const auto read
-            = readBoundedLine( file, FooterScanner::kMaxLineBytes, FooterScanner::kMaxScanBytes,
-                               cancelled, rawLine, terminated );
+            = readBoundedLine( file, encoding, FooterScanner::kMaxLineBytes,
+                               FooterScanner::kMaxScanBytes, cancelled, rawLine, terminated );
         if ( read == ReadResult::End ) {
             break;
         }
@@ -160,8 +226,8 @@ bool forEachLine( QFile& file, LinePosition& position, int maxLines,
             kind = LineKind::Stopped;
         }
 
-        const bool readOn = onLine( QString::fromUtf8( rawLine ), kind,
-                                    static_cast<qint64>( position.lines ) + 1 );
+        const bool readOn
+            = onLine( encoding.decode( rawLine ), kind, static_cast<qint64>( position.lines ) + 1 );
         if ( kind == LineKind::Stopped ) {
             // Remember where the scan stopped, so that a rescan knows the
             // file and does not read the line again.
@@ -180,6 +246,60 @@ bool forEachLine( QFile& file, LinePosition& position, int maxLines,
 }
 
 } // namespace
+
+FooterScanner::Encoding FooterScanner::Encoding::detect( const QByteArray& start )
+{
+    // Only a UTF-16 mark, as LogSquirl takes it for the encoding. A UTF-8
+    // mark stays in the first line, as it always has; decoding drops it.
+    // UTF-32 is not read as UTF-16: LogSquirl checks its marks first, and
+    // UTF-32LE's starts with UTF-16LE's.
+    if ( start.startsWith( QByteArray( "\xFF\xFE\x00\x00", 4 ) )
+         || start.startsWith( QByteArray( "\x00\x00\xFE\xFF", 4 ) ) ) {
+        return {};
+    }
+    if ( start.startsWith( "\xFF\xFE" ) ) {
+        return { Form::Utf16LE, 2 };
+    }
+    if ( start.startsWith( "\xFE\xFF" ) ) {
+        return { Form::Utf16BE, 2 };
+    }
+    return {};
+}
+
+FooterScanner::Encoding FooterScanner::Encoding::ofFile( const QString& filePath )
+{
+    QFile file( filePath );
+    if ( filePath.isEmpty() || !file.open( QIODevice::ReadOnly ) ) {
+        return {};
+    }
+    return encodingOf( file );
+}
+
+bool FooterScanner::Encoding::isUnit( const char* at, char unit ) const
+{
+    switch ( form ) {
+    case Form::Utf16LE:
+        return at[ 0 ] == unit && at[ 1 ] == '\0';
+    case Form::Utf16BE:
+        return at[ 0 ] == '\0' && at[ 1 ] == unit;
+    case Form::Utf8:
+        break;
+    }
+    return at[ 0 ] == unit;
+}
+
+QString FooterScanner::Encoding::decode( const QByteArray& bytes ) const
+{
+    if ( form == Form::Utf8 ) {
+        return QString::fromUtf8( bytes );
+    }
+    // Each line on its own, and a U+FEFF at its start kept: the file's mark
+    // is not in any line, so one there is text.
+    QStringDecoder decoder(
+        form == Form::Utf16LE ? QStringConverter::Utf16LE : QStringConverter::Utf16BE,
+        QStringConverter::Flag::Stateless | QStringConverter::Flag::ConvertInitialBom );
+    return decoder.decode( bytes );
+}
 
 FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
 {
@@ -256,6 +376,10 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     }
     else {
         progress.birthTime = QFileInfo( file ).birthTime();
+        // Told from the file's start, here only: a continued scan keeps the
+        // progress's, as the start that told it is unchanged.
+        progress.encoding = encodingOf( file );
+        progress.offset = progress.encoding.textStart;
     }
 
     // Values found in a last line without a line break.
@@ -266,7 +390,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     LinePosition position{ progress.offset, progress.lines };
     if ( progress.values.size() < keys_.size() ) {
         const bool completed
-            = forEachLine( file, position, maxLines, cancelled,
+            = forEachLine( file, progress.encoding, position, maxLines, cancelled,
                            [ this, &progress, &unterminated, &stoppedInLine ](
                                const QString& line, LineKind kind, qint64 lineNumber ) {
                                stoppedInLine = kind == LineKind::Stopped;
@@ -431,11 +555,13 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
         return cancelledPreview;
     };
 
-    LinePosition position;
+    auto& read = preview.read;
+    read.encoding = encodingOf( file );
+    LinePosition position{ read.encoding.textStart, 0 };
     bool partialLine = false;
     bool stoppedInLine = false;
     const bool completed
-        = forEachLine( file, position, maxLines, cancelled,
+        = forEachLine( file, read.encoding, position, maxLines, cancelled,
                        [ & ]( const QString& line, LineKind kind, qint64 lineNumber ) {
                            partialLine = kind != LineKind::Complete;
                            stoppedInLine = kind == LineKind::Stopped;
@@ -489,12 +615,12 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
 
     // Counting a last line that is unterminated, or that the limit stopped in.
     preview.lines = position.lines + ( partialLine ? 1 : 0 );
-    const bool more = !file.atEnd();
+    // Half a code unit at the end of a growing UTF-16 file is no more to read.
+    const bool more = !atTextEnd( file, read.encoding );
     preview.byteLimitReached = more && ( stoppedInLine || position.offset >= kMaxScanBytes );
     preview.lineLimitReached
         = more && !preview.byteLimitReached && maxLines > 0 && position.lines >= maxLines;
 
-    auto& read = preview.read;
     read.offset = position.offset;
     read.lines = position.lines;
     read.done = preview.limitReached();

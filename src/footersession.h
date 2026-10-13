@@ -137,6 +137,11 @@ private:
     /// message why over @p messageOver, without a selected Log Line.
     std::optional<SelectedLogLines> selectedLinesOrSayWhy( QWidget* messageOver );
 
+    /// Make a rule in @p editor from the first of the @p selected Log
+    /// Lines, read as the footer reads the active file: its encoding is
+    /// told from the file's first bytes now, as the host does not say it.
+    void addRuleFromLine( FooterEditor& editor, const SelectedLogLines& selected );
+
     /// Say, over @p over, how to make a rule from a selected line: to open
     /// a Log File first without an active file; over the editor, to click
     /// OK first, which keeps the rules and closes it, as it blocks the

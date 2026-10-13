@@ -20,6 +20,7 @@
 #pragma once
 
 #include "footerentry.h"
+#include "footerscanner.h"
 #include "hostfunctions.h"
 #include "ruledetailpanel.h"
 #include "rulepreviewer.h"
@@ -132,7 +133,10 @@ public:
     /// Append a new, empty rule in simple mode, select it, and show @p line
     /// above the panel to click or mark the value in. @p selectedLines is
     /// how many Log Lines were selected, of which @p line is the first.
-    void addRuleFromLine( const QString& line, int selectedLines = 1 );
+    /// @p encoding is how the footer reads the file the line is from, which
+    /// decides how much of a long line it reads (footerReadLength()).
+    void addRuleFromLine( const QString& line, int selectedLines = 1,
+                          const FooterScanner::Encoding& encoding = {} );
 
 Q_SIGNALS:
     /// Emitted when the user clicks Apply.

@@ -545,6 +545,111 @@ SCENARIO( "The part of a long line the footer reads ends at a character", "[rule
     }
 }
 
+SCENARIO( "The part of a long line the footer reads follows the file's encoding", "[rulefromline]" )
+{
+    using Encoding = FooterScanner::Encoding;
+    const Encoding utf8{};
+    const Encoding utf16LE{ Encoding::Form::Utf16LE, 2 };
+    const Encoding utf16BE{ Encoding::Form::Utf16BE, 2 };
+
+    GIVEN( "lines around the footer's 64 KiB line limit, which in UTF-16 is 32768 code units" )
+    {
+        const QString shortLine = "VIN: WDB1";
+        const QString ascii( 40000, QLatin1Char( 'x' ) );
+        // Three bytes each in UTF-8, two in UTF-16.
+        const QString cjk( 40000, QChar( 0x4E2D ) );
+        const QString exact( 32768, QLatin1Char( 'x' ) );
+        // A surrogate pair across the limit: its first half is the last
+        // unit within it.
+        const QString pairAcross
+            = QString( 32767, QLatin1Char( 'x' ) ) + QString::fromUtf8( "\xF0\x9F\x98\x80" );
+
+        WHEN( "the part the footer reads of a UTF-16 file is measured" )
+        {
+            THEN( "a short line is read whole, a long one up to 32768 code units, never half a "
+                  "surrogate pair, in either byte order" )
+            {
+                for ( const auto& encoding : { utf16LE, utf16BE } ) {
+                    REQUIRE( footerReadLength( shortLine, encoding ) == shortLine.size() );
+                    REQUIRE( footerReadLength( ascii, encoding ) == 32768 );
+                    REQUIRE( footerReadLength( cjk, encoding ) == 32768 );
+                    REQUIRE( footerReadLength( exact, encoding ) == exact.size() );
+                    REQUIRE( footerReadLength( exact + "y", encoding ) == exact.size() );
+                    REQUIRE( footerReadLength( pairAcross, encoding ) == 32767 );
+                }
+            }
+        }
+
+        WHEN( "the same lines of a UTF-8 file are measured" )
+        {
+            THEN( "they are measured in UTF-8, as without an encoding" )
+            {
+                for ( const auto& line : { shortLine, ascii, cjk, exact, pairAcross } ) {
+                    REQUIRE( footerReadLength( line, utf8 ) == footerReadLength( line ) );
+                }
+                REQUIRE( footerReadLength( ascii, utf8 ) == ascii.size() );
+                REQUIRE( footerReadLength( cjk, utf8 ) == 64 * 1024 / 3 );
+            }
+        }
+    }
+
+    GIVEN( "a long line with a value just within and one just beyond 32768 code units" )
+    {
+        // "WITHIN" ends at unit 32768, the last the footer reads; "BEYOND" after it.
+        const QString line = QString( 32768 - 10, QLatin1Char( 'x' ) ) + " a: WITHIN b: BEYOND";
+        REQUIRE( line.indexOf( "WITHIN" ) + 6 == 32768 );
+
+        WHEN( "they are marked as in a UTF-16 file" )
+        {
+            const auto within = ruleFromLine( line, line.indexOf( "WITHIN" ), 6, utf16LE );
+            const auto beyond = ruleFromLine( line, line.indexOf( "BEYOND" ), 6, utf16BE );
+
+            THEN( "the value within makes a rule, the one beyond is past the line limit" )
+            {
+                REQUIRE( within.isRule() );
+                REQUIRE( within.rule.textBefore == "a:" );
+                REQUIRE( beyond.problem == MarkProblem::BeyondLineLimit );
+            }
+
+            THEN( "the footer finds the value within in a UTF-16 file" )
+            {
+                FooterEntry entry;
+                entry.key = within.key;
+                applySimpleRule( within.rule, entry );
+
+                QTemporaryDir dir;
+                REQUIRE( dir.isValid() );
+                const auto path = dir.path() + "/sample.log";
+                QFile file( path );
+                REQUIRE( file.open( QIODevice::WriteOnly ) );
+                // UTF-16LE with its byte order mark.
+                const QString text = line + "\n";
+                QByteArray bytes( "\xFF\xFE", 2 );
+                for ( const QChar unit : text ) {
+                    bytes += static_cast<char>( unit.unicode() & 0xFF );
+                    bytes += static_cast<char>( unit.unicode() >> 8 );
+                }
+                REQUIRE( file.write( bytes ) == bytes.size() );
+                file.close();
+
+                const auto values = FooterScanner::scan( path, { entry } );
+                REQUIRE( values.value( entry.key ) == "WITHIN" );
+            }
+        }
+
+        WHEN( "they are marked as in a UTF-8 file" )
+        {
+            const auto beyond = ruleFromLine( line, line.indexOf( "BEYOND" ), 6 );
+
+            THEN( "both lie within the 64 KiB the footer reads" )
+            {
+                REQUIRE( beyond.isRule() );
+                REQUIRE( beyond.rule.textBefore == "b:" );
+            }
+        }
+    }
+}
+
 SCENARIO( "A key is suggested from the text before the value", "[rulefromline]" )
 {
     GIVEN( "texts before values" )

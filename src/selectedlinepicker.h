@@ -43,15 +43,21 @@ public:
     explicit SelectedLinePicker( QWidget* parent = nullptr );
 
     /// Show @p line, nothing marked yet. @p selectedLines is how many Log
-    /// Lines were selected, of which this is the first. Of a long line only
-    /// the part the footer reads is shown (footerReadLength()), with a note
+    /// Lines were selected, of which this is the first; @p encoding is how
+    /// the footer reads the file the line is from. Of a long line only the
+    /// part the footer reads is shown (footerReadLength()), with a note
     /// that the rest is cut off: the rest can make no rule, and a QLineEdit
     /// lays out and paints its whole text on every click.
-    void showLine( const QString& line, int selectedLines = 1 );
+    void showLine( const QString& line, int selectedLines = 1,
+                   const FooterScanner::Encoding& encoding = {} );
 
     /// The line as shown: the start of the given line, at the same
     /// positions, so marks in it are marks in that line.
     QString line() const;
+
+    /// How the footer reads the file the line is from, as given to
+    /// showLine(), to make rules from the line with (ruleFromLine()).
+    FooterScanner::Encoding encoding() const;
 
     /// Show what the last mark made: the value and the text before it, or
     /// why it makes no rule.
@@ -92,6 +98,7 @@ private:
     QLineEdit* line_ = nullptr;
     /// Says that only the start of a long line is shown.
     QLabel* cutNote_ = nullptr;
+    FooterScanner::Encoding encoding_;
     /// The hint, and the note of an earlier match shown after it.
     QString hintText_;
     QString earlierMatch_;

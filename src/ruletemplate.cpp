@@ -39,9 +39,6 @@ SimpleRule simple( const QString& textBefore, ValueEnd valueEnd = ValueEnd::Whit
     return rule;
 }
 
-/// A number from 0 to 255 without leading zeros.
-const QLatin1String kOctet( "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)" );
-
 QList<RuleTemplate> makeTemplates()
 {
     QList<RuleTemplate> templates;
@@ -89,17 +86,33 @@ QList<RuleTemplate> makeTemplates()
           simple( QStringLiteral( "Serial number:" ) ),
           {} } );
 
-    // Four numbers from 0 to 255, not part of a word, a longer number or
-    // dotted sequence: no word character or `.` before it, and no word
-    // character, or `.` and one, after it; a dot ending a sentence may
-    // follow.
-    templates.append( { tr( "IPv4 address" ),
-                        tr( "The first IPv4 address in a line, e.g. 192.168.1.20" ),
-                        QStringLiteral( "IP address" ),
-                        {},
-                        QStringLiteral( "(?<![\\w.])(" ) + kOctet + QStringLiteral( "(?:\\." )
-                            + kOctet + QStringLiteral( "){3})(?!\\w|\\.\\w)" ) } );
+    // A log with clients and servers has many addresses, and the first one
+    // in a line is an arbitrary one: the word after a text that says which
+    // address is meant.
+    templates.append(
+        { tr( "IPv4 address" ),
+          tr( "The address after IP:, e.g. IP: 192.168.1.20; adjust the text to your log" ),
+          QStringLiteral( "IP address" ),
+          simple( QStringLiteral( "IP:" ) ),
+          {} } );
 
+    // The environment and the user a log was written in or by have no shape
+    // either: the word after a text to adjust.
+    templates.append(
+        { tr( "Environment" ),
+          tr( "The word after env:, e.g. env: prod or env: staging; adjust the text" ),
+          QStringLiteral( "Environment" ),
+          simple( QStringLiteral( "env:" ) ),
+          {} } );
+    templates.append( { tr( "User" ),
+                        tr( "The word after user:, e.g. user: alice; adjust the text" ),
+                        QStringLiteral( "User" ),
+                        simple( QStringLiteral( "user:" ) ),
+                        {} } );
+
+    // A timestamp differs on almost every line; as the first match counts,
+    // the first timestamp in the file is when the log starts.
+    //
     // Date, `T` or a space as RFC 3339 allows, hours and minutes, optional
     // seconds (60 for a leap second) with a fraction after `.` or `,`, and
     // an optional `Z` or offset of `±HH`, `±HHMM` or `±HH:MM`; `t` and `z`
@@ -109,10 +122,10 @@ QList<RuleTemplate> makeTemplates()
     // match rather than cut back to `10:30`; a complete timestamp may be
     // followed by `:`, as in `10:30:00: started`.
     templates.append(
-        { tr( "Timestamp (ISO 8601)" ),
-          tr( "The first date and time in a line, e.g. 2024-01-15T10:30:00Z or "
-              "2024-01-15 10:30:00.123" ),
-          QStringLiteral( "Timestamp" ),
+        { tr( "Log start" ),
+          tr( "When the log starts: its first ISO 8601 date and time, e.g. "
+              "2024-01-15T10:30:00Z or 2024-01-15 10:30:00.123" ),
+          QStringLiteral( "Log start" ),
           {},
           QStringLiteral( "(?<!\\d)(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])"
                           "[Tt ](?:[01]\\d|2[0-3]):[0-5]\\d"

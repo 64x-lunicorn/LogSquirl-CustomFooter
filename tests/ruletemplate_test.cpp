@@ -242,7 +242,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
     {
         const auto& templates = ruleTemplates();
 
-        THEN( "there are the six of the issue, each with a name and a one-line description" )
+        THEN( "there are eight, each with a name and a one-line description" )
         {
             QStringList names;
             for ( const auto& t : templates ) {
@@ -252,7 +252,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
             }
             REQUIRE( names
                      == QStringList{ "Version", "Build number", "Serial number", "IPv4 address",
-                                     "Timestamp (ISO 8601)", "key=value" } );
+                                     "Environment", "User", "Log start", "key=value" } );
         }
 
         THEN( "every template makes an enabled rule without mappings whose pattern compiles" )
@@ -275,9 +275,10 @@ SCENARIO( "Rule templates are simple where the value fits the simple form", "[ru
 {
     GIVEN( "each template" )
     {
-        THEN( "build number and serial number are simple rules" )
+        THEN( "build number, serial number, IP address, environment and user are simple rules" )
         {
-            for ( const auto* name : { "Build number", "Serial number" } ) {
+            for ( const auto* name :
+                  { "Build number", "Serial number", "IPv4 address", "Environment", "User" } ) {
                 INFO( name );
                 const auto& t = templateNamed( name );
                 REQUIRE( t.isSimple() );
@@ -287,10 +288,9 @@ SCENARIO( "Rule templates are simple where the value fits the simple form", "[ru
             }
         }
 
-        THEN( "version, IPv4 address, timestamp and key=value need a shape and are advanced" )
+        THEN( "version, log start and key=value need a shape and are advanced" )
         {
-            for ( const auto* name :
-                  { "Version", "IPv4 address", "Timestamp (ISO 8601)", "key=value" } ) {
+            for ( const auto* name : { "Version", "Log start", "key=value" } ) {
                 INFO( name );
                 const auto& t = templateNamed( name );
                 REQUIRE( !t.isSimple() );
@@ -399,36 +399,106 @@ SCENARIO( "The serial number template finds the value after Serial number:", "[r
     }
 }
 
-SCENARIO( "The IPv4 template finds dotted quads", "[ruletemplate]" )
+SCENARIO( "The IP address template finds the address after IP:", "[ruletemplate]" )
 {
-    THEN( "four numbers from 0 to 255, anywhere in the line" )
+    GIVEN( "the template" )
     {
-        requireFinds( "IPv4 address", { { "connected to 192.168.1.20:8080", "192.168.1.20" },
-                                        { "10.0.0.1", "10.0.0.1" },
-                                        { "peer=255.255.255.0.", "255.255.255.0" },
-                                        { "from 0.0.0.0 and 1.2.3.4", "0.0.0.0" } } );
+        const auto& t = templateNamed( "IPv4 address" );
+
+        THEN( "its rule is the simple rule for the word after IP:, keyed IP address" )
+        {
+            REQUIRE( t.key == "IP address" );
+            REQUIRE( t.simple == SimpleRule{ "IP:", ValueEnd::Whitespace, {} } );
+        }
     }
 
-    THEN( "between punctuation, and before a dot ending a sentence" )
+    THEN( "the word after IP:, with or without a space" )
     {
-        requireFinds( "IPv4 address", { { "ip=10.0.0.1,", "10.0.0.1" },
-                                        { "(192.168.1.1)", "192.168.1.1" },
-                                        { "Connected to 10.0.0.1.", "10.0.0.1" } } );
+        requireFinds( "IPv4 address", { { "IP: 192.168.1.20", "192.168.1.20" },
+                                        { "Device IP:10.0.0.5 up", "10.0.0.5" },
+                                        { "eth0 IP:   172.16.0.2", "172.16.0.2" } } );
     }
 
-    THEN( "not out of range, too few or too many parts, with leading zeros, or in a word" )
+    THEN( "the address after the text, not the first address in the line" )
+    {
+        requireFinds( "IPv4 address",
+                      { { "request from 10.0.0.7 to server IP: 192.168.1.20", "192.168.1.20" },
+                        { "GET / 10.0.0.1 200\nIP: 192.168.1.20", "192.168.1.20" } } );
+    }
+
+    THEN( "not an address without the text, another spelling, or no value" )
     {
         requireFindsNothing( "IPv4 address",
-                             { "256.1.1.1", "1.2.3", "1.2.3.4.5", "01.2.3.4", "version 1.2.3",
-                               "1.2.3.999", "a.b.c.d", "v1.2.3.4", "x.1.2.3.4", "1.2.3.4a" } );
+                             { "connected to 192.168.1.20:8080", "10.0.0.1", "ip: 10.0.0.1",
+                               "IP 10.0.0.1", "IP address 10.0.0.1", "IP:", "IP:   " } );
     }
 }
 
-SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]" )
+SCENARIO( "The environment template finds the value after env:", "[ruletemplate]" )
 {
+    THEN( "the word after env:" )
+    {
+        requireFinds( "Environment", { { "env: prod", "prod" },
+                                       { "Starting service env:staging region=eu", "staging" },
+                                       { "deploy env:   dev-2", "dev-2" } } );
+    }
+
+    THEN( "not without the colon, another spelling, or no value" )
+    {
+        requireFindsNothing( "Environment", { "env prod", "ENV: prod", "Env: prod",
+                                              "environment: prod", "env=prod", "env:" } );
+    }
+}
+
+SCENARIO( "The user template finds the value after user:", "[ruletemplate]" )
+{
+    THEN( "the word after user:" )
+    {
+        requireFinds( "User", { { "user: alice", "alice" },
+                                { "Session opened user:bob@example.com", "bob@example.com" },
+                                { "login user:   svc_backup ok", "svc_backup" } } );
+    }
+
+    THEN( "not without the colon, another spelling, or no value" )
+    {
+        requireFindsNothing(
+            "User", { "user alice", "User: alice", "user=alice", "username alice", "user:" } );
+    }
+}
+
+SCENARIO( "The log start template finds the first ISO 8601 date and time", "[ruletemplate]" )
+{
+    GIVEN( "the template" )
+    {
+        const auto& t = templateNamed( "Log start" );
+
+        THEN( "it is keyed Log start and says it shows when the log starts" )
+        {
+            REQUIRE( t.key == "Log start" );
+            REQUIRE( t.description.contains( "log starts" ) );
+        }
+
+        THEN( "its pattern is the one of the former timestamp template" )
+        {
+            REQUIRE( t.entry().linePattern
+                     == "(?<!\\d)(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])"
+                        "[Tt ](?:[01]\\d|2[0-3]):[0-5]\\d"
+                        "(?>(?::(?:[0-5]\\d|60)(?:[.,]\\d+)?)?"
+                        "(?:[Zz]|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)?))(?!\\d|:\\d)" );
+        }
+    }
+
+    THEN( "of several lines with a timestamp, the first, where the log starts" )
+    {
+        requireFinds( "Log start", { { "2024-01-15T10:30:00Z start\n"
+                                       "2024-01-15T10:31:12Z running\n"
+                                       "2024-01-15T11:02:45Z stop",
+                                       "2024-01-15T10:30:00Z" } } );
+    }
+
     THEN( "date, T or a space, time, optional seconds, fraction and offset" )
     {
-        requireFinds( "Timestamp (ISO 8601)",
+        requireFinds( "Log start",
                       { { "2024-01-15T10:30:00Z start", "2024-01-15T10:30:00Z" },
                         { "[2024-01-15 10:30:00.123] INFO", "2024-01-15 10:30:00.123" },
                         { "at 2024-12-31T23:59:59,5+01:00.", "2024-12-31T23:59:59,5+01:00" },
@@ -438,15 +508,14 @@ SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]
 
     THEN( "an offset of hours only, and lower-case t and z" )
     {
-        requireFinds( "Timestamp (ISO 8601)",
-                      { { "2024-01-15T10:30:00+01 up", "2024-01-15T10:30:00+01" },
-                        { "2024-01-15 10:30:00-05", "2024-01-15 10:30:00-05" },
-                        { "2024-01-15t10:30:00z", "2024-01-15t10:30:00z" } } );
+        requireFinds( "Log start", { { "2024-01-15T10:30:00+01 up", "2024-01-15T10:30:00+01" },
+                                     { "2024-01-15 10:30:00-05", "2024-01-15 10:30:00-05" },
+                                     { "2024-01-15t10:30:00z", "2024-01-15t10:30:00z" } } );
     }
 
     THEN( "a complete timestamp followed by a colon" )
     {
-        requireFinds( "Timestamp (ISO 8601)",
+        requireFinds( "Log start",
                       { { "2024-01-15 10:30:00: Server started", "2024-01-15 10:30:00" },
                         { "2024-01-15T10:30:00Z: started", "2024-01-15T10:30:00Z" },
                         { "2024-01-15T10:30:00.123: x", "2024-01-15T10:30:00.123" },
@@ -455,7 +524,7 @@ SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]
 
     THEN( "not a date alone, another format, or values out of range" )
     {
-        requireFindsNothing( "Timestamp (ISO 8601)",
+        requireFindsNothing( "Log start",
                              { "2024-01-15", "2024/01/15 10:30:00", "15.01.2024 10:30",
                                "2024-13-01T10:00:00", "2024-01-32T10:00", "2024-01-15T24:00",
                                "2024-01-15T10:60", "12024-01-15T10:30:00", "10:30:00",
@@ -595,6 +664,32 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
             }
         }
 
+        WHEN( "adding the environment template" )
+        {
+            ui.add( "Environment" );
+
+            THEN( "the new rule is selected in simple mode with the text env:" )
+            {
+                REQUIRE( editor.entries()[ 2 ].key == "Environment" );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.textBefore->text() == "env:" );
+            }
+        }
+
+        WHEN( "adding the user template" )
+        {
+            ui.add( "User" );
+
+            THEN( "the new rule is selected in simple mode with the text user:" )
+            {
+                REQUIRE( editor.entries()[ 2 ].key == "User" );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.textBefore->text() == "user:" );
+            }
+        }
+
         WHEN( "adding the build number template" )
         {
             ui.add( "Build number" );
@@ -653,11 +748,13 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
         {
             ui.add( "IPv4 address" );
 
-            THEN( "it is the only rule, selected" )
+            THEN( "it is the only rule, selected in simple mode with the text IP:" )
             {
                 REQUIRE( editor.entries().size() == 1 );
                 REQUIRE( ui.currentRow() == 0 );
-                REQUIRE( ui.key->text() == templateNamed( "IPv4 address" ).key );
+                REQUIRE( ui.key->text() == "IP address" );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.textBefore->text() == "IP:" );
             }
         }
     }
@@ -814,7 +911,7 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
 
         WHEN( "choosing a template with another key" )
         {
-            ui.choose( "Timestamp (ISO 8601)" );
+            ui.choose( "Log start" );
 
             THEN( "there is no note" )
             {

@@ -26,7 +26,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMouseEvent>
 #include <QPushButton>
+#include <QStyle>
+#include <QStyleOptionViewItem>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -103,12 +106,7 @@ RuleTemplateDialog::RuleTemplateDialog( QWidget* parent )
     connect( keyEdit_, &QLineEdit::textChanged, this, &RuleTemplateDialog::updateChoice );
     // Double-clicking a template's name checks or unchecks it, like its
     // check box; Space does so from the keyboard, and Enter adds the rules.
-    connect( list_, &QTreeWidget::itemDoubleClicked, this, []( QTreeWidgetItem* item ) {
-        if ( item->parent() ) {
-            item->setCheckState( 0, item->checkState( 0 ) == Qt::Checked ? Qt::Unchecked
-                                                                         : Qt::Checked );
-        }
-    } );
+    list_->viewport()->installEventFilter( this );
     connect( buttons_, &QDialogButtonBox::accepted, this, &QDialog::accept );
     connect( buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject );
 
@@ -212,6 +210,32 @@ void RuleTemplateDialog::updateChoice()
     }
     note_->setText( note );
     note_->setVisible( !note.isEmpty() );
+}
+
+bool RuleTemplateDialog::eventFilter( QObject* watched, QEvent* event )
+{
+    if ( watched != list_->viewport() || event->type() != QEvent::MouseButtonDblClick ) {
+        return QDialog::eventFilter( watched, event );
+    }
+    const auto pos = static_cast<QMouseEvent*>( event )->position().toPoint();
+    auto* item = list_->itemAt( pos );
+    if ( !item || !item->parent() ) {
+        return QDialog::eventFilter( watched, event );
+    }
+    // Where the delegate draws the check box, which toggles on the release
+    // that follows.
+    QStyleOptionViewItem option;
+    option.initFrom( list_ );
+    option.rect = list_->visualItemRect( item );
+    option.features = QStyleOptionViewItem::HasCheckIndicator | QStyleOptionViewItem::HasDisplay;
+    option.text = item->text( 0 );
+    const auto checkBox
+        = list_->style()->subElementRect( QStyle::SE_ItemViewItemCheckIndicator, &option, list_ );
+    if ( checkBox.contains( pos ) ) {
+        return QDialog::eventFilter( watched, event );
+    }
+    item->setCheckState( 0, item->checkState( 0 ) == Qt::Checked ? Qt::Unchecked : Qt::Checked );
+    return true;
 }
 
 QList<int> RuleTemplateDialog::checkedTemplates() const

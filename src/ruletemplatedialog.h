@@ -65,6 +65,11 @@ public:
     /// key for a template that asks for one.
     QList<FooterEntry> entries() const;
 
+protected:
+    /// A double-click on a template's name checks or unchecks it; one on
+    /// its check box is left to the box, which takes it as two clicks.
+    bool eventFilter( QObject* watched, QEvent* event ) override;
+
 private Q_SLOTS:
     void updateChoice();
 

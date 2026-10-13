@@ -31,15 +31,19 @@
 #include "ruletemplatedialog.h"
 #include "simplerule.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QPushButton>
+#include <QStyle>
 #include <QTableView>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTest>
 #include <QToolButton>
 #include <QTreeWidget>
 
@@ -105,6 +109,21 @@ void requireFindsNothing( const QString& templateName, std::initializer_list<con
     for ( const auto* line : lines ) {
         INFO( line );
         REQUIRE( extract( templateName, line ) == std::nullopt );
+    }
+}
+
+/// A double-click at @p pos as a platform sends it: press, release, double
+/// click, release. QTest::mouseDClick() does not reach the view's
+/// double-click handling the same way.
+void doubleClick( QWidget* widget, const QPoint& pos )
+{
+    const auto global = widget->mapToGlobal( pos );
+    for ( const auto type : { QEvent::MouseButtonPress, QEvent::MouseButtonRelease,
+                              QEvent::MouseButtonDblClick, QEvent::MouseButtonRelease } ) {
+        const bool down = type != QEvent::MouseButtonRelease;
+        QMouseEvent event( type, pos, global, Qt::LeftButton, down ? Qt::LeftButton : Qt::NoButton,
+                           Qt::NoModifier );
+        QApplication::sendEvent( widget, &event );
     }
 }
 
@@ -982,15 +1001,34 @@ SCENARIO( "From template… adds every checked template", "[ruletemplate][footer
             }
         }
 
-        WHEN( "double-clicking a template" )
+        WHEN( "double-clicking with the mouse" )
         {
-            Q_EMIT ui.templates->itemDoubleClicked( ui.templateItem( "Version" ), 0 );
+            // The check box sits at the start of the item, the name after it.
+            auto* viewport = ui.templates->viewport();
+            const auto rect = ui.templates->visualItemRect( ui.templateItem( "Version" ) );
+            const auto indicator = ui.templates->style()->pixelMetric( QStyle::PM_IndicatorWidth,
+                                                                       nullptr, ui.templates );
+            const QPoint onCheckBox( rect.left() + 3 + indicator / 2, rect.center().y() );
+            const QPoint onName( rect.left() + 3 * indicator, rect.center().y() );
 
-            THEN( "it is checked, and double-clicking it again unchecks it" )
+            THEN( "a click on the check box checks it" )
             {
+                QTest::mouseClick( viewport, Qt::LeftButton, {}, onCheckBox );
+                REQUIRE( ui.checkedTemplates() == QStringList{ "Version" } );
+            }
+
+            THEN( "a double-click on the check box leaves it as two clicks do (#59)" )
+            {
+                doubleClick( viewport, onCheckBox );
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+            }
+
+            THEN( "a double-click on the name checks it, and another unchecks it" )
+            {
+                doubleClick( viewport, onName );
                 REQUIRE( ui.checkedTemplates() == QStringList{ "Version" } );
                 REQUIRE( ui.dialog->isVisible() );
-                Q_EMIT ui.templates->itemDoubleClicked( ui.templateItem( "Version" ), 0 );
+                doubleClick( viewport, onName );
                 REQUIRE( ui.checkedTemplates().isEmpty() );
             }
         }

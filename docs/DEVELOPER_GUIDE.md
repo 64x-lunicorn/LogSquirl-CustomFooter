@@ -1003,8 +1003,13 @@ item per group, `Qt::ItemIsAutoTristate`, with a checkable child per
 template showing name and description and holding its index in
 `ruleTemplates()` as `Qt::UserRole`. Checking a group checks its
 templates, and some of them checked shows it partly checked. A
-double-click on a template toggles it; Space does so through the
-delegate, and Enter reaches the default button. The key field is enabled
+double-click on a template's name toggles it: an event filter on the
+viewport takes it, but leaves one on the check box
+(`SE_ItemViewItemCheckIndicator`) to the delegate, which toggles on the
+release after it, so the box takes a double-click as two clicks. Tests
+send the platform's press, release, double-click, release. Space toggles
+through the delegate, and Enter reaches the default button. Besides
+existing keys, the note names a key that several checked templates share. The key field is enabled
 while a checked template asks for a key; `entries()` gives one rule per
 checked template in list order, and OK is enabled once there is at least
 one and each has a key. A hint says a typed trailing `=` is dropped. The

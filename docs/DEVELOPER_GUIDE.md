@@ -19,7 +19,12 @@ shared library (`.dylib` / `.so` / `.dll`) that exports these C functions:
 The host provides a function-pointer table (`LogSquirlHostApi`) that the
 plugin uses to interact with the application. The vendored header
 `include/logsquirl_plugin_api.h` is the one of LogSquirl 26.11 (a verbatim
-copy of LogSquirl's `src/plugins/include/logsquirl_plugin_api.h`).
+copy of LogSquirl's `src/plugins/include/logsquirl_plugin_api.h`). CI checks
+it byte for byte against the release named by `host_ref` in
+`.github/plugin-ci.json`. Until LogSquirl v26.11.0 is tagged, that is the
+pre-release `v26.11.0-beta1`, which CI builds against but never releases;
+before a release, set `host_ref` to `v26.11.0` and refresh the header with
+LogSquirl-Plugin-CI's `scripts/sync-plugin.sh`.
 
 **A growing table** (LogSquirl ADR 0017). Functions added to the host API
 are appended to the end of the table, and `LOGSQUIRL_PLUGIN_API_VERSION`

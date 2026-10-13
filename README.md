@@ -229,6 +229,13 @@ from macOS too; the JSON of an untranslated `.ips` file is not matched.
 The Automotive templates fit the log of one vehicle or telematics unit:
 the footer shows the first VIN, IMEI or ICCID in the file, and the
 manufacturer and model year of that VIN.
+| Database | PostgreSQL version | `PostgreSQL version` | The word after `starting PostgreSQL` in the start line of PostgreSQL 10 and later (`starting PostgreSQL 16.1 (Debian 16.1-1.pgdg120+1) on x86_64-pc-linux-gnu, …` → `16.1`, also `17beta1`) | Simple |
+| Database | MySQL version | `MySQL version` | The version between the quotes of `Version: '…'` in the ready line of MySQL or MariaDB (`ready for connections. Version: '8.0.36'  socket: …` → `8.0.36`, `Version: '11.2.2-MariaDB-1:11.2.2+maria~ubu2204'` → that whole version); not an unquoted `Version:` | Simple |
+| Database | Redis version | `Redis version` | The version after `Redis version=` up to the comma, in the start line of Redis 4 and later (`Redis version=7.2.4, bits=64, …` → `7.2.4`); not Valkey's `Valkey version=` | Simple |
+
+The Database templates fit the log of one server: with several starts in
+the file, such as the Docker image's init server before the real one,
+the footer shows the version of the first.
 
 A template can bring value mappings, as Manufacturer and Model year do:
 the new rule has them like mappings you add yourself, shown in the editor,

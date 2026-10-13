@@ -106,6 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manufacturer for common WMIs of major brands (`WVW` → Volkswagen, `WBA`
   → BMW), an unmapped WMI shown as it is; and Model year, the 10th
   character mapped to the year in the cycle 2010 to 2039.
+- **Database template group** — the server version from the line a
+  database server logs when it starts, all in simple mode: PostgreSQL
+  version (`starting PostgreSQL 16.1 on …`), MySQL version, the quoted
+  version of `Version: '8.0.36'` (MariaDB's too), and Redis version
+  (`Redis version=7.2.4,`). With several starts in a file, the first
+  counts.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

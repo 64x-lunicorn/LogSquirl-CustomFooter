@@ -228,16 +228,13 @@ The Automotive templates fit the log of one vehicle or telematics unit:
 the footer shows the first VIN, IMEI or ICCID in the file.
 
 Simple templates match their text as written, case included, so change
-`Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also
-end a longer word (`ClientIP:`, `superuser:`), so make it as long as needed
-to say which value you mean. MAC address and IPv6 address need the
-address's shape and open in advanced mode; their pattern starts with the
-text, `MAC:` or `IPv6:`, which you change there in the same way
-(`link/ether`, `inet6`). Version does not count `version` inside
 `Build:`, `IP:`, `env:`, `user:`, `IMEI:` or `ICCID:` to what your log
 says; the text may also end a longer word (`ClientIP:`, `superuser:`,
-`%XICCID:`), so make it as long as needed
-to say which value you mean. Version does not count `version` inside
+`%XICCID:`), so make it as long as needed to say which value you mean.
+MAC address and IPv6 address need the address's shape and open in advanced
+mode; their pattern starts with the text, `MAC:` or `IPv6:`, which you
+change there in the same way (`link/ether`, `inet6`). Version does not
+count `version` inside
 another word (`conversion`, `server`), and so also misses a lower-case
 `appversion`; `app_version` and `appVersion` are found. For `key=value`,
 give the key without `=` (a trailing `=` is dropped); while it is checked,

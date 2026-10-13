@@ -26,15 +26,13 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "footerentry.h"
 #include "footerscanner.h"
 #include "rulepreviewer.h"
 
-#include <QCoreApplication>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
-#include <QThread>
 
 #include <vector>
 
@@ -44,24 +42,6 @@ namespace {
 
 using Encoding = FooterScanner::Encoding;
 using Status = FooterScanner::Preview::Status;
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-/// A copy of rulepreview_test.cpp's, until the tests share one (#40).
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 void writeBytes( const QString& path, const QByteArray& content, bool append = false )
 {

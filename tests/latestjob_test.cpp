@@ -25,38 +25,16 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "latestjob.h"
 
 #include <QCoreApplication>
-#include <QElapsedTimer>
 #include <QObject>
 #include <QSemaphore>
-#include <QThread>
 
 #include <atomic>
 
 using namespace custom_footer;
-
-namespace {
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
-
-} // namespace
 
 SCENARIO( "LatestJob counts the results stop() drops as finished", "[latestjob]" )
 {

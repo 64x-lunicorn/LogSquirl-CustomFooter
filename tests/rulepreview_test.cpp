@@ -25,6 +25,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "followerfakes.h"
 #include "footereditor.h"
 #include "footerscanner.h"
@@ -33,7 +34,6 @@
 #include "rulepreviewview.h"
 
 #include <QCoreApplication>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -56,23 +56,6 @@ namespace {
 
 using Preview = FooterScanner::Preview;
 using Status = Preview::Status;
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 void writeBytes( const QString& path, const QByteArray& content )
 {

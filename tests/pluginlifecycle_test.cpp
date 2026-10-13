@@ -25,6 +25,7 @@
 #include <catch2/catch.hpp>
 
 #include "basehosttable.h"
+#include "eventloopwait.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
@@ -36,13 +37,11 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDialog>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QTimer>
 #include <QToolButton>
 #include <QWidget>
@@ -194,36 +193,21 @@ LogSquirlHostApi fakeApi()
     return api;
 }
 
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-    }
-    return true;
-}
-
+/// Process events until the footer shows a value containing @p text.
 bool waitForText( const QString& text, int timeoutMs = 5000 )
 {
-    QElapsedTimer timer;
-    timer.start();
-    while ( timer.elapsed() < timeoutMs ) {
-        if ( const auto* footer = qobject_cast<FooterDisplayWidget*>( host().footerWidget ) ) {
-            for ( const auto& value : footer->values() ) {
-                if ( value.value.contains( text ) ) {
-                    return true;
+    return processUntil(
+        [ &text ] {
+            if ( const auto* footer = qobject_cast<FooterDisplayWidget*>( host().footerWidget ) ) {
+                for ( const auto& value : footer->values() ) {
+                    if ( value.value.contains( text ) ) {
+                        return true;
+                    }
                 }
             }
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 5 );
-    }
-    return false;
+            return false;
+        },
+        timeoutMs );
 }
 
 void writeFile( const QString& path, const QByteArray& content )

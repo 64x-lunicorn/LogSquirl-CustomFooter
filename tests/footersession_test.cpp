@@ -25,6 +25,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
@@ -47,7 +48,6 @@
 #include <QPushButton>
 #include <QStringList>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QTimer>
 #include <QToolButton>
 #include <QToolTip>
@@ -59,23 +59,6 @@
 using namespace custom_footer;
 
 namespace {
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 void writeFile( const QString& path, const QByteArray& content )
 {

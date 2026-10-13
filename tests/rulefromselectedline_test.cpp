@@ -26,6 +26,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
@@ -36,9 +37,7 @@
 
 #include <QApplication>
 #include <QComboBox>
-#include <QCoreApplication>
 #include <QDialogButtonBox>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -47,7 +46,6 @@
 #include <QPushButton>
 #include <QTableView>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QToolButton>
 
 #include <memory>
@@ -57,21 +55,6 @@
 using namespace custom_footer;
 
 namespace {
-
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 void writeFile( const QString& path, const QString& content )
 {

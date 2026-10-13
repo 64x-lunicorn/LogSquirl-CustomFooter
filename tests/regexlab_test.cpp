@@ -25,6 +25,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "footereditor.h"
 #include "hostfunctions.h"
 #include "rulelistmodel.h"
@@ -32,9 +33,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
-#include <QCoreApplication>
 #include <QDialogButtonBox>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -42,7 +41,6 @@
 #include <QPushButton>
 #include <QTableView>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QToolButton>
 
 #include <memory>
@@ -108,23 +106,6 @@ struct FakeRegexLab {
         return answer( std::nullopt );
     }
 };
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 template <typename Widget>
 Widget* child( QObject& parent, const char* name )

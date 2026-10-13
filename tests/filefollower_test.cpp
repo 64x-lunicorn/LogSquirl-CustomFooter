@@ -27,6 +27,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "filefollower.h"
 #include "followerfakes.h"
 
@@ -48,23 +49,6 @@ using namespace custom_footer;
 namespace {
 
 using Follower = FileFollower<int>;
-
-/// Process events until @p done, for at most a generous bound: a hung
-/// worker fails the test instead of hanging it. Nothing depends on timing.
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 1 );
-    }
-    return true;
-}
 
 /// Jobs that number their results from @p first and record what they were
 /// given; they may hold the worker until the test releases them, or until

@@ -25,9 +25,9 @@
 
 #include <catch2/catch.hpp>
 
+#include "eventloopwait.h"
 #include "filechangesource.h"
 
-#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
@@ -35,22 +35,6 @@
 using namespace custom_footer;
 
 namespace {
-
-/// Process events until @p done, for at most a generous bound: file system
-/// events arrive when the system delivers them.
-template <typename Predicate>
-bool processUntil( Predicate done, int boundMs = 10000 )
-{
-    QElapsedTimer timer;
-    timer.start();
-    while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
-            return false;
-        }
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-    }
-    return true;
-}
 
 void writeBytes( const QString& path, const QByteArray& content, bool append = false )
 {

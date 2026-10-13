@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-16, as LogSquirl reads it: rules find their values, and the Log Line
   of each value is LogSquirl's, also for lines with characters such as
   "Ċ" (U+010A) and with Windows line ends, as the file grows, and in the
-  editor's live preview. Before, such files were read as UTF-8, so rules
+  editor's live preview. A rule from a selected Log Line of such a file
+  takes its value only from the part of a long line the footer reads, the
+  first 64 KiB (32 768 UTF-16 code units), and shows only that part.
+  Before, such files were read as UTF-8, so rules
   practically never matched and line numbers could differ. UTF-8 and
   single-byte files are read as before. UTF-16 files without a byte order
   mark, and encodings chosen in LogSquirl, are not covered yet.

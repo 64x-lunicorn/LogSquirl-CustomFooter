@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "footerscanner.h"
 #include "simplerule.h"
 
 #include <QString>
@@ -74,20 +75,22 @@ struct RuleFromLine {
  * key is suggestedKey() of the text.
  *
  * No rule (see MarkProblem) when nothing is marked, the value starts the
- * line, it ends past the first FooterScanner::kMaxLineBytes of the line
- * (the footer reads no further), the text before it occurs earlier in the
+ * line, it ends past the part of the line the footer reads in a file of
+ * @p encoding (footerReadLength()), the text before it occurs earlier in the
  * line so that the rule would find an earlier value, or no simple rule
  * finds exactly the marked value. The work is bounded and linear in the
  * length of the line: at most three matches, within the part of the line
  * the footer reads, of patterns made of a text of at most kMaxTextBefore
  * characters.
  */
-RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length );
+RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length,
+                           const FooterScanner::Encoding& encoding = {} );
 
-/// How much of @p line the footer reads, in UTF-16 units: its first
-/// FooterScanner::kMaxLineBytes bytes in UTF-8, cut at a character
+/// How much of @p line the footer reads in a file of @p encoding, in UTF-16
+/// units: its first FooterScanner::kMaxLineBytes bytes in that encoding (in
+/// UTF-16 that is kMaxLineBytes / 2 code units), cut at a character
 /// boundary; all of a shorter line.
-qsizetype footerReadLength( const QString& line );
+qsizetype footerReadLength( const QString& line, const FooterScanner::Encoding& encoding = {} );
 
 /**
  * A key for the value after @p textBefore: its longest word, the last of

@@ -106,7 +106,8 @@ QList<SimpleRule> valueEnds( const QString& line, qsizetype valueEnd )
 
 } // namespace
 
-RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length )
+RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype length,
+                           const FooterScanner::Encoding& encoding )
 {
     RuleFromLine made;
     made.problem = MarkProblem::NothingMarked;
@@ -161,7 +162,7 @@ RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype lengt
     }
 
     // The footer matches a long line's start only.
-    const auto read = footerReadLength( line );
+    const auto read = footerReadLength( line, encoding );
     if ( valueEnd > read ) {
         made.problem = MarkProblem::BeyondLineLimit;
         return made;
@@ -215,8 +216,18 @@ RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype lengt
     return made;
 }
 
-qsizetype footerReadLength( const QString& line )
+qsizetype footerReadLength( const QString& line, const FooterScanner::Encoding& encoding )
 {
+    if ( encoding.unitBytes() == 2 ) {
+        // Whole code units, as the line is UTF-16 already.
+        const auto units = FooterScanner::kMaxLineBytes / 2;
+        if ( line.size() <= units ) {
+            return line.size();
+        }
+        // Not between the halves of a surrogate pair.
+        return line.at( units ).isLowSurrogate() ? units - 1 : units;
+    }
+
     qint64 bytes = 0;
     for ( qsizetype at = 0; at < line.size(); ++at ) {
         const auto c = line.at( at ).unicode();

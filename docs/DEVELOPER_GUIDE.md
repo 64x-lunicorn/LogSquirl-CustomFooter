@@ -938,7 +938,10 @@ with an empty key asks for it (`asksForKey()`): `%1` in its pattern is the
 `givenKey()` (trimmed, one trailing `=` dropped) escaped with
 `QRegularExpression::escape()`, and without a key `entry()` is empty. Only
 values with a shape or boundaries a simple rule cannot express are
-advanced: Version, Log start (ISO 8601 timestamps), and `key=value`, whose key
+advanced: Version, Log start (ISO 8601 timestamps), MAC and IPv6 address
+(text before, then the shape: one MAC separator throughout via the
+backreference `\2`, IPv6 as RFC 3986's `IPv6address` built from `h16` and
+`ls32` pieces), and `key=value`, whose key
 must not end a longer key (`(?<![\w.-])`, before up to two dashes so
 flags like `--user=` match but `my-user=` does not) and whose value starts
 right after `=`. The patterns guard their edges with lookarounds rather than

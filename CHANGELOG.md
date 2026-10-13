@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   getprop's `[key]: [value]` lines Device model (`ro.product.model`),
   Android version (`ro.build.version.release`) and Device serial number
   (`ro.serialno`, with the key `Serial number`).
+- **Network template group** — next to IPv4 address, two templates in
+  advanced mode: MAC address, the address after `MAC:` as
+  `52:54:00:12:34:56`, `00-1A-2B-3C-4D-5E` or `0050.56a1.b2c3`, with the
+  same separator throughout, and IPv6 address, the address after `IPv6:`,
+  in full, shortened with `::` or with an IPv4 address as its last part
+  (`::ffff:192.0.2.10`). Their pattern starts with the text, which you
+  adjust to your log (`link/ether`, `inet6`).
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

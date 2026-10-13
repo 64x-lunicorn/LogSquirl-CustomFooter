@@ -190,11 +190,16 @@ keeps its patterns and key when the template changes.
 | Android | Device model | `Device model` | The value of `ro.product.model` in getprop output, spaces included (`[ro.product.model]: [Pixel 7]` → `Pixel 7`) | Simple |
 | Android | Android version | `Android version` | The value of `ro.build.version.release` in getprop output (`[ro.build.version.release]: [14]`) | Simple |
 | Android | Device serial number | `Serial number` | The value of `ro.serialno` in getprop output (`[ro.serialno]: [28031FDH2004VT]`) | Simple |
+| Network | MAC address | `MAC address` | The address after `MAC:`: six pairs of hex digits separated by `:` or `-`, the same separator throughout (`52:54:00:12:34:56`, `00-1A-2B-3C-4D-5E`), or three groups of four separated by `.` (`0050.56a1.b2c3`), in either case. A longer address or mixed separators are not matched. | Advanced |
+| Network | IPv6 address | `IPv6 address` | The address after `IPv6:`, in full or shortened with `::` (`2001:db8::1`, `::1`), also with an IPv4 address as its last part (`::ffff:192.0.2.10`). A prefix length (`/64`) or zone (`%eth0`) after it is not part of the value. | Advanced |
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also
 end a longer word (`ClientIP:`, `superuser:`), so make it as long as needed
-to say which value you mean. Version does not count `version` inside
+to say which value you mean. MAC address and IPv6 address need the
+address's shape and open in advanced mode; their pattern starts with the
+text, `MAC:` or `IPv6:`, which you change there in the same way
+(`link/ether`, `inet6`). Version does not count `version` inside
 another word (`conversion`, `server`), and so also misses a lower-case
 `appversion`; `app_version` and `appVersion` are found. For `key=value`,
 give the key without `=` (a trailing `=` is dropped); while it is checked,

@@ -350,6 +350,41 @@ SCENARIO( "The encoding of a file is told from its first bytes", "[footerscanner
             REQUIRE( Encoding::ofFile( tmpDir.path() + "/missing.log" ) == Encoding() );
             REQUIRE( Encoding::ofFile( QString() ) == Encoding() );
         }
+
+        THEN( "a UTF-32 mark is not taken for UTF-16, as LogSquirl checks it first" )
+        {
+            // TextEncoding::forUtfText(): FF FE 00 00 is UTF-32LE, whose mark
+            // starts with UTF-16LE's.
+            writeBytes( path, QByteArray( "\xFF\xFE\x00\x00V\x00\x00\x00\n\x00\x00\x00", 12 ) );
+            REQUIRE( Encoding::ofFile( path ) == Encoding() );
+            writeBytes( path, QByteArray( "\x00\x00\xFE\xFF\x00\x00\x00V\x00\x00\x00\n", 12 ) );
+            REQUIRE( Encoding::ofFile( path ) == Encoding() );
+        }
+    }
+}
+
+SCENARIO( "The preview of a UTF-16 file ending in half a code unit",
+          "[footerscanner][utf16][preview]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto path = tmpDir.path() + "/half.log";
+
+    for ( const auto order : { ByteOrder::LittleEndian, ByteOrder::BigEndian } ) {
+        GIVEN( "exactly as many complete lines as the preview reads, and one byte more" )
+        {
+            const auto lines = utf16File( "a\nb\n", order );
+            writeBytes( path, lines + utf16( "c", order ).left( 1 ) );
+            const QList<FooterEntry> entries = { { "Any", "^(z)$", "", true, {} } };
+            const auto preview = FooterScanner::preview( path, entries, 0, 2 );
+
+            THEN( "no limit is reached: half a code unit is no more to read" )
+            {
+                REQUIRE( preview.lines == 2 );
+                REQUIRE( !preview.lineLimitReached );
+                REQUIRE( !preview.limitReached() );
+            }
+        }
     }
 }
 

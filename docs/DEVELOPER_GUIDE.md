@@ -558,11 +558,14 @@ hidden global test state.
    **Encoding:** a scan from the start of a file tells how its bytes are
    text from its first bytes (`FooterScanner::Encoding::detect()`), as
    LogSquirl does for a byte order mark: `FF FE` makes it UTF-16LE,
-   `FE FF` UTF-16BE. Lines then start after the mark, end only at a line
-   feed that is a whole code unit (`0A 00` resp. `00 0A` at an even offset
-   from the mark; LogSquirl's `IndexingBlock::isDelimiter` likewise needs
-   the other byte to be `00`), so the `0A` byte in U+010A "Ċ" or U+0A00
-   ends no line, and are decoded as UTF-16 of that byte order; `\r\n` and the limits count in code units and bytes
+   `FE FF` UTF-16BE. A UTF-32 mark (`FF FE 00 00`, `00 00 FE FF`), which
+   LogSquirl checks first, is not taken for UTF-16. In UTF-16, lines start
+   after the mark and are decoded as UTF-16 of its byte order. A line ends
+   only at a line feed that is a whole code unit: `0A 00` (LE) or `00 0A`
+   (BE) at an even offset from the mark, so the `0A` byte in U+010A "Ċ" or
+   U+0A00 ends no line. (LogSquirl's `IndexingBlock::isDelimiter` checks
+   only that the other byte is `00`, not the offset; LogSquirl#804.)
+   `\r\n` and the limits count in code units and bytes
    as for UTF-8. Every other file is read as before: split at the byte
    `0x0A` and decoded as UTF-8, a UTF-8 mark in the first line but dropped
    from its text by the decoding, and a UTF-16 file without a mark as

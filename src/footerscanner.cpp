@@ -152,7 +152,7 @@ QByteArray readAt( QFile& file, qint64 offset, qint64 size )
 FooterScanner::Encoding encodingOf( QFile& file )
 {
     // Enough for a byte order mark.
-    constexpr qint64 markBytes = 2;
+    constexpr qint64 markBytes = 4; // a UTF-32 mark, to tell it from UTF-16's
     return FooterScanner::Encoding::detect( readAt( file, 0, markBytes ) );
 }
 
@@ -251,6 +251,12 @@ FooterScanner::Encoding FooterScanner::Encoding::detect( const QByteArray& start
 {
     // Only a UTF-16 mark, as LogSquirl takes it for the encoding. A UTF-8
     // mark stays in the first line, as it always has; decoding drops it.
+    // UTF-32 is not read as UTF-16: LogSquirl checks its marks first, and
+    // UTF-32LE's starts with UTF-16LE's.
+    if ( start.startsWith( QByteArray( "\xFF\xFE\x00\x00", 4 ) )
+         || start.startsWith( QByteArray( "\x00\x00\xFE\xFF", 4 ) ) ) {
+        return {};
+    }
     if ( start.startsWith( "\xFF\xFE" ) ) {
         return { Form::Utf16LE, 2 };
     }
@@ -609,7 +615,8 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
 
     // Counting a last line that is unterminated, or that the limit stopped in.
     preview.lines = position.lines + ( partialLine ? 1 : 0 );
-    const bool more = !file.atEnd();
+    // Half a code unit at the end of a growing UTF-16 file is no more to read.
+    const bool more = !atTextEnd( file, read.encoding );
     preview.byteLimitReached = more && ( stoppedInLine || position.offset >= kMaxScanBytes );
     preview.lineLimitReached
         = more && !preview.byteLimitReached && maxLines > 0 && position.lines >= maxLines;

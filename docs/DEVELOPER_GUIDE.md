@@ -967,7 +967,9 @@ after a complete timestamp, as in `10:30:00: started`, is fine. Each template is
 with lines it must find and lines it must not, through `FooterScanner`:
 General, the dialog and the editor in `tests/ruletemplate_test.cpp`, each
 other group in its own `tests/ruletemplate_<group>_test.cpp`, with sample
-lines that name the tool and version they come from. A new template is a
+lines that name the tool and version they come from; the helpers they
+share (`templateNamed()`, `extract()`, `requireFinds()`,
+`requireFindsNothing()`, `templatesIn()`) are in `tests/templatesamples.h`. A new template is a
 row in its group's function plus such samples in its group's test file; a
 new group is a function returning its templates, one `appendGroup()` line
 in `makeTemplates()`, and a test file. Template names are unique across

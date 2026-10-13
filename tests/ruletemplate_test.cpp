@@ -352,7 +352,6 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
             }
         }
 
-        THEN( "every template makes an enabled rule without mappings whose pattern compiles" )
         THEN( "every template makes an enabled rule with its mappings whose pattern compiles" )
         {
             for ( const auto& t : templates ) {

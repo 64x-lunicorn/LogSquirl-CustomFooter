@@ -229,6 +229,63 @@ QList<RuleTemplate> linuxTemplates()
     return templates;
 }
 
+/// Android: logcat output and bug reports.
+QList<RuleTemplate> androidTemplates()
+{
+    QList<RuleTemplate> templates;
+
+    // The build fingerprint names one build of one device, and nothing else
+    // has its shape, so it is found by shape alone: in a tombstone or a
+    // crash in logcat (`Build fingerprint: '…'`), the header of a bug
+    // report, or getprop. `brand/product/device:version/id/incremental`,
+    // each part a word of letters, digits, `_`, `.` or `-`, then `:`, the
+    // build type `user`, `userdebug` or `eng`, `/` and the tags, separated
+    // by `,` (`release-keys`). Not inside a path or a longer word, and the
+    // tags not cut short.
+    templates.append(
+        { tr( "Build fingerprint" ),
+          tr( "The build fingerprint, e.g. "
+              "google/sunfish/sunfish:11/RQ3A.210805.001.A1/7474174:user/release-keys" ),
+          QStringLiteral( "Build fingerprint" ),
+          {},
+          QStringLiteral( "(?<![\\w./:-])"
+                          "([\\w.-]+/[\\w.-]+/[\\w.-]+:[\\w.-]+/[\\w.-]+/[\\w.-]+"
+                          ":(?:user|userdebug|eng)/[\\w-]+(?:,[\\w-]+)*)"
+                          "(?![\\w,/-])" ) } );
+
+    // getprop prints each property as `[key]: [value]`, in a bug report
+    // too. The value is what is in the brackets, spaces included
+    // (`[Pixel 7]`); the `[` before the key keeps out longer keys that end
+    // the same (`ro.product.vendor.model`).
+    const auto getprop = []( const QString& property ) {
+        SimpleRule rule;
+        rule.textBefore = QLatin1Char( '[' ) + property + QStringLiteral( "]: [" );
+        rule.valueEnd = ValueEnd::Character;
+        rule.endCharacter = QStringLiteral( "]" );
+        return rule;
+    };
+    templates.append( { tr( "Device model" ),
+                        tr( "The model from getprop, e.g. [ro.product.model]: [Pixel 7]" ),
+                        QStringLiteral( "Device model" ),
+                        getprop( QStringLiteral( "ro.product.model" ) ),
+                        {} } );
+    templates.append(
+        { tr( "Android version" ),
+          tr( "The Android version from getprop, e.g. [ro.build.version.release]: [14]" ),
+          QStringLiteral( "Android version" ),
+          getprop( QStringLiteral( "ro.build.version.release" ) ),
+          {} } );
+    // Named apart from General's Serial number, as the dialog lists
+    // templates by name; the key is the same, as it is the same value.
+    templates.append( { tr( "Device serial number" ),
+                        tr( "The serial number from getprop, e.g. [ro.serialno]: [1A2B3C4D5E6F]" ),
+                        QStringLiteral( "Serial number" ),
+                        getprop( QStringLiteral( "ro.serialno" ) ),
+                        {} } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -247,6 +304,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "General" ), generalTemplates() );
     appendGroup( templates, tr( "Network" ), networkTemplates() );
     appendGroup( templates, tr( "Linux and boot" ), linuxTemplates() );
+    appendGroup( templates, tr( "Android" ), androidTemplates() );
 
     return templates;
 }

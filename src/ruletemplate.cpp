@@ -822,14 +822,14 @@ QList<RuleTemplate> makeTemplates()
     // new group is a function above and a line here.
     appendGroup( templates, tr( "General" ), generalTemplates() );
     appendGroup( templates, tr( "Network" ), networkTemplates() );
-    appendGroup( templates, tr( "Linux and boot" ), linuxTemplates() );
+    appendGroup( templates, tr( "Automotive" ), automotiveTemplates() );
     appendGroup( templates, tr( "Android" ), androidTemplates() );
-    appendGroup( templates, tr( "Test run" ), testRunTemplates() );
-    appendGroup( templates, tr( "CI" ), ciTemplates() );
+    appendGroup( templates, tr( "Linux and boot" ), linuxTemplates() );
     appendGroup( templates, tr( "iOS crash log" ), iosCrashTemplates() );
     appendGroup( templates, tr( "Java and Spring Boot" ), javaTemplates() );
-    appendGroup( templates, tr( "Automotive" ), automotiveTemplates() );
     appendGroup( templates, tr( "Database" ), databaseTemplates() );
+    appendGroup( templates, tr( "CI" ), ciTemplates() );
+    appendGroup( templates, tr( "Test run" ), testRunTemplates() );
 
     return templates;
 }

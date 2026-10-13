@@ -314,7 +314,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
                      == QStringList{ "IPv4 address", "MAC address", "IPv6 address" } );
         }
 
-        THEN( "each is in a group, the templates of a group next to each other, General first" )
+        THEN( "each is in a group, the templates of a group next to each other, in the order of the groups" )
         {
             QStringList groups;
             for ( const auto& t : templates ) {
@@ -325,7 +325,10 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
                     groups.append( t.group );
                 }
             }
-            REQUIRE( groups.mid( 0, 2 ) == QStringList{ "General", "Network" } );
+            REQUIRE( groups
+                     == QStringList{ "General", "Network", "Automotive", "Android",
+                                     "Linux and boot", "iOS crash log", "Java and Spring Boot",
+                                     "Database", "CI", "Test run" } );
         }
 
         THEN( "the IPv4 address is under Network, the others of the issue under General" )

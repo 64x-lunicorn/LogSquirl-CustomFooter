@@ -181,61 +181,70 @@ keeps its patterns, key and mappings when the template changes.
 | General | Log start | `Log start` | When the log starts: the first date and time in the file, as the first match counts. ISO 8601: `2024-01-15T10:30:00Z`, with `T` or a space, optional seconds, fraction and `Z` or an offset of `±HH`, `±HHMM` or `±HH:MM`, `t` and `z` in lower case too. Truncated fields such as `10:30:5` or `+01:0` are not matched; a `:` after a complete timestamp (`10:30:00: started`) is fine. | Advanced |
 | General | `key=value` | the key you give | The value right after `<key>=`, up to the next whitespace, as in logfmt. Also as a flag, `-user=` or `--user=`. Not in a longer key (`superuser=`, `a.user=`, `my-user=`), and `user= x` has no value. | Advanced |
 | Network | IPv4 address | `IP address` | The word after `IP:` (`IP: 192.168.1.20`), not the first address in a line, which in a log with clients and servers is an arbitrary one | Simple |
+| Network | MAC address | `MAC address` | The address after `MAC:`: six pairs of hex digits separated by `:` or `-`, the same separator throughout (`52:54:00:12:34:56`, `00-1A-2B-3C-4D-5E`), or three groups of four separated by `.` (`0050.56a1.b2c3`), in either case. A longer address or mixed separators are not matched. | Advanced |
+| Network | IPv6 address | `IPv6 address` | The address after `IPv6:`, in full or shortened with `::` (`2001:db8::1`, `::1`), also with an IPv4 address as its last part (`::ffff:192.0.2.10`). A prefix length (`/64`) or zone (`%eth0`) after it is not part of the value. | Advanced |
+| Automotive | VIN | `VIN` | A VIN by its shape alone, with or without text before it (`VIN: WVWZZZ1JZXW000001`, `"vin": "1M8GDM9AXKP042788"`): 17 characters from `A`–`Z` and `0`–`9` without `I`, `O` and `Q`, with both letters and digits, not part of a longer word; `_` and punctuation may border it. Upper case only, and no check digit test, as only North American VINs have one. | Advanced |
+| Automotive | IMEI | `IMEI` | The word after `IMEI:` (`IMEI: 490154203237518`) | Simple |
+| Automotive | ICCID | `ICCID` | The word after `ICCID:` (`%XICCID: 89014103211118510720`) | Simple |
+| Automotive | Manufacturer | `Manufacturer` | The first three characters (the WMI) of a VIN the VIN template finds, mapped to the manufacturer for common WMIs (`WVWZZZ1JZXW000001` → `Volkswagen`, `WBA…` → `BMW`); an unmapped WMI shows as it is (`1M8GDM9AXKP042788` → `1M8`) | Advanced |
+| Automotive | Model year | `Model year` | The 10th character of a VIN the VIN template finds, mapped to the model year (`WBA3A5C51CF256985` → `2012`). The codes repeat every 30 years; the mappings give 2010 to 2039, so `K` reads `2019` even for a vehicle from 1989. | Advanced |
+| Android | Build fingerprint | `Build fingerprint` | The build fingerprint by its shape, `brand/product/device:version/id/incremental:type/tags` with type `user`, `userdebug` or `eng` (`google/sunfish/sunfish:11/RQ3A.210805.001.A1/7474174:user/release-keys`), as in a tombstone, a crash in logcat (`Build fingerprint: '…'`), a bug report or getprop. Not inside a path. | Advanced |
+| Android | Device model | `Device model` | The value of `ro.product.model` in getprop output, spaces included (`[ro.product.model]: [Pixel 7]` → `Pixel 7`) | Simple |
+| Android | Android version | `Android version` | The value of `ro.build.version.release` in getprop output (`[ro.build.version.release]: [14]`) | Simple |
+| Android | Device serial number | `Serial number` | The value of `ro.serialno` in getprop output (`[ro.serialno]: [28031FDH2004VT]`) | Simple |
 | Linux and boot | Kernel version | `Kernel` | The word after `Linux version` in dmesg (`Linux version 6.8.0-45-generic (buildd@…) …` → `6.8.0-45-generic`) | Simple |
 | Linux and boot | Hardware (DMI) | `Hardware` | Vendor, product and board before `, BIOS` in the `DMI:` line (`DMI: LENOVO 20XW0055GE/20XW0055GE, BIOS N32ET86W (1.62 ) 06/26/2023` → `LENOVO 20XW0055GE/20XW0055GE`); a comma in the product is kept. `DMI: not present or invalid.` is not taken. | Advanced |
 | Linux and boot | Kernel command line | `Command line` | The rest of the line after `Command line:` (`Command line: BOOT_IMAGE=/boot/vmlinuz-6.8.0-45-generic root=UUID=… ro quiet splash`) | Simple |
 | Linux and boot | U-Boot version | `U-Boot` | The version in the U-Boot banner (`U-Boot 2024.01 (Mar 11 2024 - 18:45:23 +0000)` → `2024.01`), not the SPL or TPL banner | Advanced |
 | Linux and boot | Syslog host | `Host` | The host after the time at the start of an RFC 3164 syslog line, with or without `<PRI>` (`Oct 13 08:12:01 webserver01 sshd[1234]: …` → `webserver01`); also journalctl's default output | Advanced |
-| Android | Build fingerprint | `Build fingerprint` | The build fingerprint by its shape, `brand/product/device:version/id/incremental:type/tags` with type `user`, `userdebug` or `eng` (`google/sunfish/sunfish:11/RQ3A.210805.001.A1/7474174:user/release-keys`), as in a tombstone, a crash in logcat (`Build fingerprint: '…'`), a bug report or getprop. Not inside a path. | Advanced |
-| Android | Device model | `Device model` | The value of `ro.product.model` in getprop output, spaces included (`[ro.product.model]: [Pixel 7]` → `Pixel 7`) | Simple |
-| Android | Android version | `Android version` | The value of `ro.build.version.release` in getprop output (`[ro.build.version.release]: [14]`) | Simple |
-| Android | Device serial number | `Serial number` | The value of `ro.serialno` in getprop output (`[ro.serialno]: [28031FDH2004VT]`) | Simple |
-| Network | MAC address | `MAC address` | The address after `MAC:`: six pairs of hex digits separated by `:` or `-`, the same separator throughout (`52:54:00:12:34:56`, `00-1A-2B-3C-4D-5E`), or three groups of four separated by `.` (`0050.56a1.b2c3`), in either case. A longer address or mixed separators are not matched. | Advanced |
-| Network | IPv6 address | `IPv6 address` | The address after `IPv6:`, in full or shortened with `::` (`2001:db8::1`, `::1`), also with an IPv4 address as its last part (`::ffff:192.0.2.10`). A prefix length (`/64`) or zone (`%eth0`) after it is not part of the value. | Advanced |
-| Test run | Python version | `Python` | The Python version in the pytest header, after `-- Python` up to the comma (`platform linux -- Python 3.12.3, pytest-8.3.2, pluggy-1.5.0` → `3.12.3`); on PyPy with the PyPy version (`3.9.10[pypy-7.3.8-final]`) | Simple |
-| Test run | pytest version | `pytest` | The pytest version in the pytest header, after `, pytest-` up to the comma (`8.3.2`), not in a temporary path like `/tmp/pytest-of-user/pytest-3` | Simple |
-| Test run | Test result | `Test result` | The summary at the end of a pytest run, without the `=` around it: `=== 3 failed, 120 passed in 12.30s ===` → `3 failed, 120 passed in 12.30s`, also `no tests ran in 0.01s`, a duration after a long run (`in 336.42s (0:05:36)`), `in 0.03 seconds` from pytest before 5.1, and the line `pytest -q` writes without `=` | Advanced |
-
-The Test run templates are meant for one pytest run per file: with
-several runs, the footer shows the versions and the result of the first.
-| CI | Runner image | `Runner image` | The GitHub Actions runner image after `Image:` in *Set up job* (`Image: ubuntu-24.04`) | Simple |
-| CI | Runner image version | `Runner image version` | The GitHub Actions runner image version after `Version:`: a date and two numbers (`Version: 20261004.327.1`), so the two-part `Version:` of the Runner Image Provisioner before it is skipped | Advanced |
-| CI | Commit | `Commit` | The commit after `HEAD is now at` (`HEAD is now at aa5a02d Merge …` → `aa5a02d`); with several checkouts in the log, the first | Simple |
-| CI | GitLab Runner version | `GitLab Runner version` | The version after `Running with gitlab-runner` (`Running with gitlab-runner 16.2.0 (782e15da)` → `16.2.0`) | Simple |
-| CI | Started by | `Started by` | The Jenkins user after `Started by user`, up to the end of the line (`Started by user Jane Doe` → `Jane Doe`); nothing for `Started by timer` | Simple |
-
-The runner image templates fit job logs of GitHub-hosted runners; a
-self-hosted runner prints no Runner Image section.
 | iOS crash log | Hardware model | `Hardware model` | The word after `Hardware Model:` (`Hardware Model: iPhone15,5` → `iPhone15,5`) | Simple |
 | iOS crash log | OS version | `OS version` | The rest of the line after `OS Version:` (`OS Version: iPhone OS 17.2 (21C62)` → `iPhone OS 17.2 (21C62)`, also `macOS 14.6.1 (23G93)`) | Simple |
 | iOS crash log | Incident identifier | `Incident identifier` | The word after `Incident Identifier:`, the report's UUID | Simple |
 | iOS crash log | App version | `App version` | The rest of the line after `Version:` (`Version: 1.0 (1)` → `1.0 (1)`, the app's CFBundleVersion and CFBundleShortVersionString), not after a word and a space, so `OS Version:`, `Baseband Version:` and `Report Version:` are not taken when the app's `Version:` is empty | Advanced |
-
-The iOS crash log templates fit the text form of a crash report (a
-`.crash` file, or the translated report at the top of an `.ips` file),
-from macOS too; the JSON of an untranslated `.ips` file is not matched.
 | Java and Spring Boot | Application | `Application` | The application of the Spring Boot start line, `Starting MyApp v1.2.0 using Java 17.0.8 with PID 4242 (…)` → `MyApp`, in the wording of Spring Boot 2 and 3, also `Starting AOT-processed MyApp`. Not `Starting service [Tomcat]` or other lines that start something. | Advanced |
 | Java and Spring Boot | Application version | `Application version` | The version after `v` in the Spring Boot start line (`v1.2.0` → `1.2.0`); none if the application has no version | Advanced |
 | Java and Spring Boot | Java version | `Java version` | The word after `using Java` (`using Java 17.0.8`), in the start line of Spring Boot 2.4 and later | Simple |
 | Java and Spring Boot | Host | `Host` | The host between `on` and `with PID` in the Spring Boot 2 start line (`… on myhost with PID 4242`); Spring Boot 3 no longer logs it | Advanced |
 | Java and Spring Boot | Active profile | `Active profile` | The active Spring profiles: `The following 1 profile is active: "prod"` → `prod`; several as listed (`"dev", "local"`, or `dev,local` before Spring Boot 2.7). Not the default profile of `No active profile set, falling back to …`. | Advanced |
 | Java and Spring Boot | JRE version | `JRE version` | The runtime version in `(build …)` of the `# JRE version:` line of a JVM crash log (`hs_err_pid*.log`), `… (build 17.0.8+7)` → `17.0.8+7`; none if the JVM crashed while starting and left it empty | Advanced |
-| Automotive | VIN | `VIN` | A VIN by its shape alone, with or without text before it (`VIN: WVWZZZ1JZXW000001`, `"vin": "1M8GDM9AXKP042788"`): 17 characters from `A`–`Z` and `0`–`9` without `I`, `O` and `Q`, with both letters and digits, not part of a longer word; `_` and punctuation may border it. Upper case only, and no check digit test, as only North American VINs have one. | Advanced |
-| Automotive | IMEI | `IMEI` | The word after `IMEI:` (`IMEI: 490154203237518`) | Simple |
-| Automotive | ICCID | `ICCID` | The word after `ICCID:` (`%XICCID: 89014103211118510720`) | Simple |
-| Automotive | Manufacturer | `Manufacturer` | The first three characters (the WMI) of a VIN the VIN template finds, mapped to the manufacturer for common WMIs (`WVWZZZ1JZXW000001` → `Volkswagen`, `WBA…` → `BMW`); an unmapped WMI shows as it is (`1M8GDM9AXKP042788` → `1M8`) | Advanced |
-| Automotive | Model year | `Model year` | The 10th character of a VIN the VIN template finds, mapped to the model year (`WBA3A5C51CF256985` → `2012`). The codes repeat every 30 years; the mappings give 2010 to 2039, so `K` reads `2019` even for a vehicle from 1989. | Advanced |
+| Database | PostgreSQL version | `PostgreSQL version` | The word after `starting PostgreSQL` in the start line of PostgreSQL 10 and later (`starting PostgreSQL 16.1 (Debian 16.1-1.pgdg120+1) on x86_64-pc-linux-gnu, …` → `16.1`, also `17beta1`) | Simple |
+| Database | MySQL version | `MySQL version` | The version between the quotes of `Version: '…'` in the ready line of MySQL or MariaDB (`ready for connections. Version: '8.0.36'  socket: …` → `8.0.36`, `Version: '11.2.2-MariaDB-1:11.2.2+maria~ubu2204'` → that whole version); not an unquoted `Version:` | Simple |
+| Database | Redis version | `Redis version` | The version after `Redis version=` up to the comma, in the start line of Redis 4 and later (`Redis version=7.2.4, bits=64, …` → `7.2.4`); not Valkey's `Valkey version=` | Simple |
+| CI | Runner image | `Runner image` | The GitHub Actions runner image after `Image:` in *Set up job* (`Image: ubuntu-24.04`) | Simple |
+| CI | Runner image version | `Runner image version` | The GitHub Actions runner image version after `Version:`: a date and two numbers (`Version: 20261004.327.1`), so the two-part `Version:` of the Runner Image Provisioner before it is skipped | Advanced |
+| CI | Commit | `Commit` | The commit after `HEAD is now at` (`HEAD is now at aa5a02d Merge …` → `aa5a02d`); with several checkouts in the log, the first | Simple |
+| CI | GitLab Runner version | `GitLab Runner version` | The version after `Running with gitlab-runner` (`Running with gitlab-runner 16.2.0 (782e15da)` → `16.2.0`) | Simple |
+| CI | Started by | `Started by` | The Jenkins user after `Started by user`, up to the end of the line (`Started by user Jane Doe` → `Jane Doe`); nothing for `Started by timer` | Simple |
+| Test run | Python version | `Python` | The Python version in the pytest header, after `-- Python` up to the comma (`platform linux -- Python 3.12.3, pytest-8.3.2, pluggy-1.5.0` → `3.12.3`); on PyPy with the PyPy version (`3.9.10[pypy-7.3.8-final]`) | Simple |
+| Test run | pytest version | `pytest` | The pytest version in the pytest header, after `, pytest-` up to the comma (`8.3.2`), not in a temporary path like `/tmp/pytest-of-user/pytest-3` | Simple |
+| Test run | Test result | `Test result` | The summary at the end of a pytest run, without the `=` around it: `=== 3 failed, 120 passed in 12.30s ===` → `3 failed, 120 passed in 12.30s`, also `no tests ran in 0.01s`, a duration after a long run (`in 336.42s (0:05:36)`), `in 0.03 seconds` from pytest before 5.1, and the line `pytest -q` writes without `=` | Advanced |
 
 The Automotive templates fit the log of one vehicle or telematics unit:
 the footer shows the first VIN, IMEI or ICCID in the file, and the
 manufacturer and model year of that VIN.
-| Database | PostgreSQL version | `PostgreSQL version` | The word after `starting PostgreSQL` in the start line of PostgreSQL 10 and later (`starting PostgreSQL 16.1 (Debian 16.1-1.pgdg120+1) on x86_64-pc-linux-gnu, …` → `16.1`, also `17beta1`) | Simple |
-| Database | MySQL version | `MySQL version` | The version between the quotes of `Version: '…'` in the ready line of MySQL or MariaDB (`ready for connections. Version: '8.0.36'  socket: …` → `8.0.36`, `Version: '11.2.2-MariaDB-1:11.2.2+maria~ubu2204'` → that whole version); not an unquoted `Version:` | Simple |
-| Database | Redis version | `Redis version` | The version after `Redis version=` up to the comma, in the start line of Redis 4 and later (`Redis version=7.2.4, bits=64, …` → `7.2.4`); not Valkey's `Valkey version=` | Simple |
+
+The Android getprop templates read the `[key]: [value]` lines of `adb
+shell getprop` and of a bug report, not `build.prop`
+(`ro.product.model=…`).
+
+Syslog host takes the host of the first line, so it fits the log of one
+host, not one merged from several. ARM kernels write `Kernel command
+line:` instead of `Command line:`; change the text of Kernel command line
+to it.
+
+The iOS crash log templates fit the text form of a crash report (a
+`.crash` file, or the translated report at the top of an `.ips` file),
+from macOS too; the JSON of an untranslated `.ips` file is not matched.
 
 The Database templates fit the log of one server: with several starts in
-the file, such as the Docker image's init server before the real one,
-the footer shows the version of the first.
+the file, such as the Docker image's init server before the real one, the
+footer shows the version of the first.
+
+The runner image templates fit job logs of GitHub-hosted runners; a
+self-hosted runner prints no Runner Image section.
+
+The Test run templates are meant for one pytest run per file: with several
+runs, the footer shows the versions and the result of the first.
 
 A template can bring value mappings, as Manufacturer and Model year do:
 the new rule has them like mappings you add yourself, shown in the editor,
@@ -249,21 +258,14 @@ says; the text may also end a longer word (`ClientIP:`, `superuser:`,
 MAC address and IPv6 address need the address's shape and open in advanced
 mode; their pattern starts with the text, `MAC:` or `IPv6:`, which you
 change there in the same way (`link/ether`, `inet6`). Version does not
-count `version` inside
-another word (`conversion`, `server`), and so also misses a lower-case
-`appversion`; `app_version` and `appVersion` are found. For `key=value`,
+count `version` inside another word (`conversion`, `server`), and so also
+misses a lower-case `appversion`; `app_version` and `appVersion` are found. For `key=value`,
 give the key without `=` (a trailing `=` is dropped); while it is checked,
 the dialog asks for the key and **Add Rules** stays disabled until one is
 given. For lists separated by `;` or `,`, change `(\S+)` in the pattern to
 `([^;]+)`. If an enabled rule with a line pattern already has the key of a
 checked template, the dialog names every such key: each new rule with one
 of them becomes an alternative for that key.
-
-Syslog host takes the host of the first line, so it fits the log of one
-host, not one merged from several. ARM kernels write `Kernel command line:`
-instead of `Command line:`; change the text of Kernel command line to it.
-The Android getprop templates read the `[key]: [value]` lines of `adb shell
-getprop` and of a bug report, not `build.prop` (`ro.product.model=…`).
 
 ### Rule from a selected line
 

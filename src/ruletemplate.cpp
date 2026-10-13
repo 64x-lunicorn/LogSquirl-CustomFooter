@@ -757,6 +757,54 @@ QList<RuleTemplate> automotiveTemplates()
     return templates;
 }
 
+/// Database: the server version from the line a database server logs when
+/// it starts.
+QList<RuleTemplate> databaseTemplates()
+{
+    QList<RuleTemplate> templates;
+    const auto upTo = []( const QString& textBefore, const QString& endCharacter ) {
+        auto rule = simple( textBefore, ValueEnd::Character );
+        rule.endCharacter = endCharacter;
+        return rule;
+    };
+
+    // PostgreSQL 10 and later log `starting PostgreSQL 16.1 (Debian
+    // 16.1-1.pgdg120+1) on x86_64-pc-linux-gnu, ...` once per start; the
+    // version is the word after it, also a beta's (`17beta1`). The lower
+    // case `starting` keeps out the `Starting PostgreSQL 13 database
+    // server` of Debian's init script, which names the cluster's major
+    // version. With several starts in the file, such as the Docker image's
+    // init server before the real one, the first counts.
+    templates.append(
+        { tr( "PostgreSQL version" ),
+          tr( "The version after starting PostgreSQL, e.g. starting PostgreSQL 16.1 on ..." ),
+          QStringLiteral( "PostgreSQL version" ),
+          simple( QStringLiteral( "starting PostgreSQL " ) ),
+          {} } );
+
+    // MySQL logs `ready for connections. Version: '8.0.36'  socket: ...`
+    // once per start; MySQL 5.7 and MariaDB put `Version: '...'` on a line
+    // of its own. The version is between the quotes, so MariaDB's suffix
+    // (`11.2.2-MariaDB-1:11.2.2+maria~ubu2204`) is part of it. The quote
+    // keeps out an unquoted `Version:`, as in other logs.
+    templates.append( { tr( "MySQL version" ),
+                        tr( "The quoted version after Version: in the MySQL or MariaDB ready "
+                            "line, e.g. Version: '8.0.36'" ),
+                        QStringLiteral( "MySQL version" ),
+                        upTo( QStringLiteral( "Version: '" ), QStringLiteral( "'" ) ),
+                        {} } );
+
+    // Redis 4 and later log `Redis version=7.2.4, bits=64, commit=...`
+    // once per start; the version ends at the comma.
+    templates.append( { tr( "Redis version" ),
+                        tr( "The version after Redis version=, e.g. Redis version=7.2.4, bits=64" ),
+                        QStringLiteral( "Redis version" ),
+                        upTo( QStringLiteral( "Redis version=" ), QStringLiteral( "," ) ),
+                        {} } );
+
+    return templates;
+}
+
 /// Appends the templates of @p group to @p templates, named @p name.
 void appendGroup( QList<RuleTemplate>& templates, const QString& name, QList<RuleTemplate> group )
 {
@@ -781,6 +829,7 @@ QList<RuleTemplate> makeTemplates()
     appendGroup( templates, tr( "iOS crash log" ), iosCrashTemplates() );
     appendGroup( templates, tr( "Java and Spring Boot" ), javaTemplates() );
     appendGroup( templates, tr( "Automotive" ), automotiveTemplates() );
+    appendGroup( templates, tr( "Database" ), databaseTemplates() );
 
     return templates;
 }

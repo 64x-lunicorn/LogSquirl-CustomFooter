@@ -44,6 +44,7 @@ add_executable(logsquirl_custom_footer_tests
     rulefromselectedline_test.cpp
     simplemode_test.cpp
     ruletemplate_test.cpp
+    ruletemplate_database_test.cpp
     ruletemplate_linux_test.cpp
     ruletemplate_android_test.cpp
     ruletemplate_network_test.cpp

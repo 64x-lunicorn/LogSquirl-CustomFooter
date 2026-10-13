@@ -939,13 +939,20 @@ with an empty key asks for it (`asksForKey()`): `%1` in its pattern is the
 `givenKey()` (trimmed, one trailing `=` dropped) escaped with
 `QRegularExpression::escape()`, and without a key `entry()` is empty. Only
 values with a shape or boundaries a simple rule cannot express are
-advanced: Version, Log start (ISO 8601 timestamps), MAC and IPv6 address
+advanced: in General and Network, Version, Log start (ISO 8601
+timestamps), MAC and IPv6 address
 (text before, then the shape: one MAC separator throughout via the
 backreference `\2`, IPv6 as RFC 3986's `IPv6address` built from `h16` and
 `ls32` pieces), and `key=value`, whose key
 must not end a longer key (`(?<![\w.-])`, before up to two dashes so
 flags like `--user=` match but `my-user=` does not) and whose value starts
-right after `=`. The patterns guard their edges with lookarounds rather than
+right after `=`. In the other groups, a template is advanced where its
+value has a shape (VIN, Manufacturer, Model year, Build fingerprint,
+U-Boot version, Runner image version, Test result), a fixed place
+(Syslog host), or a text a simple rule cannot bound: the DMI line up to
+`, BIOS`, the Spring Boot start line (Application, Application version,
+Host), Active profile, JRE version, and App version's `Version:`, which
+also ends `OS Version:`. The patterns guard their edges with lookarounds rather than
 anchors or `\b`, as a value may be anywhere in the line and `_` counts as
 a word character; `\d` and `\w` are ASCII, like everything the scanner
 compiles. Version takes `version` after `_` or as a camel-case `Version`,
@@ -957,10 +964,14 @@ dates are never taken. The timestamp's seconds, fraction and offset are an
 atomic group followed by `(?!\d|:\d)`, so a truncated field (`10:30:5`,
 `+01:0`) fails instead of backtracking to a shorter match, while a `:`
 after a complete timestamp, as in `10:30:00: started`, is fine. Each template is tested
-with lines it must find and lines it must not, through `FooterScanner`
-(`tests/ruletemplate_test.cpp`). A new template is a row in its group's
-function plus such samples; a new group is a function returning its
-templates and one `appendGroup()` line in `makeTemplates()`.
+with lines it must find and lines it must not, through `FooterScanner`:
+General, the dialog and the editor in `tests/ruletemplate_test.cpp`, each
+other group in its own `tests/ruletemplate_<group>_test.cpp`, with sample
+lines that name the tool and version they come from. A new template is a
+row in its group's function plus such samples in its group's test file; a
+new group is a function returning its templates, one `appendGroup()` line
+in `makeTemplates()`, and a test file. Template names are unique across
+groups, as the dialog tests find templates by name.
 
 Every template follows one rule: **a template finds a value that holds
 for the whole file.** The footer shows one value per key, taken from the

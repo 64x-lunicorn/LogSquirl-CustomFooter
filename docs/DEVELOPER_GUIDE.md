@@ -1054,3 +1054,7 @@ forward-compatible changes.  See the README for format examples.
    The suite runs on Qt's offscreen platform: `tests/tests_main.cpp` sets
    `QT_QPA_PLATFORM=offscreen` unless it is already set, so widget tests
    (tooltips, `QFileDialog`) behave the same on every desktop and in CI.
+   A test that waits for a worker, a timer or a file system event uses
+   `processUntil()` from `tests/eventloopwait.h`: it processes events
+   until a condition holds, for at most a bound (10 s unless the test
+   passes another), so a hung worker fails the test instead of hanging it.

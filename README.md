@@ -198,6 +198,14 @@ keeps its patterns and key when the template changes.
 
 The Test run templates are meant for one pytest run per file: with
 several runs, the footer shows the versions and the result of the first.
+| CI | Runner image | `Runner image` | The GitHub Actions runner image after `Image:` in *Set up job* (`Image: ubuntu-24.04`) | Simple |
+| CI | Runner image version | `Runner image version` | The GitHub Actions runner image version after `Version:`: a date and two numbers (`Version: 20261004.327.1`), so the two-part `Version:` of the Runner Image Provisioner before it is skipped | Advanced |
+| CI | Commit | `Commit` | The commit after `HEAD is now at` (`HEAD is now at aa5a02d Merge …` → `aa5a02d`); with several checkouts in the log, the first | Simple |
+| CI | GitLab Runner version | `GitLab Runner version` | The version after `Running with gitlab-runner` (`Running with gitlab-runner 16.2.0 (782e15da)` → `16.2.0`) | Simple |
+| CI | Started by | `Started by` | The Jenkins user after `Started by user`, up to the end of the line (`Started by user Jane Doe` → `Jane Doe`); nothing for `Started by timer` | Simple |
+
+The runner image templates fit job logs of GitHub-hosted runners; a
+self-hosted runner prints no Runner Image section.
 
 Simple templates match their text as written, case included, so change
 `Build:`, `IP:`, `env:` or `user:` to what your log says; the text may also

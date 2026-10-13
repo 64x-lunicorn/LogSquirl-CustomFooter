@@ -73,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`platform linux -- Python 3.12.3, pytest-8.3.2, …`), in simple mode,
   and Test result, the summary at the end (`3 failed, 120 passed in
   12.30s`) without the `=` around it, in advanced mode.
+- **CI template group** — for build logs: from GitHub Actions, Runner
+  image (`Image: ubuntu-24.04`) and Runner image version
+  (`Version: 20261004.327.1`, not the Runner Image Provisioner's version);
+  Commit, from `HEAD is now at <sha>`, the first checkout counting;
+  GitLab Runner version, from `Running with gitlab-runner <version>`; and
+  from Jenkins, Started by, the user's name from `Started by user <name>`.
 
 ### Changed
 - **Template groups, and several templates at once** — **From template…**

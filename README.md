@@ -265,7 +265,9 @@ the dialog asks for the key and **Add Rules** stays disabled until one is
 given. For lists separated by `;` or `,`, change `(\S+)` in the pattern to
 `([^;]+)`. If an enabled rule with a line pattern already has the key of a
 checked template, the dialog names every such key: each new rule with one
-of them becomes an alternative for that key.
+of them becomes an alternative for that key. It also names a key that
+several checked templates share, such as `Serial number` of Serial number
+and Device serial number.
 
 ### Rule from a selected line
 

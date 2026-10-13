@@ -163,14 +163,33 @@ void RuleTemplateDialog::updateChoice()
                            : QString() );
     keyHint_->setVisible( typedEquals );
 
-    // Rules sharing a key are alternatives: allowed, but never silently.
+    // Rules sharing a key are alternatives: allowed, but never silently,
+    // whether the key is an existing rule's or that of another checked
+    // template.
     QStringList usedKeys;
+    QStringList sharedKeys;
+    QStringList newKeys;
     for ( const auto& entry : newEntries ) {
-        if ( !entry.key.isEmpty() && existingKeys_.contains( entry.key )
-             && !usedKeys.contains( entry.key ) ) {
-            usedKeys.append( entry.key );
+        if ( entry.key.isEmpty() ) {
+            continue;
         }
+        if ( existingKeys_.contains( entry.key ) ) {
+            if ( !usedKeys.contains( entry.key ) ) {
+                usedKeys.append( entry.key );
+            }
+        }
+        else if ( newKeys.contains( entry.key ) && !sharedKeys.contains( entry.key ) ) {
+            sharedKeys.append( entry.key );
+        }
+        newKeys.append( entry.key );
     }
+    const auto quotedList = [ this ]( const QStringList& keys ) {
+        QStringList quoted;
+        for ( const auto& key : keys ) {
+            quoted.append( tr( "“%1”" ).arg( key ) );
+        }
+        return QLocale().createSeparatedList( quoted );
+    };
     QString note;
     if ( usedKeys.size() == 1 ) {
         note = tr( "A rule with the key “%1” exists already: the new rule becomes an "
@@ -179,14 +198,17 @@ void RuleTemplateDialog::updateChoice()
                    .arg( usedKeys.first() );
     }
     else if ( usedKeys.size() > 1 ) {
-        QStringList quoted;
-        for ( const auto& key : usedKeys ) {
-            quoted.append( tr( "“%1”" ).arg( key ) );
-        }
         note = tr( "Rules with the keys %1 exist already: each new rule with one of them "
                    "becomes an alternative for its value: whichever matches first in the file "
                    "supplies it." )
-                   .arg( QLocale().createSeparatedList( quoted ) );
+                   .arg( quotedList( usedKeys ) );
+    }
+    if ( !sharedKeys.isEmpty() ) {
+        const auto shared
+            = tr( "Several checked templates have the key %1: their rules become alternatives "
+                  "for its value: whichever matches first in the file supplies it." )
+                  .arg( quotedList( sharedKeys ) );
+        note = note.isEmpty() ? shared : note + QLatin1Char( ' ' ) + shared;
     }
     note_->setText( note );
     note_->setVisible( !note.isEmpty() );

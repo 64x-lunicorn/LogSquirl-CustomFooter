@@ -314,7 +314,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
                      == QStringList{ "IPv4 address", "MAC address", "IPv6 address" } );
         }
 
-        THEN( "each is in a group, the templates of a group next to each other, in the order of the groups" )
+        THEN( "each is in a group, the groups in order, a group's templates together" )
         {
             QStringList groups;
             for ( const auto& t : templates ) {
@@ -1273,6 +1273,42 @@ SCENARIO( "The alternative note names every checked template whose key is used",
             {
                 REQUIRE( ui.note->text().contains( "“Version”" ) );
                 REQUIRE( ui.note->text().contains( "“IP address”" ) );
+            }
+        }
+
+        WHEN( "checking two templates with the same key no rule has yet" )
+        {
+            // Both use the key Serial number (#58).
+            ui.check( "Serial number" );
+            ui.check( "Device serial number" );
+
+            THEN( "the note names that key" )
+            {
+                REQUIRE( !ui.note->isHidden() );
+                REQUIRE( ui.note->text().contains( "“Serial number”" ) );
+                REQUIRE( ui.note->text().contains( "alternative" ) );
+                REQUIRE( !ui.note->text().contains( "Version" ) );
+            }
+
+            AND_WHEN( "checking version too" )
+            {
+                ui.check( "Version" );
+
+                THEN( "the note names both keys" )
+                {
+                    REQUIRE( ui.note->text().contains( "“Serial number”" ) );
+                    REQUIRE( ui.note->text().contains( "“Version”" ) );
+                }
+            }
+
+            AND_WHEN( "unchecking one of them" )
+            {
+                ui.check( "Device serial number", false );
+
+                THEN( "there is no note" )
+                {
+                    REQUIRE( ui.note->isHidden() );
+                }
             }
         }
     }

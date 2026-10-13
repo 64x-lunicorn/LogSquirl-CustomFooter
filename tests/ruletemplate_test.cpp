@@ -30,81 +30,40 @@
 #include "ruletemplate.h"
 #include "ruletemplatedialog.h"
 #include "simplerule.h"
+#include "templatesamples.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QPushButton>
+#include <QStyle>
 #include <QTableView>
 #include <QTableWidget>
-#include <QTemporaryDir>
+#include <QTest>
 #include <QToolButton>
 #include <QTreeWidget>
 
-#include <algorithm>
 #include <optional>
 
 using namespace custom_footer;
 
 namespace {
 
-const RuleTemplate& templateNamed( const QString& name )
+/// A double-click at @p pos as a platform sends it: press, release, double
+/// click, release. QTest::mouseDClick() does not reach the view's
+/// double-click handling the same way.
+void doubleClick( QWidget* widget, const QPoint& pos )
 {
-    const auto& templates = ruleTemplates();
-    const auto it = std::find_if( templates.begin(), templates.end(),
-                                  [ & ]( const RuleTemplate& t ) { return t.name == name; } );
-    REQUIRE( it != templates.end() );
-    return *it;
-}
-
-/// The value @p entry extracts from @p line through the scanner, as the
-/// footer would show it; nothing if it does not match.
-std::optional<QString> extract( const FooterEntry& entry, const QString& line )
-{
-    REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    const auto path = dir.path() + "/sample.log";
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "first line\n" );
-    file.write( line.toUtf8() );
-    file.write( "\nlast line\n" );
-    file.close();
-
-    const auto values = FooterScanner::scan( path, { entry } );
-    if ( !values.contains( entry.key ) ) {
-        return std::nullopt;
-    }
-    return values.value( entry.key );
-}
-
-std::optional<QString> extract( const QString& templateName, const QString& line )
-{
-    return extract( templateNamed( templateName ).entry(), line );
-}
-
-/// Lines a template finds, with the value it takes from each.
-struct Sample {
-    const char* line;
-    const char* value;
-};
-
-void requireFinds( const QString& templateName, std::initializer_list<Sample> samples )
-{
-    for ( const auto& sample : samples ) {
-        INFO( sample.line );
-        REQUIRE( extract( templateName, sample.line ) == QString( sample.value ) );
-    }
-}
-
-void requireFindsNothing( const QString& templateName, std::initializer_list<const char*> lines )
-{
-    for ( const auto* line : lines ) {
-        INFO( line );
-        REQUIRE( extract( templateName, line ) == std::nullopt );
+    const auto global = widget->mapToGlobal( pos );
+    for ( const auto type : { QEvent::MouseButtonPress, QEvent::MouseButtonRelease,
+                              QEvent::MouseButtonDblClick, QEvent::MouseButtonRelease } ) {
+        const bool down = type != QEvent::MouseButtonRelease;
+        QMouseEvent event( type, pos, global, Qt::LeftButton, down ? Qt::LeftButton : Qt::NoButton,
+                           Qt::NoModifier );
+        QApplication::sendEvent( widget, &event );
     }
 }
 
@@ -148,11 +107,45 @@ struct TemplateUi {
         return dialog;
     }
 
-    void choose( const QString& name ) const
+    /// The item of the template named @p name, under its group.
+    QTreeWidgetItem* templateItem( const QString& name ) const
+    {
+        const auto items = templates->findItems( name, Qt::MatchExactly | Qt::MatchRecursive, 0 );
+        REQUIRE( items.size() == 1 );
+        REQUIRE( items.first()->parent() );
+        return items.first();
+    }
+
+    QTreeWidgetItem* groupItem( const QString& name ) const
     {
         const auto items = templates->findItems( name, Qt::MatchExactly, 0 );
         REQUIRE( items.size() == 1 );
-        templates->setCurrentItem( items.first() );
+        return items.first();
+    }
+
+    void check( const QString& name, bool checked = true ) const
+    {
+        templateItem( name )->setCheckState( 0, checked ? Qt::Checked : Qt::Unchecked );
+    }
+
+    void checkGroup( const QString& name ) const
+    {
+        groupItem( name )->setCheckState( 0, Qt::Checked );
+    }
+
+    /// The names of the checked templates, in list order.
+    QStringList checkedTemplates() const
+    {
+        QStringList names;
+        for ( int g = 0; g < templates->topLevelItemCount(); ++g ) {
+            const auto* group = templates->topLevelItem( g );
+            for ( int i = 0; i < group->childCount(); ++i ) {
+                if ( group->child( i )->checkState( 0 ) == Qt::Checked ) {
+                    names.append( group->child( i )->text( 0 ) );
+                }
+            }
+        }
+        return names;
     }
 
     QPushButton* ok() const
@@ -165,11 +158,11 @@ struct TemplateUi {
         return buttons->button( QDialogButtonBox::Cancel );
     }
 
-    /// Choose a template and click OK.
+    /// Check a template and click OK.
     void add( const QString& name, const QString& askedKey = QString() )
     {
         open();
-        choose( name );
+        check( name );
         if ( !askedKey.isEmpty() ) {
             templateKey->setText( askedKey );
         }
@@ -242,20 +235,74 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
     {
         const auto& templates = ruleTemplates();
 
-        THEN( "there are the six of the issue, each with a name and a one-line description" )
+        THEN( "each has a name and a one-line description" )
         {
-            QStringList names;
             for ( const auto& t : templates ) {
-                names.append( t.name );
+                INFO( t.name.toStdString() );
+                REQUIRE( !t.name.isEmpty() );
                 REQUIRE( !t.description.isEmpty() );
                 REQUIRE( !t.description.contains( '\n' ) );
             }
-            REQUIRE( names
-                     == QStringList{ "Version", "Build number", "Serial number", "IPv4 address",
-                                     "Timestamp (ISO 8601)", "key=value" } );
         }
 
-        THEN( "every template makes an enabled rule without mappings whose pattern compiles" )
+        THEN( "General and Network hold their templates in this order" )
+        {
+            const auto names = []( const QString& group ) {
+                QStringList inGroup;
+                for ( const auto& t : templatesIn( group ) ) {
+                    inGroup.append( t.name );
+                }
+                return inGroup;
+            };
+            REQUIRE( names( "General" )
+                     == QStringList{ "Version", "Build number", "Serial number", "Environment",
+                                     "User", "Log start", "key=value" } );
+            REQUIRE( names( "Network" )
+                     == QStringList{ "IPv4 address", "MAC address", "IPv6 address" } );
+        }
+
+        THEN( "each is in a group, the groups in order, a group's templates together" )
+        {
+            QStringList groups;
+            for ( const auto& t : templates ) {
+                INFO( t.name.toStdString() );
+                REQUIRE( !t.group.isEmpty() );
+                if ( groups.isEmpty() || groups.last() != t.group ) {
+                    REQUIRE( !groups.contains( t.group ) );
+                    groups.append( t.group );
+                }
+            }
+            REQUIRE( groups
+                     == QStringList{ "General", "Network", "Automotive", "Android",
+                                     "Linux and boot", "iOS crash log", "Java and Spring Boot",
+                                     "Database", "CI", "Test run" } );
+        }
+
+        THEN( "the IPv4 address is under Network, the others of the issue under General" )
+        {
+            for ( const auto* name : { "Version", "Build number", "Serial number", "Environment",
+                                       "User", "Log start", "key=value" } ) {
+                INFO( name );
+                REQUIRE( templateNamed( name ).group == "General" );
+            }
+            REQUIRE( templateNamed( "IPv4 address" ).group == "Network" );
+        }
+
+        THEN( "a simple template whose text ends in a word does not match inside a longer word" )
+        {
+            // `Linux versions 1` is no kernel version `s` (#56).
+            for ( const auto& t : templates ) {
+                const auto text = t.simple.textBefore.trimmed();
+                if ( !t.isSimple() || text.isEmpty() || !text.back().isLetterOrNumber() ) {
+                    continue;
+                }
+                INFO( t.name.toStdString() );
+                REQUIRE( extract( t.entry(), text + "s 1" ) == std::nullopt );
+                REQUIRE( extract( t.entry(), text + " 1" ) == "1" );
+            }
+        }
+
+        THEN( "every template makes an enabled rule with its mappings whose pattern compiles" )
         {
             for ( const auto& t : templates ) {
                 INFO( t.name.toStdString() );
@@ -264,7 +311,7 @@ SCENARIO( "Rule templates are named and described", "[ruletemplate]" )
                 REQUIRE( !entry.linePattern.isEmpty() );
                 REQUIRE( entry.valuePattern.isEmpty() );
                 REQUIRE( entry.enabled );
-                REQUIRE( entry.mappings.isEmpty() );
+                REQUIRE( entry.mappings.size() == t.mappings.size() );
                 REQUIRE( FooterScanner::patternError( entry.linePattern ).isEmpty() );
             }
         }
@@ -275,9 +322,10 @@ SCENARIO( "Rule templates are simple where the value fits the simple form", "[ru
 {
     GIVEN( "each template" )
     {
-        THEN( "build number and serial number are simple rules" )
+        THEN( "build number, serial number, IP address, environment and user are simple rules" )
         {
-            for ( const auto* name : { "Build number", "Serial number" } ) {
+            for ( const auto* name :
+                  { "Build number", "Serial number", "IPv4 address", "Environment", "User" } ) {
                 INFO( name );
                 const auto& t = templateNamed( name );
                 REQUIRE( t.isSimple() );
@@ -287,10 +335,9 @@ SCENARIO( "Rule templates are simple where the value fits the simple form", "[ru
             }
         }
 
-        THEN( "version, IPv4 address, timestamp and key=value need a shape and are advanced" )
+        THEN( "version, log start and key=value need a shape and are advanced" )
         {
-            for ( const auto* name :
-                  { "Version", "IPv4 address", "Timestamp (ISO 8601)", "key=value" } ) {
+            for ( const auto* name : { "Version", "Log start", "key=value" } ) {
                 INFO( name );
                 const auto& t = templateNamed( name );
                 REQUIRE( !t.isSimple() );
@@ -399,36 +446,106 @@ SCENARIO( "The serial number template finds the value after Serial number:", "[r
     }
 }
 
-SCENARIO( "The IPv4 template finds dotted quads", "[ruletemplate]" )
+SCENARIO( "The IP address template finds the address after IP:", "[ruletemplate]" )
 {
-    THEN( "four numbers from 0 to 255, anywhere in the line" )
+    GIVEN( "the template" )
     {
-        requireFinds( "IPv4 address", { { "connected to 192.168.1.20:8080", "192.168.1.20" },
-                                        { "10.0.0.1", "10.0.0.1" },
-                                        { "peer=255.255.255.0.", "255.255.255.0" },
-                                        { "from 0.0.0.0 and 1.2.3.4", "0.0.0.0" } } );
+        const auto& t = templateNamed( "IPv4 address" );
+
+        THEN( "its rule is the simple rule for the word after IP:, keyed IP address" )
+        {
+            REQUIRE( t.key == "IP address" );
+            REQUIRE( t.simple == SimpleRule{ "IP:", ValueEnd::Whitespace, {} } );
+        }
     }
 
-    THEN( "between punctuation, and before a dot ending a sentence" )
+    THEN( "the word after IP:, with or without a space" )
     {
-        requireFinds( "IPv4 address", { { "ip=10.0.0.1,", "10.0.0.1" },
-                                        { "(192.168.1.1)", "192.168.1.1" },
-                                        { "Connected to 10.0.0.1.", "10.0.0.1" } } );
+        requireFinds( "IPv4 address", { { "IP: 192.168.1.20", "192.168.1.20" },
+                                        { "Device IP:10.0.0.5 up", "10.0.0.5" },
+                                        { "eth0 IP:   172.16.0.2", "172.16.0.2" } } );
     }
 
-    THEN( "not out of range, too few or too many parts, with leading zeros, or in a word" )
+    THEN( "the address after the text, not the first address in the line" )
+    {
+        requireFinds( "IPv4 address",
+                      { { "request from 10.0.0.7 to server IP: 192.168.1.20", "192.168.1.20" },
+                        { "GET / 10.0.0.1 200\nIP: 192.168.1.20", "192.168.1.20" } } );
+    }
+
+    THEN( "not an address without the text, another spelling, or no value" )
     {
         requireFindsNothing( "IPv4 address",
-                             { "256.1.1.1", "1.2.3", "1.2.3.4.5", "01.2.3.4", "version 1.2.3",
-                               "1.2.3.999", "a.b.c.d", "v1.2.3.4", "x.1.2.3.4", "1.2.3.4a" } );
+                             { "connected to 192.168.1.20:8080", "10.0.0.1", "ip: 10.0.0.1",
+                               "IP 10.0.0.1", "IP address 10.0.0.1", "IP:", "IP:   " } );
     }
 }
 
-SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]" )
+SCENARIO( "The environment template finds the value after env:", "[ruletemplate]" )
 {
+    THEN( "the word after env:" )
+    {
+        requireFinds( "Environment", { { "env: prod", "prod" },
+                                       { "Starting service env:staging region=eu", "staging" },
+                                       { "deploy env:   dev-2", "dev-2" } } );
+    }
+
+    THEN( "not without the colon, another spelling, or no value" )
+    {
+        requireFindsNothing( "Environment", { "env prod", "ENV: prod", "Env: prod",
+                                              "environment: prod", "env=prod", "env:" } );
+    }
+}
+
+SCENARIO( "The user template finds the value after user:", "[ruletemplate]" )
+{
+    THEN( "the word after user:" )
+    {
+        requireFinds( "User", { { "user: alice", "alice" },
+                                { "Session opened user:bob@example.com", "bob@example.com" },
+                                { "login user:   svc_backup ok", "svc_backup" } } );
+    }
+
+    THEN( "not without the colon, another spelling, or no value" )
+    {
+        requireFindsNothing(
+            "User", { "user alice", "User: alice", "user=alice", "username alice", "user:" } );
+    }
+}
+
+SCENARIO( "The log start template finds the first ISO 8601 date and time", "[ruletemplate]" )
+{
+    GIVEN( "the template" )
+    {
+        const auto& t = templateNamed( "Log start" );
+
+        THEN( "it is keyed Log start and says it shows when the log starts" )
+        {
+            REQUIRE( t.key == "Log start" );
+            REQUIRE( t.description.contains( "log starts" ) );
+        }
+
+        THEN( "its pattern is the one of the former timestamp template" )
+        {
+            REQUIRE( t.entry().linePattern
+                     == "(?<!\\d)(\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])"
+                        "[Tt ](?:[01]\\d|2[0-3]):[0-5]\\d"
+                        "(?>(?::(?:[0-5]\\d|60)(?:[.,]\\d+)?)?"
+                        "(?:[Zz]|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)?))(?!\\d|:\\d)" );
+        }
+    }
+
+    THEN( "of several lines with a timestamp, the first, where the log starts" )
+    {
+        requireFinds( "Log start", { { "2024-01-15T10:30:00Z start\n"
+                                       "2024-01-15T10:31:12Z running\n"
+                                       "2024-01-15T11:02:45Z stop",
+                                       "2024-01-15T10:30:00Z" } } );
+    }
+
     THEN( "date, T or a space, time, optional seconds, fraction and offset" )
     {
-        requireFinds( "Timestamp (ISO 8601)",
+        requireFinds( "Log start",
                       { { "2024-01-15T10:30:00Z start", "2024-01-15T10:30:00Z" },
                         { "[2024-01-15 10:30:00.123] INFO", "2024-01-15 10:30:00.123" },
                         { "at 2024-12-31T23:59:59,5+01:00.", "2024-12-31T23:59:59,5+01:00" },
@@ -438,15 +555,14 @@ SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]
 
     THEN( "an offset of hours only, and lower-case t and z" )
     {
-        requireFinds( "Timestamp (ISO 8601)",
-                      { { "2024-01-15T10:30:00+01 up", "2024-01-15T10:30:00+01" },
-                        { "2024-01-15 10:30:00-05", "2024-01-15 10:30:00-05" },
-                        { "2024-01-15t10:30:00z", "2024-01-15t10:30:00z" } } );
+        requireFinds( "Log start", { { "2024-01-15T10:30:00+01 up", "2024-01-15T10:30:00+01" },
+                                     { "2024-01-15 10:30:00-05", "2024-01-15 10:30:00-05" },
+                                     { "2024-01-15t10:30:00z", "2024-01-15t10:30:00z" } } );
     }
 
     THEN( "a complete timestamp followed by a colon" )
     {
-        requireFinds( "Timestamp (ISO 8601)",
+        requireFinds( "Log start",
                       { { "2024-01-15 10:30:00: Server started", "2024-01-15 10:30:00" },
                         { "2024-01-15T10:30:00Z: started", "2024-01-15T10:30:00Z" },
                         { "2024-01-15T10:30:00.123: x", "2024-01-15T10:30:00.123" },
@@ -455,7 +571,7 @@ SCENARIO( "The timestamp template finds ISO 8601 date and time", "[ruletemplate]
 
     THEN( "not a date alone, another format, or values out of range" )
     {
-        requireFindsNothing( "Timestamp (ISO 8601)",
+        requireFindsNothing( "Log start",
                              { "2024-01-15", "2024/01/15 10:30:00", "15.01.2024 10:30",
                                "2024-13-01T10:00:00", "2024-01-32T10:00", "2024-01-15T24:00",
                                "2024-01-15T10:60", "12024-01-15T10:30:00", "10:30:00",
@@ -478,30 +594,23 @@ SCENARIO( "The key=value template finds the value after the given key", "[rulete
 
         THEN( "the value directly after = ends at whitespace" )
         {
-            for ( const Sample& sample :
-                  std::initializer_list<Sample>{ { "user=alice", "alice" },
-                                                 { "level=info user=alice msg=hi", "alice" },
-                                                 { "a=1 user=x;y=2", "x;y=2" },
-                                                 { "superuser=root user=alice", "alice" },
-                                                 { "user= msg=hi user=bob", "bob" },
-                                                 { "Starting with --user=alice", "alice" },
-                                                 { "--user=alice", "alice" },
-                                                 { "-user=alice", "alice" },
-                                                 { "a=1 user=alice", "alice" } } ) {
-                INFO( sample.line );
-                REQUIRE( extract( entry, sample.line ) == QString( sample.value ) );
-            }
+            requireFinds( entry, { { "user=alice", "alice" },
+                                   { "level=info user=alice msg=hi", "alice" },
+                                   { "a=1 user=x;y=2", "x;y=2" },
+                                   { "superuser=root user=alice", "alice" },
+                                   { "user= msg=hi user=bob", "bob" },
+                                   { "Starting with --user=alice", "alice" },
+                                   { "--user=alice", "alice" },
+                                   { "-user=alice", "alice" },
+                                   { "a=1 user=alice", "alice" } } );
         }
 
         THEN( "not for other keys, another separator, or without a value" )
         {
-            for ( const auto* line :
-                  { "users: alice", "user: alice", "User=alice", "user=", "user= msg=hi",
-                    "superuser=root", "a.user=x", "my-user=x", "my-user=bob", "x.user=bob",
-                    "my--user=bob", "---user=bob" } ) {
-                INFO( line );
-                REQUIRE( extract( entry, line ) == std::nullopt );
-            }
+            requireFindsNothing( entry, { "users: alice", "user: alice", "User=alice",
+                                          "user=", "user= msg=hi", "superuser=root", "a.user=x",
+                                          "my-user=x", "my-user=bob", "x.user=bob", "my--user=bob",
+                                          "---user=bob" } );
         }
     }
 
@@ -552,22 +661,31 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
         {
             ui.open();
 
-            THEN( "it lists every template with its name and description" )
+            THEN( "it lists every template with its name and description under its group" )
             {
                 const auto& templates = ruleTemplates();
-                REQUIRE( ui.templates->topLevelItemCount() == templates.size() );
-                for ( int i = 0; i < templates.size(); ++i ) {
-                    REQUIRE( ui.templates->topLevelItem( i )->text( 0 ) == templates[ i ].name );
-                    REQUIRE( ui.templates->topLevelItem( i )->text( 1 )
-                             == templates[ i ].description );
+                int i = 0;
+                for ( int g = 0; g < ui.templates->topLevelItemCount(); ++g ) {
+                    const auto* group = ui.templates->topLevelItem( g );
+                    REQUIRE( group->childCount() > 0 );
+                    for ( int c = 0; c < group->childCount(); ++c, ++i ) {
+                        REQUIRE( i < templates.size() );
+                        REQUIRE( group->text( 0 ) == templates[ i ].group );
+                        REQUIRE( group->child( c )->text( 0 ) == templates[ i ].name );
+                        REQUIRE( group->child( c )->text( 1 ) == templates[ i ].description );
+                    }
                 }
+                REQUIRE( i == templates.size() );
+                REQUIRE( ui.templates->topLevelItem( 0 )->text( 0 ) == "General" );
+                REQUIRE( ui.templates->topLevelItem( 1 )->text( 0 ) == "Network" );
             }
 
-            THEN( "the first template is chosen and needs no key" )
+            THEN( "nothing is checked, so OK is disabled and no key is asked for" )
             {
-                REQUIRE( ui.templates->currentItem() == ui.templates->topLevelItem( 0 ) );
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+                REQUIRE( ui.groupItem( "General" )->checkState( 0 ) == Qt::Unchecked );
+                REQUIRE( !ui.ok()->isEnabled() );
                 REQUIRE( !ui.templateKey->isEnabled() );
-                REQUIRE( ui.ok()->isEnabled() );
                 REQUIRE( ui.note->isHidden() );
             }
         }
@@ -592,6 +710,32 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
                 const auto entries = editor.entries();
                 REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
                 REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+            }
+        }
+
+        WHEN( "adding the environment template" )
+        {
+            ui.add( "Environment" );
+
+            THEN( "the new rule is selected in simple mode with the text env:" )
+            {
+                REQUIRE( editor.entries()[ 2 ].key == "Environment" );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.textBefore->text() == "env:" );
+            }
+        }
+
+        WHEN( "adding the user template" )
+        {
+            ui.add( "User" );
+
+            THEN( "the new rule is selected in simple mode with the text user:" )
+            {
+                REQUIRE( editor.entries()[ 2 ].key == "User" );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.textBefore->text() == "user:" );
             }
         }
 
@@ -631,7 +775,7 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
         WHEN( "cancelling the dialog" )
         {
             ui.open();
-            ui.choose( "IPv4 address" );
+            ui.check( "IPv4 address" );
             ui.cancel()->click();
 
             THEN( "nothing is added and the selection stays" )
@@ -653,11 +797,175 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
         {
             ui.add( "IPv4 address" );
 
-            THEN( "it is the only rule, selected" )
+            THEN( "it is the only rule, selected in simple mode with the text IP:" )
             {
                 REQUIRE( editor.entries().size() == 1 );
                 REQUIRE( ui.currentRow() == 0 );
-                REQUIRE( ui.key->text() == templateNamed( "IPv4 address" ).key );
+                REQUIRE( ui.key->text() == "IP address" );
+                REQUIRE( ui.inSimpleMode() );
+                REQUIRE( ui.textBefore->text() == "IP:" );
+            }
+        }
+    }
+}
+
+SCENARIO( "From template… adds every checked template", "[ruletemplate][footereditor]" )
+{
+    GIVEN( "the template dialog of an editor with two rules, the second selected" )
+    {
+        const auto rules = twoRules();
+        FooterEditor editor( rules );
+        TemplateUi ui( editor );
+        editor.show();
+        ui.list->setCurrentIndex( ui.model->index( 1, RuleListModel::KeyColumn ) );
+        ui.open();
+
+        WHEN( "checking log start, then the version, and clicking OK" )
+        {
+            ui.check( "Log start" );
+            ui.check( "Version" );
+            REQUIRE( ui.ok()->isEnabled() );
+            ui.ok()->click();
+
+            THEN( "both are added after the existing rules in list order, the first selected" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 4 );
+                REQUIRE( sameEntry( entries[ 2 ], templateNamed( "Version" ).entry() ) );
+                REQUIRE( sameEntry( entries[ 3 ], templateNamed( "Log start" ).entry() ) );
+                REQUIRE( ui.currentRow() == 2 );
+                REQUIRE( ui.key->text() == "Version" );
+            }
+
+            THEN( "the existing rules are unchanged" )
+            {
+                const auto entries = editor.entries();
+                REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
+                REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+            }
+        }
+
+        WHEN( "checking the Network group" )
+        {
+            ui.checkGroup( "Network" );
+
+            THEN( "its templates are checked, and OK adds them" )
+            {
+                QStringList names;
+                for ( const auto& t : templatesIn( "Network" ) ) {
+                    names.append( t.name );
+                }
+                REQUIRE( ui.checkedTemplates() == names );
+                REQUIRE( ui.ok()->isEnabled() );
+                ui.ok()->click();
+                const auto entries = editor.entries();
+                REQUIRE( entries.size() == 2 + names.size() );
+                REQUIRE( sameEntry( entries[ 2 ], templateNamed( "IPv4 address" ).entry() ) );
+                REQUIRE( ui.currentRow() == 2 );
+            }
+        }
+
+        WHEN( "checking the General group" )
+        {
+            ui.checkGroup( "General" );
+
+            THEN( "all its templates are checked, and OK waits for the key of key=value" )
+            {
+                REQUIRE( ui.checkedTemplates().size() == templatesIn( "General" ).size() );
+                REQUIRE( ui.templateKey->isEnabled() );
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "giving the key user and clicking OK" )
+            {
+                ui.templateKey->setText( "user" );
+                REQUIRE( ui.ok()->isEnabled() );
+                ui.ok()->click();
+
+                THEN( "there is one new rule per template in list order, the first selected" )
+                {
+                    const auto entries = editor.entries();
+                    const auto general = templatesIn( "General" );
+                    REQUIRE( entries.size() == 2 + general.size() );
+                    REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
+                    REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+                    for ( int i = 0; i < general.size(); ++i ) {
+                        REQUIRE( sameEntry( entries[ 2 + i ], general[ i ].entry( "user" ) ) );
+                    }
+                    REQUIRE( ui.currentRow() == 2 );
+                }
+            }
+
+            AND_WHEN( "unchecking key=value" )
+            {
+                ui.check( "key=value", false );
+
+                THEN( "the group is partly checked, no key is asked, and OK adds the others" )
+                {
+                    REQUIRE( ui.groupItem( "General" )->checkState( 0 ) == Qt::PartiallyChecked );
+                    REQUIRE( !ui.templateKey->isEnabled() );
+                    REQUIRE( ui.ok()->isEnabled() );
+                    ui.ok()->click();
+                    REQUIRE( editor.entries().size() == 2 + templatesIn( "General" ).size() - 1 );
+                }
+            }
+        }
+
+        WHEN( "checking a template and unchecking it again" )
+        {
+            ui.check( "Version" );
+            ui.check( "Version", false );
+
+            THEN( "OK is disabled again" )
+            {
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+        }
+
+        WHEN( "double-clicking with the mouse" )
+        {
+            // The check box sits at the start of the item, the name after it.
+            auto* viewport = ui.templates->viewport();
+            const auto rect = ui.templates->visualItemRect( ui.templateItem( "Version" ) );
+            const auto indicator = ui.templates->style()->pixelMetric( QStyle::PM_IndicatorWidth,
+                                                                       nullptr, ui.templates );
+            const QPoint onCheckBox( rect.left() + 3 + indicator / 2, rect.center().y() );
+            const QPoint onName( rect.left() + 3 * indicator, rect.center().y() );
+
+            THEN( "a click on the check box checks it" )
+            {
+                QTest::mouseClick( viewport, Qt::LeftButton, {}, onCheckBox );
+                REQUIRE( ui.checkedTemplates() == QStringList{ "Version" } );
+            }
+
+            THEN( "a double-click on the check box leaves it as two clicks do (#59)" )
+            {
+                doubleClick( viewport, onCheckBox );
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+            }
+
+            THEN( "a double-click on the name checks it, and another unchecks it" )
+            {
+                doubleClick( viewport, onName );
+                REQUIRE( ui.checkedTemplates() == QStringList{ "Version" } );
+                REQUIRE( ui.dialog->isVisible() );
+                doubleClick( viewport, onName );
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+            }
+        }
+
+        WHEN( "checking templates, cancelling and opening the dialog again" )
+        {
+            ui.check( "Version" );
+            ui.checkGroup( "Network" );
+            ui.cancel()->click();
+            ui.open();
+
+            THEN( "nothing is checked" )
+            {
+                REQUIRE( ui.checkedTemplates().isEmpty() );
+                REQUIRE( ui.groupItem( "Network" )->checkState( 0 ) == Qt::Unchecked );
+                REQUIRE( !ui.ok()->isEnabled() );
             }
         }
     }
@@ -665,13 +973,13 @@ SCENARIO( "From template… adds a rule and selects it", "[ruletemplate][footere
 
 SCENARIO( "The key=value template asks for the key", "[ruletemplate][footereditor]" )
 {
-    GIVEN( "the template dialog with key=value chosen" )
+    GIVEN( "the template dialog with key=value checked" )
     {
         FooterEditor editor( twoRules() );
         TemplateUi ui( editor );
         editor.show();
         ui.open();
-        ui.choose( "key=value" );
+        ui.check( "key=value" );
 
         THEN( "the key field is enabled, and OK waits for a key" )
         {
@@ -756,19 +1064,30 @@ SCENARIO( "The key=value template asks for the key", "[ruletemplate][footeredito
                 THEN( "it starts over, without the key given before" )
                 {
                     REQUIRE( ui.templateKey->text().isEmpty() );
-                    REQUIRE( ui.templates->currentItem() == ui.templates->topLevelItem( 0 ) );
+                    REQUIRE( ui.checkedTemplates().isEmpty() );
                 }
             }
         }
 
-        WHEN( "choosing a template that needs no key" )
+        WHEN( "checking a template that needs no key too" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
 
-            THEN( "the key field is disabled again" )
+            THEN( "the key is still asked for, and OK still waits for it" )
             {
-                REQUIRE( !ui.templateKey->isEnabled() );
-                REQUIRE( ui.ok()->isEnabled() );
+                REQUIRE( ui.templateKey->isEnabled() );
+                REQUIRE( !ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "unchecking key=value" )
+            {
+                ui.check( "key=value", false );
+
+                THEN( "the key field is disabled again, and OK enabled" )
+                {
+                    REQUIRE( !ui.templateKey->isEnabled() );
+                    REQUIRE( ui.ok()->isEnabled() );
+                }
             }
         }
     }
@@ -785,9 +1104,9 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
         editor.show();
         ui.open();
 
-        WHEN( "choosing the version template" )
+        WHEN( "checking the version template" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
 
             THEN( "a note says the new rule becomes an alternative for Version" )
             {
@@ -812,9 +1131,9 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
             }
         }
 
-        WHEN( "choosing a template with another key" )
+        WHEN( "checking a template with another key" )
         {
-            ui.choose( "Timestamp (ISO 8601)" );
+            ui.check( "Log start" );
 
             THEN( "there is no note" )
             {
@@ -824,7 +1143,7 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
 
         WHEN( "giving key=value the key Version" )
         {
-            ui.choose( "key=value" );
+            ui.check( "key=value" );
             ui.templateKey->setText( "Version" );
 
             THEN( "the note shows up for the given key" )
@@ -837,6 +1156,115 @@ SCENARIO( "A template whose key is used already says it adds an alternative",
                 ui.templateKey->setText( "Versions" );
 
                 THEN( "the note goes away" )
+                {
+                    REQUIRE( ui.note->isHidden() );
+                }
+            }
+        }
+    }
+}
+
+SCENARIO( "The alternative note names every checked template whose key is used",
+          "[ruletemplate][footereditor]" )
+{
+    GIVEN( "an editor with rules for the keys Version and IP address" )
+    {
+        const QList<FooterEntry> rules{ { "Version", "Version=(\\S+)", "", true, {} },
+                                        { "IP address", "ip=(\\S+)", "", true, {} } };
+        FooterEditor editor( rules );
+        TemplateUi ui( editor );
+        editor.show();
+        ui.open();
+
+        WHEN( "checking version, build number and the IPv4 address" )
+        {
+            ui.check( "Version" );
+            ui.check( "Build number" );
+            ui.check( "IPv4 address" );
+
+            THEN( "the note names Version and IP address, but not Build" )
+            {
+                REQUIRE( !ui.note->isHidden() );
+                REQUIRE( ui.note->text().contains( "“Version”" ) );
+                REQUIRE( ui.note->text().contains( "“IP address”" ) );
+                REQUIRE( !ui.note->text().contains( "Build" ) );
+                REQUIRE( ui.note->text().contains( "alternative" ) );
+                REQUIRE( ui.ok()->isEnabled() );
+            }
+
+            AND_WHEN( "unchecking version" )
+            {
+                ui.check( "Version", false );
+
+                THEN( "the note names only IP address" )
+                {
+                    REQUIRE( !ui.note->isHidden() );
+                    REQUIRE( ui.note->text().contains( "“IP address”" ) );
+                    REQUIRE( !ui.note->text().contains( "Version" ) );
+                }
+            }
+
+            AND_WHEN( "adding them" )
+            {
+                ui.ok()->click();
+
+                THEN( "they are added after the existing rules, which stay unchanged" )
+                {
+                    const auto entries = editor.entries();
+                    REQUIRE( entries.size() == 5 );
+                    REQUIRE( sameEntry( entries[ 0 ], rules[ 0 ] ) );
+                    REQUIRE( sameEntry( entries[ 1 ], rules[ 1 ] ) );
+                    REQUIRE( entries[ 2 ].key == "Version" );
+                    REQUIRE( entries[ 3 ].key == "Build" );
+                    REQUIRE( entries[ 4 ].key == "IP address" );
+                    REQUIRE( ui.currentRow() == 2 );
+                }
+            }
+        }
+
+        WHEN( "checking key=value with the key Version along with the IPv4 address" )
+        {
+            ui.check( "key=value" );
+            ui.check( "IPv4 address" );
+            ui.templateKey->setText( "Version" );
+
+            THEN( "the note names the given key too" )
+            {
+                REQUIRE( ui.note->text().contains( "“Version”" ) );
+                REQUIRE( ui.note->text().contains( "“IP address”" ) );
+            }
+        }
+
+        WHEN( "checking two templates with the same key no rule has yet" )
+        {
+            // Both use the key Serial number (#58).
+            ui.check( "Serial number" );
+            ui.check( "Device serial number" );
+
+            THEN( "the note names that key" )
+            {
+                REQUIRE( !ui.note->isHidden() );
+                REQUIRE( ui.note->text().contains( "“Serial number”" ) );
+                REQUIRE( ui.note->text().contains( "alternative" ) );
+                REQUIRE( !ui.note->text().contains( "Version" ) );
+            }
+
+            AND_WHEN( "checking version too" )
+            {
+                ui.check( "Version" );
+
+                THEN( "the note names both keys" )
+                {
+                    REQUIRE( ui.note->text().contains( "“Serial number”" ) );
+                    REQUIRE( ui.note->text().contains( "“Version”" ) );
+                }
+            }
+
+            AND_WHEN( "unchecking one of them" )
+            {
+                ui.check( "Device serial number", false );
+
+                THEN( "there is no note" )
                 {
                     REQUIRE( ui.note->isHidden() );
                 }
@@ -860,9 +1288,9 @@ SCENARIO( "The alternative note counts only rules the scanner uses",
 
         THEN( "neither key gets the note" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
             REQUIRE( ui.note->isHidden() );
-            ui.choose( "IPv4 address" );
+            ui.check( "IPv4 address" );
             REQUIRE( ui.note->isHidden() );
         }
     }
@@ -877,7 +1305,7 @@ SCENARIO( "The alternative note counts only rules the scanner uses",
 
         THEN( "its key gets no note" )
         {
-            ui.choose( "Version" );
+            ui.check( "Version" );
             REQUIRE( ui.note->isHidden() );
         }
     }

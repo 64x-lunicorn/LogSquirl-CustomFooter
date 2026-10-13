@@ -34,7 +34,9 @@ namespace custom_footer {
  * A template that fits the simple form is a SimpleRule, built into patterns
  * by applySimpleRule(), so it opens in simple mode. One whose value needs a
  * shape, such as a dotted version or a timestamp, has an advanced line
- * pattern instead and opens in advanced mode.
+ * pattern instead and opens in advanced mode. A template may bring value
+ * mappings, so that a raw code reads as text, e.g. the manufacturer of a
+ * VIN's first three characters.
  */
 struct RuleTemplate {
     QString name;        ///< E.g. "Version".
@@ -47,6 +49,12 @@ struct RuleTemplate {
     /// group. Empty for a simple template. With asksForKey(), `%1` in it
     /// stands for the given key, escaped to match literally.
     QString linePattern;
+    /// The group the dialog shows it under, e.g. "General"; set for all
+    /// templates of a group by makeTemplates().
+    QString group;
+    /// Value mappings the new rule starts with, e.g. a code to its name;
+    /// empty for most templates.
+    QList<ValueMapping> mappings;
 
     /// Whether the user gives the key, e.g. for `key=value`.
     bool asksForKey() const
@@ -62,7 +70,8 @@ struct RuleTemplate {
     }
 
     /**
-     * The new rule, enabled and without mappings. @p askedKey is the key of
+     * The new rule, enabled and with the template's mappings, which users
+     * can edit like any others. @p askedKey is the key of
      * a template that asks for one, see givenKey(); other templates ignore
      * it. A template asking for a key gives an empty rule without one.
      */
@@ -73,7 +82,8 @@ struct RuleTemplate {
     static QString givenKey( const QString& askedKey );
 };
 
-/// The rule templates, in the order they are offered.
+/// The rule templates, in the order they are offered: group by group, the
+/// templates of a group next to each other.
 const QList<RuleTemplate>& ruleTemplates();
 
 } // namespace custom_footer

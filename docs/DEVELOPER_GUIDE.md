@@ -532,7 +532,7 @@ hidden global test state.
 | **SimpleRule** | `simplerule.h/.cpp` | Simple mode: generates a rule's patterns from the text before its value, and classifies patterns |
 | **RuleFromLine** | `rulefromline.h/.cpp` | Makes a simple rule and a key from a sample line and the value marked in it |
 | **SelectedLinePicker** | `selectedlinepicker.h/.cpp` | The editor's view of the Log Line a rule is made from: click or mark the value |
-| **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values, and the dialog choosing one |
+| **RuleTemplate** | `ruletemplate.h/.cpp`, `ruletemplatedialog.h/.cpp` | Ready-made rules for common values in groups, and the dialog checking those to add |
 
 ## Scanning Algorithm
 
@@ -923,8 +923,15 @@ with the message open), and the 26.11 FakeHost scenarios in
 ### Rule templates
 
 `ruletemplate.h` is a data table, `ruleTemplates()`: each `RuleTemplate`
-has a name, a one-line description, a key, and either a `SimpleRule` or an
-advanced `linePattern` with the value as group 1. `entry()` builds the
+has a name, a one-line description, a key, either a `SimpleRule` or an
+advanced `linePattern` with the value as group 1, its group, and value
+mappings, empty for most templates.
+`makeTemplates()` builds the table from one function per group
+(`generalTemplates()`, `networkTemplates()`, …), each returning its
+templates in order; `appendGroup()` sets their `group`, so the rows of a
+group's function leave it out. The order of the `appendGroup()` calls is
+the order of the groups in the dialog, and the templates of a group are
+next to each other in `ruleTemplates()`. `entry()` builds the
 rule: a simple template goes through `applySimpleRule()`, so its patterns
 are exactly what simple mode generates and it opens in simple mode; an
 advanced one keeps its pattern and opens in advanced mode. A template
@@ -932,10 +939,20 @@ with an empty key asks for it (`asksForKey()`): `%1` in its pattern is the
 `givenKey()` (trimmed, one trailing `=` dropped) escaped with
 `QRegularExpression::escape()`, and without a key `entry()` is empty. Only
 values with a shape or boundaries a simple rule cannot express are
-advanced: Version, IPv4, ISO 8601 timestamps, and `key=value`, whose key
+advanced: in General and Network, Version, Log start (ISO 8601
+timestamps), MAC and IPv6 address
+(text before, then the shape: one MAC separator throughout via the
+backreference `\2`, IPv6 as RFC 3986's `IPv6address` built from `h16` and
+`ls32` pieces), and `key=value`, whose key
 must not end a longer key (`(?<![\w.-])`, before up to two dashes so
 flags like `--user=` match but `my-user=` does not) and whose value starts
-right after `=`. The patterns guard their edges with lookarounds rather than
+right after `=`. In the other groups, a template is advanced where its
+value has a shape (VIN, Manufacturer, Model year, Build fingerprint,
+U-Boot version, Runner image version, Test result), a fixed place
+(Syslog host), or a text a simple rule cannot bound: the DMI line up to
+`, BIOS`, the Spring Boot start line (Application, Application version,
+Host), Active profile, JRE version, and App version's `Version:`, which
+also ends `OS Version:`. The patterns guard their edges with lookarounds rather than
 anchors or `\b`, as a value may be anywhere in the line and `_` counts as
 a word character; `\d` and `\w` are ASCII, like everything the scanner
 compiles. Version takes `version` after `_` or as a camel-case `Version`,
@@ -947,19 +964,77 @@ dates are never taken. The timestamp's seconds, fraction and offset are an
 atomic group followed by `(?!\d|:\d)`, so a truncated field (`10:30:5`,
 `+01:0`) fails instead of backtracking to a shorter match, while a `:`
 after a complete timestamp, as in `10:30:00: started`, is fine. Each template is tested
-with lines it must find and lines it must not, through `FooterScanner`
-(`tests/ruletemplate_test.cpp`). A new template is a row in
-`makeTemplates()` plus such samples.
+with lines it must find and lines it must not, through `FooterScanner`:
+General, the dialog and the editor in `tests/ruletemplate_test.cpp`, each
+other group in its own `tests/ruletemplate_<group>_test.cpp`, with sample
+lines that name the tool and version they come from; the helpers they
+share (`templateNamed()`, `extract()`, `requireFinds()`,
+`requireFindsNothing()`, `templatesIn()`) are in `tests/templatesamples.h`. A new template is a
+row in its group's function plus such samples in its group's test file; a
+new group is a function returning its templates, one `appendGroup()` line
+in `makeTemplates()`, and a test file. Template names are unique across
+groups, as the dialog tests find templates by name.
 
-`RuleTemplateDialog` lists name and description in a `QTreeWidget`, with a
-key field enabled only for a template that asks for one; OK is enabled
-once `entry()` has a key, and a hint says a typed trailing `=` is dropped.
-It gets the keys of the rules the scanner uses, `RuleCheck::keysInUse()`,
-in `reset()` and shows a note when the new rule's key is one of
-them: the rule is still added, as an alternative. `FooterEditor::addFromTemplate()` commits the panel's
-pending edit, keeps one dialog, calls `reset()` and `open()` (not `exec()`,
-so tests click through it), and on `accepted` appends `entry()` and selects
-it, like the add button, without touching other rows.
+Every template follows one rule: **a template finds a value that holds
+for the whole file.** The footer shows one value per key, taken from the
+first line that matches, so a template is for a value such as a version,
+a serial number or a device name, not for one that changes from line to
+line. A template that matches by shape alone, without text before the
+value, is only for values unique by nature (a VIN, a build fingerprint);
+anything else needs text before the value, so that the first match is
+the value meant and not some other value of the same shape.
+
+A simple rule allows no whitespace between its text and the value
+(`IP:192.168.1.20`), so a simple template whose text ends in a letter or
+digit ends it with a space (`Linux version `), as **Rule from a selected
+line** does: without it, `Linux versions 1` would give the kernel version
+`s`. A test in `tests/ruletemplate_test.cpp` checks every such template.
+
+The VIN template is such a shape: `kVin` in `ruletemplate.cpp` holds it
+without a capturing group (17 characters of `[A-HJ-NPR-Z0-9]`, lookaheads
+for at least one letter and one digit, no letter or digit on either
+side), and the VIN template captures all of it. A template that takes a
+part of a VIN puts `kVin` in a lookahead and captures the part, so it
+finds exactly the VINs the VIN template finds. Its tests are in
+`tests/ruletemplate_automotive_test.cpp`.
+
+A template may bring value mappings, which `entry()` copies into the new
+rule; from there they are the rule's own, edited in the panel and saved
+with it, and a template without mappings makes a rule without any.
+Manufacturer and Model year use them: they capture the WMI and the 10th
+character of a VIN (`kVin` in a lookahead), and their mappings are built
+from compact tables in `ruletemplate.cpp`, `kManufacturers` (a brand and
+its WMIs, separated by spaces, taken from Wikibooks' WMI list; a WMI
+shared by several brands is left out) and `kModelYearCodes` (one code per
+year from `kFirstModelYear`, 2010, for one 30-year cycle). A new template
+with mappings sets `mappings` after building the row. Their tests,
+through the scanner, the From template… dialog and a save and load, are in
+`tests/ruletemplate_mapping_test.cpp`.
+
+`RuleTemplateDialog` lists the templates in a `QTreeWidget`: a top-level
+item per group, `Qt::ItemIsAutoTristate`, with a checkable child per
+template showing name and description and holding its index in
+`ruleTemplates()` as `Qt::UserRole`. Checking a group checks its
+templates, and some of them checked shows it partly checked. A
+double-click on a template's name toggles it: an event filter on the
+viewport takes it, but leaves one on the check box
+(`SE_ItemViewItemCheckIndicator`) to the delegate, which toggles on the
+release after it, so the box takes a double-click as two clicks. Tests
+send the platform's press, release, double-click, release. Space toggles
+through the delegate, and Enter reaches the default button. Besides
+existing keys, the note names a key that several checked templates share. The key field is enabled
+while a checked template asks for a key; `entries()` gives one rule per
+checked template in list order, and OK is enabled once there is at least
+one and each has a key. A hint says a typed trailing `=` is dropped. The
+dialog gets the keys of the rules the scanner uses,
+`RuleCheck::keysInUse()`, in `reset()`, which also unchecks everything,
+and its note names every key of a checked template that is one of them:
+those rules are still added, as alternatives.
+`FooterEditor::addFromTemplate()` commits the panel's pending edit, keeps
+one dialog, calls `reset()` and `open()` (not `exec()`, so tests click
+through it), and on `accepted` appends `entries()` after the existing
+rules and selects the first new one, like the add button, without
+touching other rows.
 
 ## Configuration Storage
 

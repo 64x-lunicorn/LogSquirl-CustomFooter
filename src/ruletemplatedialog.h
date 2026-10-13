@@ -32,17 +32,20 @@ class QTreeWidget;
 namespace custom_footer {
 
 /**
- * Chooses a rule template: the templates with their name and description,
- * and a key field for a template that asks for its key, such as
- * `key=value`. OK is enabled once the chosen template has everything it
- * needs.
+ * Chooses rule templates: the templates with their name and description
+ * under their group, each with a check box, and a key field for a
+ * template that asks for its key, such as `key=value`. Checking a group
+ * checks all its templates; a group with some of them checked shows as
+ * partly checked. OK is enabled once at least one template is checked and
+ * every checked one has everything it needs.
  *
  * A key typed with its `=`, such as `user=`, loses it, as the pattern adds
  * it; a hint says so.
  *
- * If the key of the new rule is already used by a rule, a note says that
- * the new rule becomes an alternative for it. That is allowed, as rules
- * sharing a key are alternatives, but never happens silently.
+ * If the key of a new rule is already used by a rule, a note names every
+ * such key and says that the new rules become alternatives for them. That
+ * is allowed, as rules sharing a key are alternatives, but never happens
+ * silently.
  *
  * The editor keeps one dialog and shows it with open(), so tests drive it
  * through its widgets instead of waiting for exec() to return.
@@ -53,21 +56,26 @@ class RuleTemplateDialog : public QDialog {
 public:
     explicit RuleTemplateDialog( QWidget* parent = nullptr );
 
-    /// Start over for a new choice: the first template, no key, and
+    /// Start over for a new choice: nothing checked, no key, and
     /// @p existingKeys as the keys of the rules the scanner uses
     /// (RuleCheck::keysInUse()).
     void reset( const QStringList& existingKeys );
 
-    /// The rule the chosen template makes, with the given key if it asks
-    /// for one.
-    FooterEntry entry() const;
+    /// The rules the checked templates make, in list order, with the given
+    /// key for a template that asks for one.
+    QList<FooterEntry> entries() const;
+
+protected:
+    /// A double-click on a template's name checks or unchecks it; one on
+    /// its check box is left to the box, which takes it as two clicks.
+    bool eventFilter( QObject* watched, QEvent* event ) override;
 
 private Q_SLOTS:
     void updateChoice();
 
 private:
-    /// The index of the chosen template in ruleTemplates(), or -1.
-    int chosenTemplate() const;
+    /// The indexes of the checked templates in ruleTemplates(), in order.
+    QList<int> checkedTemplates() const;
 
     QStringList existingKeys_;
     QTreeWidget* list_ = nullptr;

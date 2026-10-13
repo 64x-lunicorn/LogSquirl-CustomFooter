@@ -45,8 +45,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   File, a message says what to do. On LogSquirl 26.11 the editor moves to
   *Plugins → Custom Footer → Edit Rules…*; on LogSquirl 26.10 the action is
   not offered, and the menu stays *Plugins → Custom Footer…*.
+- **Environment and User templates** — two more templates in simple mode:
+  Environment, the word after `env:` (`env: prod`, `env: staging`), and
+  User, the word after `user:`. Adjust the text to your log.
+- **Network template group** — next to IPv4 address, two templates in
+  advanced mode: MAC address, the address after `MAC:` as
+  `52:54:00:12:34:56`, `00-1A-2B-3C-4D-5E` or `0050.56a1.b2c3`, with the
+  same separator throughout, and IPv6 address, the address after `IPv6:`,
+  in full, shortened with `::` or with an IPv4 address as its last part
+  (`::ffff:192.0.2.10`). Their pattern starts with the text, which you
+  adjust to your log (`link/ether`, `inet6`).
+- **Automotive template group** — VIN, found by its shape alone, with or
+  without text before it: 17 letters and digits without `I`, `O` and `Q`,
+  with both letters and digits, not part of a longer word (no check digit
+  test, which only North American VINs have). IMEI and ICCID, the word
+  after `IMEI:` and `ICCID:` in simple mode; adjust the text to your log.
+- **Templates with value mappings** — a template can bring value
+  mappings, which the new rule has like any others: shown in the editor,
+  editable and saved with it. Two Automotive templates use them, both
+  finding their value in exactly the VINs the VIN template finds:
+  Manufacturer, the first three characters (the WMI) mapped to the
+  manufacturer for common WMIs of major brands (`WVW` → Volkswagen, `WBA`
+  → BMW), an unmapped WMI shown as it is; and Model year, the 10th
+  character mapped to the year in the cycle 2010 to 2039.
+- **Android template group** — for logcat output and bug reports: Build
+  fingerprint, found by its shape
+  (`brand/product/device:version/id/incremental:type/tags`), and from
+  getprop's `[key]: [value]` lines Device model (`ro.product.model`),
+  Android version (`ro.build.version.release`) and Device serial number
+  (`ro.serialno`, with the key `Serial number`).
+- **Linux and boot template group** — templates for dmesg, boot and
+  syslog output: Kernel version, the word after `Linux version`; Hardware
+  (DMI), vendor and product before `, BIOS` in the `DMI:` line; Kernel
+  command line, the rest of the line after `Command line:`; U-Boot
+  version, from the U-Boot banner; and Syslog host, the host after the
+  time of an RFC 3164 syslog line, which fits the log of one host, not
+  merged ones.
+- **iOS crash log template group** — four templates for the header of an
+  Apple crash report: Hardware model (`Hardware Model:`), OS version
+  (`OS Version:`, up to the end of the line, as in `iPhone OS 17.2
+  (21C62)`) and Incident identifier (`Incident Identifier:`) in simple
+  mode, and App version (`Version:`, up to the end of the line, as in
+  `1.0 (1)`) in advanced mode, which does not take `OS Version:` or
+  another `… Version:` when the app's version is empty.
+- **Java and Spring Boot template group** — from the Spring Boot start
+  line (`Starting MyApp v1.2.0 using Java 17.0.8 …`), in the wording of
+  Spring Boot 2 and 3: Application, Application version, Java version
+  (simple mode, after `using Java`) and Host (Spring Boot 2 only, as
+  Spring Boot 3 no longer logs it). Active profile, from `The following …
+  active:`, one profile without its quotes. JRE version, the runtime
+  version in `(build …)` of the `# JRE version:` line of a JVM crash log.
+- **Database template group** — the server version from the line a
+  database server logs when it starts, all in simple mode: PostgreSQL
+  version (`starting PostgreSQL 16.1 on …`), MySQL version, the quoted
+  version of `Version: '8.0.36'` (MariaDB's too), and Redis version
+  (`Redis version=7.2.4,`). With several starts in a file, the first
+  counts.
+- **CI template group** — for build logs: from GitHub Actions, Runner
+  image (`Image: ubuntu-24.04`) and Runner image version
+  (`Version: 20261004.327.1`, not the Runner Image Provisioner's version);
+  Commit, from `HEAD is now at <sha>`, the first checkout counting;
+  GitLab Runner version, from `Running with gitlab-runner <version>`; and
+  from Jenkins, Started by, the user's name from `Started by user <name>`.
+- **Test run template group** — for pytest output, meant for one run per
+  file: Python version and pytest version from the header
+  (`platform linux -- Python 3.12.3, pytest-8.3.2, …`), in simple mode,
+  and Test result, the summary at the end (`3 failed, 120 passed in
+  12.30s`) without the `=` around it, in advanced mode.
 
 ### Changed
+- **Template groups, and several templates at once** — **From template…**
+  lists the templates under their group: Version, Build number, Serial
+  number, Environment, User, Log start and `key=value` under *General*,
+  IPv4 address under *Network*. Templates are checked instead of picked one at
+  a time; checking a group checks all its templates. **Add Rules** adds
+  one new rule per checked template, after the existing rules and in the
+  order the dialog lists them, and selects the first new one; existing
+  rules are not changed. While `key=value` is checked, the dialog asks for
+  its key and **Add Rules** stays disabled until one is given. The note
+  about a key already in use names every checked template's key that an
+  enabled rule with a line pattern has. The developer guide states the
+  rule every template follows: it finds a value that holds for the whole
+  file.
+- **IPv4 address template** — finds the address after `IP:` in simple
+  mode instead of the first address in a line, which in a log with clients
+  and servers is an arbitrary one. Adjust the text so it says which
+  address is meant. The key stays `IP address`.
+- **Timestamp template renamed Log start** — with the key `Log start`, and
+  a description saying what it shows: as the first match counts, the first
+  date and time in the file, which is when the log starts. It matches what
+  it matched before.
+- Rules made from these templates earlier do not change: a template only
+  makes new rules.
 - **Footer session** — one module now owns the rules in the config
   directory, the active file, the footer's controller and the rule
   editor's lifetime, and its destructor defines the shutdown order: the

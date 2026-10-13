@@ -45,8 +45,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   File, a message says what to do. On LogSquirl 26.11 the editor moves to
   *Plugins → Custom Footer → Edit Rules…*; on LogSquirl 26.10 the action is
   not offered, and the menu stays *Plugins → Custom Footer…*.
+- **Environment and User templates** — two more templates in simple mode:
+  Environment, the word after `env:` (`env: prod`, `env: staging`), and
+  User, the word after `user:`. Adjust the text to your log.
 
 ### Changed
+- **IPv4 address template** — finds the address after `IP:` in simple
+  mode instead of the first address in a line, which in a log with clients
+  and servers is an arbitrary one. Adjust the text so it says which
+  address is meant. The key stays `IP address`.
+- **Timestamp template renamed Log start** — with the key `Log start`, and
+  a description saying what it shows: as the first match counts, the first
+  date and time in the file, which is when the log starts. It matches what
+  it matched before.
+- Rules made from these templates earlier do not change: a template only
+  makes new rules.
 - **Footer session** — one module now owns the rules in the config
   directory, the active file, the footer's controller and the rule
   editor's lifetime, and its destructor defines the shutdown order: the

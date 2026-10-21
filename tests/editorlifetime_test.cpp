@@ -30,8 +30,10 @@
 #include "rulelistmodel.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPointer>
@@ -138,6 +140,29 @@ SCENARIO( "The rule editor's import and export never block", "[footereditor][lif
                 const auto exported = FooterConfig::importFromJson( path );
                 REQUIRE( exported.size() == 1 );
                 REQUIRE( exported[ 0 ].key == "A" );
+            }
+        }
+
+        WHEN( "the chosen file cannot be written" )
+        {
+            // A directory in place of the file: unwritable on every platform,
+            // also for root.
+            const auto path = dir.path() + "/taken.json";
+            REQUIRE( QDir().mkdir( path ) );
+            QString reason;
+            REQUIRE_FALSE( FooterConfig::exportToJson( path, {}, &reason ) );
+            REQUIRE_FALSE( reason.isEmpty() );
+            Q_EMIT dialog->fileSelected( path ); // as the dialog does on OK
+
+            THEN( "the export error is shown with the reason, and nothing is written" )
+            {
+                auto* box = child<QMessageBox>( *editor, "exportErrorBox" );
+                REQUIRE( box->isVisible() );
+                REQUIRE( box->text().contains( path ) );
+                REQUIRE( box->text().contains( reason ) );
+                REQUIRE( QFileInfo( path ).isDir() );
+                REQUIRE( QDir( dir.path() ).entryList( QDir::AllEntries | QDir::NoDotAndDotDot )
+                         == QStringList{ "taken.json" } );
             }
         }
     }

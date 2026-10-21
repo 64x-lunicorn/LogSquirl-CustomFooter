@@ -24,6 +24,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QSettings>
 
 namespace custom_footer {
@@ -123,7 +124,8 @@ bool FooterConfig::saveMaxLines( const QString& configDir, int maxLines )
     return settings.status() == QSettings::NoError;
 }
 
-bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntry>& entries )
+bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntry>& entries,
+                                 QString* errorOut )
 {
     QJsonArray jsonEntries;
     for ( const auto& entry : entries ) {
@@ -149,12 +151,20 @@ bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntr
     root[ "version" ] = 1;
     root[ "entries" ] = jsonEntries;
 
-    QFile file( filePath );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-        return false;
+    // QSaveFile writes to a temporary file and renames it over filePath only
+    // on commit(), after every byte was written: a failed write leaves
+    // filePath as it was and removes the temporary file.
+    QSaveFile file( filePath );
+    if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+        file.write( QJsonDocument( root ).toJson( QJsonDocument::Indented ) );
+        if ( file.commit() ) {
+            return true;
+        }
     }
-    file.write( QJsonDocument( root ).toJson( QJsonDocument::Indented ) );
-    return true;
+    if ( errorOut ) {
+        *errorOut = file.errorString();
+    }
+    return false;
 }
 
 QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath, QString* errorOut )

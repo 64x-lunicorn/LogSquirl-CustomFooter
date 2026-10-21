@@ -26,7 +26,9 @@
 
 #include "footerconfig.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 using namespace custom_footer;
@@ -173,6 +175,111 @@ SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
                 REQUIRE( error.contains( "parse" ) );
             }
         }
+    }
+}
+
+SCENARIO( "FooterConfig export reports a failed write and leaves no partial file",
+          "[footerconfig][export]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const QList<FooterEntry> entries{ { "VIN", "VIN:\\s+(\\S+)", "", true, {} } };
+    const auto dirEntries = [ & ]( const QString& path ) {
+        return QDir( path ).entryList( QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden );
+    };
+
+    GIVEN( "a directory where the file should be" )
+    {
+        // Unwritable on every platform, also for root.
+        const QString target = tmpDir.path() + "/rules.json";
+        REQUIRE( QDir().mkdir( target ) );
+
+        WHEN( "exporting to it" )
+        {
+            QString error;
+            const bool ok = FooterConfig::exportToJson( target, entries, &error );
+
+            THEN( "the failure and its reason are reported, and nothing is written" )
+            {
+                REQUIRE_FALSE( ok );
+                REQUIRE_FALSE( error.isEmpty() );
+                REQUIRE( QFileInfo( target ).isDir() );
+                REQUIRE( dirEntries( target ).isEmpty() );
+                REQUIRE( dirEntries( tmpDir.path() ) == QStringList{ "rules.json" } );
+            }
+        }
+    }
+
+    GIVEN( "a target in a directory that does not exist" )
+    {
+        const QString target = tmpDir.path() + "/missing/rules.json";
+
+        WHEN( "exporting to it" )
+        {
+            QString error;
+            const bool ok = FooterConfig::exportToJson( target, entries, &error );
+
+            THEN( "the failure and its reason are reported, and nothing is written" )
+            {
+                REQUIRE_FALSE( ok );
+                REQUIRE_FALSE( error.isEmpty() );
+                REQUIRE_FALSE( QFileInfo::exists( target ) );
+                REQUIRE( dirEntries( tmpDir.path() ).isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "an exported rules file in a directory that can no longer be written" )
+    {
+        const QString folder = tmpDir.path() + "/locked";
+        REQUIRE( QDir().mkdir( folder ) );
+        const QString target = folder + "/rules.json";
+        REQUIRE( FooterConfig::exportToJson( target, entries ) );
+        QFile previous( target );
+        REQUIRE( previous.open( QIODevice::ReadOnly ) );
+        const auto before = previous.readAll();
+        previous.close();
+
+        const auto writable = QFile::permissions( folder );
+        REQUIRE( QFile::setPermissions( folder, QFileDevice::ReadOwner | QFileDevice::ExeOwner ) );
+        // Windows ignores these permissions on a directory, and root ignores
+        // them everywhere: there the directory stays writable.
+        QFile probe( folder + "/probe" );
+        const bool locked = !probe.open( QIODevice::WriteOnly );
+        if ( !locked ) {
+            probe.close();
+            probe.remove();
+        }
+
+        WHEN( "exporting other rules over it" )
+        {
+            QString error;
+            bool ok = true;
+            if ( locked ) {
+                ok = FooterConfig::exportToJson(
+                    target, { { "Other", "Other=(\\S+)", "", false, {} } }, &error );
+            }
+            const auto after = dirEntries( folder );
+            QFile current( target );
+            const bool readable = current.open( QIODevice::ReadOnly );
+            const auto content = current.readAll();
+            QFile::setPermissions( folder, writable );
+
+            THEN( "the failure is reported, and the previous file is left as it was" )
+            {
+                if ( !locked ) {
+                    WARN( "The directory cannot be made unwritable here; not checked" );
+                }
+                else {
+                    REQUIRE_FALSE( ok );
+                    REQUIRE_FALSE( error.isEmpty() );
+                    REQUIRE( after == QStringList{ "rules.json" } );
+                    REQUIRE( readable );
+                    REQUIRE( content == before );
+                }
+            }
+        }
+        QFile::setPermissions( folder, writable );
     }
 }
 

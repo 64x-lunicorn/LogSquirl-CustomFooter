@@ -1123,6 +1123,16 @@ plugin's config directory provided by the host.
 The JSON import/export uses a versioned format (`version: 1`) to allow
 forward-compatible changes.  See the README for format examples.
 
+`FooterConfig::exportToJson()` writes through a `QSaveFile`: the JSON goes
+to a temporary file next to the target, which is renamed over the target
+only once every byte was written.  The target is therefore either the
+previous file or the complete export, never a partial one, and a failed
+write removes the temporary file.  On failure it returns false with the
+`QSaveFile` error as the reason, which the editor shows in its export
+error box (`exportErrorBox`) after the path.  The INI file is written by
+`QSettings`, which also writes through a `QSaveFile` and reports a failed
+`sync()` in `status()`.
+
 ## Adding a New Feature
 
 1. Extend `FooterEntry` in `footerentry.h` if new per-rule data is needed.

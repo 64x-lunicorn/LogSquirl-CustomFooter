@@ -513,8 +513,10 @@ void FooterEditor::exportRules()
 
 void FooterEditor::exportTo( const QString& filePath )
 {
-    if ( !FooterConfig::exportToJson( filePath, entries() ) ) {
-        showError( tr( "Export Error" ), tr( "Could not write to file: %1" ).arg( filePath ),
+    QString error;
+    if ( !FooterConfig::exportToJson( filePath, entries(), &error ) ) {
+        showError( tr( "Export Error" ),
+                   tr( "Could not write to file: %1\n%2" ).arg( filePath, error ),
                    "exportErrorBox" );
     }
 }

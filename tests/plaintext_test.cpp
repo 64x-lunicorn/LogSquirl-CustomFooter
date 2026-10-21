@@ -68,9 +68,9 @@ SCENARIO( "The rule list's tooltip shows the line pattern as it is", "[plaintext
 
         WHEN( "its line pattern is hovered" )
         {
-            const auto shown = shownAsToolTip(
-                model.index( 0, RuleListModel::LinePatternColumn ).data( Qt::ToolTipRole )
-                    .toString() );
+            const auto shown = shownAsToolTip( model.index( 0, RuleListModel::LinePatternColumn )
+                                                   .data( Qt::ToolTipRole )
+                                                   .toString() );
 
             THEN( "the pattern is shown literally, and nothing is loaded" )
             {
@@ -89,9 +89,9 @@ SCENARIO( "The rule list's tooltip shows the line pattern as it is", "[plaintext
 
         THEN( "both are shown literally, each on a line of its own" )
         {
-            const auto shown = shownAsToolTip(
-                model.index( 0, RuleListModel::LinePatternColumn ).data( Qt::ToolTipRole )
-                    .toString() );
+            const auto shown = shownAsToolTip( model.index( 0, RuleListModel::LinePatternColumn )
+                                                   .data( Qt::ToolTipRole )
+                                                   .toString() );
             REQUIRE( shown.text == ( QStringList{ kHtml } + problems ).join( '\n' ) );
             REQUIRE( shown.resources.isEmpty() );
         }
@@ -202,8 +202,7 @@ SCENARIO( "The problem labels show their text as plain text", "[plaintext][foote
     }
 }
 
-SCENARIO( "The template dialog's notes show the keys as plain text",
-          "[plaintext][ruletemplate]" )
+SCENARIO( "The template dialog's notes show the keys as plain text", "[plaintext][ruletemplate]" )
 {
     GIVEN( "the template dialog, opened over a rule whose key looks like HTML" )
     {
@@ -225,8 +224,8 @@ SCENARIO( "The footer's tooltips keep escaping the key and the values", "[plaint
     GIVEN( "a mapped value whose key, value and raw value look like HTML" )
     {
         FooterDisplayWidget widget;
-        widget.updateValues( { { "<b>Key</b>", "<img src=\"file:///dev/zero\"> &amp;",
-                                 "<i>raw</i> &lt;", 0 } } );
+        widget.updateValues(
+            { { "<b>Key</b>", "<img src=\"file:///dev/zero\"> &amp;", "<i>raw</i> &lt;", 0 } } );
         const auto items = widget.findChildren<FooterValueItem*>();
         REQUIRE( items.size() == 1 );
 

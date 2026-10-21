@@ -124,8 +124,7 @@ struct EditorUi {
     static bool marked( const QLineEdit* field, const QLabel* reason )
     {
         return !field->toolTip().isEmpty()
-               && reason->text() == shownAsToolTip( field->toolTip() ).text
-               && !reason->isHidden();
+               && reason->text() == shownAsToolTip( field->toolTip() ).text && !reason->isHidden();
     }
     static bool unmarked( const QLineEdit* field, const QLabel* reason )
     {
@@ -788,7 +787,8 @@ SCENARIO( "FooterEditor shows the rules' problems and blocks OK and Apply", "[fo
         WHEN( "its value pattern becomes longer than the limit" )
         {
             ui.select( 1 );
-            ui.valuePattern->setText( QString( RuleCheck::kMaxPatternLength + 1, QLatin1Char( 'a' ) ) );
+            ui.valuePattern->setText(
+                QString( RuleCheck::kMaxPatternLength + 1, QLatin1Char( 'a' ) ) );
 
             THEN( "the field, the list row and the listing show why, and OK and Apply are blocked" )
             {

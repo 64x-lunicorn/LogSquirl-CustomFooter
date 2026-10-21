@@ -83,10 +83,10 @@ const QString kTooLong = patternOfLength( RuleCheck::kMaxPatternLength + 1 );
 /// Too long, and invalid as well.
 const QString kTooLongInvalid = "(" + kLongest;
 
-const QString kLineTooLong = QString( "line pattern longer than %1 characters" )
-                                 .arg( RuleCheck::kMaxPatternLength );
-const QString kValueTooLong = QString( "value pattern longer than %1 characters" )
-                                  .arg( RuleCheck::kMaxPatternLength );
+const QString kLineTooLong
+    = QString( "line pattern longer than %1 characters" ).arg( RuleCheck::kMaxPatternLength );
+const QString kValueTooLong
+    = QString( "value pattern longer than %1 characters" ).arg( RuleCheck::kMaxPatternLength );
 
 struct Case {
     const char* name;

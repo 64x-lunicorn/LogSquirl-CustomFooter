@@ -814,10 +814,9 @@ SCENARIO( "The plugin refuses a host table with a missing function", "[plugin]" 
     host() = FakeHost();
     host().configDir = configDir.path().toUtf8();
     int handle = 0;
-    const QString missing
-        = GENERATE( as<QString>{}, "get_config_dir", "register_menu_action",
-                    "register_footer_widget", "unregister_footer_widget", "get_active_file_path",
-                    "register_active_file_callback" );
+    const QString missing = GENERATE( as<QString>{}, "get_config_dir", "register_menu_action",
+                                      "register_footer_widget", "unregister_footer_widget",
+                                      "get_active_file_path", "register_active_file_callback" );
     const auto api = fakeApiWithout( missing );
 
     WHEN( "init() is called with a table whose " + missing.toStdString() + " is NULL" )

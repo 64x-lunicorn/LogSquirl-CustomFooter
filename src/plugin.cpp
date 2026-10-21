@@ -176,9 +176,9 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
     guarded( plugin().host(), "scanning the active file", [ filePath ] {
         if ( !onUiThread() ) {
-            plugin().host().logMessage( LOGSQUIRL_LOG_ERROR,
-                                        QStringLiteral( "Custom Footer: the host reported the "
-                                                        "active file off the UI thread; ignored" ) );
+            plugin().host().logMessage(
+                LOGSQUIRL_LOG_ERROR, QStringLiteral( "Custom Footer: the host reported the "
+                                                     "active file off the UI thread; ignored" ) );
             return;
         }
         if ( auto* session = plugin().session.get() ) {

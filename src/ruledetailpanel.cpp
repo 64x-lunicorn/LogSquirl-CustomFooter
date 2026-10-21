@@ -72,8 +72,7 @@ QString problemFieldStyle()
 }
 
 /// Marks @p field with @p problem, or shows its @p hint when there is none.
-void markField( QLineEdit* field, QLabel* label, const QString& problem,
-                const QString& hint = {} )
+void markField( QLineEdit* field, QLabel* label, const QString& problem, const QString& hint = {} )
 {
     const auto toolTip = problem.isEmpty() ? hint : plainToolTip( problem );
     if ( field->toolTip() == toolTip ) {
@@ -177,12 +176,12 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     advancedCheck_->installEventFilter( this );
     form->addRow( QString(), advancedCheck_ );
 
-    linePatternEdit_ = addField( form, tr( "&Line pattern:" ), "linePatternEdit",
-                                 kPatternFieldLength, &linePatternProblem_,
-                                 &testLinePatternButton_ );
-    valuePatternEdit_ = addField( form, tr( "&Value pattern:" ), "valuePatternEdit",
-                                  kPatternFieldLength, &valuePatternProblem_,
-                                  &testValuePatternButton_ );
+    linePatternEdit_
+        = addField( form, tr( "&Line pattern:" ), "linePatternEdit", kPatternFieldLength,
+                    &linePatternProblem_, &testLinePatternButton_ );
+    valuePatternEdit_
+        = addField( form, tr( "&Value pattern:" ), "valuePatternEdit", kPatternFieldLength,
+                    &valuePatternProblem_, &testValuePatternButton_ );
 
     // ── Its value mappings ───────────────────────────────────────────────
     auto* mappings = new QWidget( this );
@@ -319,8 +318,7 @@ std::optional<SimpleRule> RuleDetailPanel::unfinishedSimpleRule() const
 void RuleDetailPanel::setProblems( const RuleProblems& problems )
 {
     markField( keyEdit_, keyProblem_, problems.key );
-    markField( endCharacterEdit_, endCharacterProblem_, problems.endCharacter,
-               endCharacterHint() );
+    markField( endCharacterEdit_, endCharacterProblem_, problems.endCharacter, endCharacterHint() );
     markField( linePatternEdit_, linePatternProblem_, problems.linePattern );
     markField( valuePatternEdit_, valuePatternProblem_, problems.valuePattern );
 }

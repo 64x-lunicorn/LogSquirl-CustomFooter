@@ -126,7 +126,10 @@ through a `QFutureWatcher` on the GUI thread. `logsquirl_plugin_shutdown()`
 destroys the footer session first, which deletes the editor and then the
 controller; that stops the follower, which cancels the running scan, waits
 for the worker and drops its wake-up: after it returns, no code of the
-plugin runs, and the host may unload the library.
+plugin runs, and the host may unload the library. That wait is short
+because no job blocks: the scanner never opens an active file that is
+not a regular file, such as a FIFO (see
+[Scanning Algorithm](#scanning-algorithm)).
 
 The controller keeps only its own concerns: the rules, the scan progress
 and showing values. The scan progress is the follower's previous result:
@@ -601,6 +604,19 @@ hidden global test state.
 3. Read the log file line by line, up to `maxLines` lines and at most
    64 MiB, even inside a single huge line. Lines longer than 64 KiB are
    matched against their first 64 KiB.
+   **Regular files only:** the scan, the preview, `fileUnchangedFor()` and
+   `Encoding::ofFile()` open a path only when it is a regular file, or a
+   link to one (`openRegularFile()`). A FIFO or a device is not opened:
+   opening or reading one blocks until someone writes to it, and the
+   editor's closing and the plugin's shutdown wait for the worker that
+   would block. Such a file has no values, and the preview says it cannot
+   be read (`Preview::Status::Unreadable`). The follower still watches the
+   path, so a regular file that replaces it is scanned.
+   `tests/footerscanner_fifo_test.cpp` covers the scanner with a FIFO;
+   the footer, the preview and the shutdown are covered by the `[fifo]`
+   scenarios of `footercontroller_test.cpp`, `rulepreview_test.cpp` and
+   `pluginlifecycle_test.cpp` (POSIX only; `tests/fifo.h` has a watchdog
+   that makes a reader of the FIFO fail the test instead of hanging it).
    **Encoding:** a scan from the start of a file tells how its bytes are
    text from its first bytes (`FooterScanner::Encoding::detect()`), as
    LogSquirl does for a byte order mark: `FF FE` makes it UTF-16LE,

@@ -28,6 +28,7 @@
 #include <catch2/catch.hpp>
 
 #include "eventloopwait.h"
+#include "fifo.h"
 #include "followerfakes.h"
 #include "footerconfig.h"
 #include "footercontroller.h"
@@ -38,6 +39,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <cstdio>
 #include <memory>
 
 using namespace custom_footer;
@@ -631,6 +633,80 @@ SCENARIO( "FooterController can be destroyed during a scan", "[footercontroller]
         }
     }
 }
+
+#if defined( Q_OS_UNIX )
+
+SCENARIO( "FooterController shows nothing for an active file that is not a regular file",
+          "[footercontroller][fifo]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+
+    const auto fifo = logDir.path() + "/fifo.log";
+    REQUIRE( makeFifo( fifo ) );
+    // Declared first, so that it outlives the controller: a scan opening the
+    // FIFO fails the test instead of hanging it.
+    FifoWatchdog watchdog( fifo );
+
+    FooterDisplayWidget widget;
+    Fakes fakes;
+    auto controller = makeController( widget, configDir.path(), fakes );
+
+    GIVEN( "a FIFO, which no one writes to, as the active file" )
+    {
+        controller->setActiveFile( fifo );
+
+        THEN( "the scan finishes without opening it, and no values are shown" )
+        {
+            REQUIRE( scansSettle( *controller ) );
+            REQUIRE_FALSE( watchdog.fired() );
+            REQUIRE( controller->scansStarted() == 1 );
+            REQUIRE( shownText( widget ).isEmpty() );
+        }
+
+        THEN( "its path is still followed" )
+        {
+            REQUIRE( fakes.changes->file == fifo );
+        }
+
+        WHEN( "the controller is destroyed, as the plugin is shut down" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            controller.reset();
+
+            THEN( "it returns at once" )
+            {
+                REQUIRE( timer.elapsed() < 1000 );
+                REQUIRE_FALSE( watchdog.fired() );
+            }
+        }
+
+        WHEN( "a regular file replaces it, and the change is reported" )
+        {
+            REQUIRE( scansSettle( *controller ) );
+            const auto replacement = logDir.path() + "/replacement.log";
+            writeFile( replacement, "VIN: REPLACED\n" );
+            REQUIRE( std::rename( QFile::encodeName( replacement ).constData(),
+                                  QFile::encodeName( fifo ).constData() )
+                     == 0 );
+            fakes.changes->fire();
+            fakes.clock->advance( kGap );
+
+            THEN( "the regular file is scanned" )
+            {
+                REQUIRE( processUntil( [ & ] { return shownText( widget ) == "VIN: REPLACED"; } ) );
+                REQUIRE_FALSE( watchdog.fired() );
+            }
+        }
+    }
+}
+
+#endif
 
 SCENARIO( "FooterController shows the values of a log that changes while it is scanned",
           "[footercontroller]" )

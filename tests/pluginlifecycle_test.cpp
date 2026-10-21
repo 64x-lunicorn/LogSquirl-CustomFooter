@@ -26,6 +26,7 @@
 
 #include "basehosttable.h"
 #include "eventloopwait.h"
+#include "fifo.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
@@ -37,7 +38,9 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
@@ -581,6 +584,68 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
         logsquirl_plugin_shutdown();
     }
 }
+
+#if defined( Q_OS_UNIX )
+
+SCENARIO( "The plugin shuts down at once while the active file is not a regular file",
+          "[plugin][fifo]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    const auto fifo = logDir.path() + "/fifo.log";
+    REQUIRE( makeFifo( fifo ) );
+    // Declared first, so that it outlives the plugin: a scan or preview
+    // opening the FIFO fails the test instead of hanging it.
+    FifoWatchdog watchdog( fifo );
+
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = fifo.toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    GIVEN( "an initialised plugin, and its rule editor open, with a FIFO as the active file" )
+    {
+        REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+        logsquirl_plugin_configure( nullptr );
+        QPointer<FooterEditor> editor = openEditorWindow();
+        REQUIRE( editor );
+        auto* message = editor->findChild<QLabel*>( "previewMessage" );
+        REQUIRE( message );
+
+        THEN( "the preview says the file cannot be read, and the footer shows no values" )
+        {
+            REQUIRE( processUntil(
+                [ message ] { return message->text().contains( "cannot be read" ); } ) );
+            const auto* footer = qobject_cast<FooterDisplayWidget*>( host().footerWidget );
+            REQUIRE( footer );
+            REQUIRE( footer->values().isEmpty() );
+            REQUIRE_FALSE( watchdog.fired() );
+        }
+
+        WHEN( "the plugin is shut down" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            logsquirl_plugin_shutdown();
+
+            THEN( "it returns at once, and the editor is gone" )
+            {
+                REQUIRE( timer.elapsed() < 1000 );
+                REQUIRE_FALSE( watchdog.fired() );
+                REQUIRE_FALSE( editor );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+}
+
+#endif
 
 SCENARIO( "The plugin logs what is wrong through the host", "[plugin]" )
 {

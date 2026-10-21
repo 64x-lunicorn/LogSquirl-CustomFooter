@@ -782,6 +782,37 @@ SCENARIO( "A footer session makes a rule from the Log Line selected in the host"
         }
     }
 
+    GIVEN( "a host that reads a UTF-16LE file without mark as UTF-16LE, a long line selected" )
+    {
+        const auto noBomLog = logDir.path() + "/nobom.log";
+        writeUtf16File( noBomLog, kLongUtf16Line + "\n" );
+        {
+            // Without its mark: only the host's encoding tells it is UTF-16.
+            QFile file( noBomLog );
+            REQUIRE( file.open( QIODevice::ReadWrite ) );
+            const auto bytes = file.readAll().mid( 2 );
+            REQUIRE( file.resize( 0 ) );
+            REQUIRE( file.seek( 0 ) );
+            REQUIRE( file.write( bytes ) == bytes.size() );
+        }
+        selection.lines = QStringList{ kLongUtf16Line };
+        auto host = selection.host();
+        host.logFileEncoding = []( const QString& ) { return QByteArray( "UTF-16LE" ); };
+        FooterSession session( configDir.path(), &footer, host );
+        session.setActiveFile( noBomLog );
+
+        WHEN( "a rule is made from the selected line" )
+        {
+            QPointer<FooterEditor> editor = session.ruleFromSelectedLine( &window );
+            REQUIRE( editor );
+
+            THEN( "only the part the footer reads in the host's UTF-16LE is shown" )
+            {
+                REQUIRE( FromLineUi( *editor ).line->text() == kLongUtf16Line.left( 32768 ) );
+            }
+        }
+    }
+
     GIVEN( "a host with the same long Log Line selected in a UTF-8 file" )
     {
         const auto utf8Log = logDir.path() + "/utf8.log";

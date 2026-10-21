@@ -129,6 +129,23 @@ HostApiAdapter::HostApiAdapter( const LogSquirlHostApi* api, void* handle, std::
                                      result == LOGSQUIRL_LOG_LINES_TRUNCATED };
         };
     }
+    // Only with the callback that tells of a change: an encoding read once
+    // would go stale when the user chooses another one.
+    if ( LOGSQUIRL_HOST_API_HAS( apiSize, get_log_file_encoding )
+         && LOGSQUIRL_HOST_API_HAS( apiSize, register_encoding_callback )
+         && api->get_log_file_encoding && api->register_encoding_callback ) {
+        functions_.logFileEncoding
+            = [ api, handle ]( const QString& filePath ) -> std::optional<QByteArray> {
+            const char* encoding = nullptr;
+            const int result
+                = api->get_log_file_encoding( handle, filePath.toUtf8().constData(), &encoding );
+            if ( result < LOGSQUIRL_LOG_LINES_OK || !encoding || !*encoding ) {
+                return std::nullopt;
+            }
+            // Copied at once: the host's name lasts only until the next call.
+            return QByteArray( encoding );
+        };
+    }
 }
 
 HostApiAdapter::~HostApiAdapter()

@@ -88,8 +88,9 @@ RuleFromLine ruleFromLine( const QString& line, qsizetype start, qsizetype lengt
 
 /// How much of @p line the footer reads in a file of @p encoding, in UTF-16
 /// units: its first FooterScanner::kMaxLineBytes bytes in that encoding (in
-/// UTF-16 that is kMaxLineBytes / 2 code units), cut at a character
-/// boundary; all of a shorter line.
+/// UTF-16 that is kMaxLineBytes / 2 code units, in a single-byte encoding
+/// kMaxLineBytes characters), cut at a character boundary; all of a shorter
+/// line.
 qsizetype footerReadLength( const QString& line, const FooterScanner::Encoding& encoding = {} );
 
 /**

@@ -40,7 +40,9 @@
  *      the host hands over the selected Log Lines (26.11), a submenu
  *      "Custom Footer" with "Edit Rules…" and "Rule from Selected Line…".
  *   3. When the active file changes, onActiveFileChanged() hands it to the
- *      session, for the footer and the rule editor.
+ *      session, for the footer and the rule editor; where the host tells
+ *      the encoding of a Log File (26.12), onEncodingChanged() hands each
+ *      change of it to the session too.
  *   4. Host calls shutdown() — destroying the session stops everything of
  *      the plugin; then the footer widget is unregistered and deleted, and
  *      the adapter drops the Regex Lab answers still awaited.
@@ -123,6 +125,9 @@ QString readyMessage( const FooterSession& session )
     if ( session.has( HostFeature::SelectedLogLines ) ) {
         offered.append( QStringLiteral( "selected Log Lines" ) );
     }
+    if ( session.has( HostFeature::LogFileEncoding ) ) {
+        offered.append( QStringLiteral( "Log File encoding" ) );
+    }
     return QStringLiteral( "Custom Footer plugin ready. Host functions: %1." )
         .arg( offered.isEmpty() ? QStringLiteral( "none" )
                                 : offered.join( QStringLiteral( ", " ) ) );
@@ -146,6 +151,19 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
             session->setActiveFile( fromHost( filePath ) );
         }
     } );
+}
+
+/// Called by the host, on the UI thread, when it reads a Log File in another
+/// encoding; registered only where the host offers the encoding.
+static void onEncodingChanged( void* /* userData */, const char* filePath, const char* encoding )
+{
+    guarded( plugin().host(), "reading the active file in its new encoding",
+             [ filePath, encoding ] {
+                 if ( auto* session = plugin().session.get() ) {
+                     session->encodingChanged( fromHost( filePath ),
+                                               encoding ? QByteArray( encoding ) : QByteArray() );
+                 }
+             } );
 }
 
 /// Called when the user clicks "Custom Footer…" in the Plugins menu, or
@@ -251,6 +269,11 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
 
         // Register callback for active file changes.
         api->register_active_file_callback( handle, &onActiveFileChanged, nullptr );
+        // And for changes of a Log File's encoding (26.12): the adapter sets
+        // logFileEncoding only where the host has this registration too.
+        if ( host.logFileEncoding ) {
+            api->register_encoding_callback( handle, &onEncodingChanged, nullptr );
+        }
 
         // Initial scan if a file is already open. Read here, on the UI
         // thread, and pushed into the session, which never asks the host.

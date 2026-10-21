@@ -56,6 +56,9 @@ namespace custom_footer {
  * preview (FooterScanner::fileUnchangedFor()) is not previewed, and the
  * file is followed on.
  *
+ * The file is read in the encoding the host reads it in, where the host
+ * says; read in another one, it is previewed again at once.
+ *
  * Destroying the previewer, or stop(), cancels a running preview, waits for
  * the worker, and leaves no timer running and no result pending: no code of
  * the plugin runs on its behalf afterwards.
@@ -68,9 +71,9 @@ public:
 
     /// Makes a preview on the worker thread; FooterScanner::preview() unless
     /// a test replaces it.
-    using PreviewFunction
-        = std::function<Preview( const QString& filePath, const QList<FooterEntry>& entries,
-                                 int rule, int maxLines, const std::atomic_bool* cancelled )>;
+    using PreviewFunction = std::function<Preview(
+        const QString& filePath, const QList<FooterEntry>& entries, int rule, int maxLines,
+        const std::atomic_bool* cancelled, const QByteArray& hostEncoding )>;
 
     /// When a requested preview starts.
     enum class Start {
@@ -86,12 +89,19 @@ public:
     explicit RulePreviewer( QObject* parent = nullptr, FollowerParts parts = {} );
     ~RulePreviewer() override;
 
-    /// The file to preview against; empty for none. The same file again
-    /// counts as a change of it, which does not cancel a running preview.
-    void setActiveFile( const QString& filePath );
+    /// The file to preview against; empty for none. @p hostEncoding is the
+    /// name of the encoding the host reads it in, empty where the host does
+    /// not say (FooterScanner::Encoding::forHost()). The same file in the
+    /// same encoding again counts as a change of it, which does not cancel
+    /// a running preview.
+    void setActiveFile( const QString& filePath, const QByteArray& hostEncoding = {} );
     const QString& activeFile() const
     {
         return activeFile_;
+    }
+    const QByteArray& activeFileEncoding() const
+    {
+        return activeFileEncoding_;
     }
 
     /// The scan's line limit, as configured for the footer. A new limit
@@ -150,6 +160,7 @@ private:
     void start();
 
     QString activeFile_;
+    QByteArray activeFileEncoding_;
     int maxLines_ = FooterScanner::kDefaultMaxLines;
     int editDelayMs_ = kDelayMs;
     PreviewFunction previewFunction_;

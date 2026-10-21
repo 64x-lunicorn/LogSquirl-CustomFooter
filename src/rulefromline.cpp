@@ -22,7 +22,10 @@
 
 #include <QList>
 #include <QRegularExpression>
+#include <QStringEncoder>
 #include <QStringView>
+
+#include <optional>
 
 namespace custom_footer {
 
@@ -228,14 +231,46 @@ qsizetype footerReadLength( const QString& line, const FooterScanner::Encoding& 
         return line.at( units ).isLowSurrogate() ? units - 1 : units;
     }
 
+    if ( encoding.form == FooterScanner::Encoding::Form::Utf8 ) {
+        qint64 bytes = 0;
+        for ( qsizetype at = 0; at < line.size(); ++at ) {
+            const auto c = line.at( at ).unicode();
+            // A surrogate pair is four bytes, two for each half.
+            bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : ( c >= 0xD800 && c < 0xE000 ) ? 2 : 3;
+            if ( bytes > FooterScanner::kMaxLineBytes ) {
+                // Not between the halves of a surrogate pair.
+                return line.at( at ).isLowSurrogate() ? at - 1 : at;
+            }
+        }
+        return line.size();
+    }
+
+    // UTF-32: four bytes a code point. An encoding the host names: the bytes
+    // it encodes each code point in, one where this Qt cannot encode in it,
+    // as the scan then reads it as Latin-1.
+    std::optional<QStringEncoder> named;
+    if ( encoding.form == FooterScanner::Encoding::Form::Named ) {
+        QStringEncoder encoder( encoding.name.constData(), QStringConverter::Flag::Stateless );
+        if ( encoder.isValid() ) {
+            named.emplace( std::move( encoder ) );
+        }
+    }
     qint64 bytes = 0;
-    for ( qsizetype at = 0; at < line.size(); ++at ) {
-        const auto c = line.at( at ).unicode();
-        // A surrogate pair is four bytes, two for each half.
-        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : ( c >= 0xD800 && c < 0xE000 ) ? 2 : 3;
+    qsizetype units = 1;
+    for ( qsizetype at = 0; at < line.size(); at += units ) {
+        codePointAt( line, at, &units );
+        if ( encoding.unitBytes() == 4 ) {
+            bytes += 4;
+        }
+        else if ( named ) {
+            const QByteArray encoded = named->encode( QStringView( line ).mid( at, units ) );
+            bytes += qMax<qsizetype>( 1, encoded.size() );
+        }
+        else {
+            bytes += 1;
+        }
         if ( bytes > FooterScanner::kMaxLineBytes ) {
-            // Not between the halves of a surrogate pair.
-            return line.at( at ).isLowSurrogate() ? at - 1 : at;
+            return at;
         }
     }
     return line.size();

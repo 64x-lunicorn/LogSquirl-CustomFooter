@@ -270,11 +270,9 @@ the UI thread.
 opens the editor as `openEditor()` does (or brings the open one forward,
 edits kept) and calls `FooterEditor::addRuleFromLine()` with the first line
 and the encoding the footer reads the active file in
-(`FooterScanner::Encoding::ofFile()`, which reads the file's first two
-bytes for a byte order mark; UTF-8 when it cannot be read), as that
-decides how much of a long line the footer reads. The host hands over
-text, not the encoding; once it says which encoding it uses (#60), that
-value takes the place of `ofFile()`. Without a selection it opens no editor and shows a message instead: a
+(`FooterScanner::Encoding::ofFile( activeFile, hostEncoding )`: the host's
+encoding where it says, else told from the file's byte order mark), as
+that decides how much of a long line the footer reads. Without a selection it opens no editor and shows a message instead: a
 `QMessageBox` opened with `open()`, never `exec()`, over the open editor or
 else over the given window, tracked by the session, shown once however
 often it is asked for, and deleted in the destructor right after the
@@ -290,14 +288,29 @@ the button (`offerRuleFromLine()`) only when
 `has( HostFeature::SelectedLogLines )`.
 
 `HostFunctions` (`hostfunctions.h`) is what the session needs from the
-host, as a value: `log`, and the three [host functions](#host-functions)
-of LogSquirl 26.11. A member the running host does not offer stays empty,
+host, as a value: `log`, the three [host functions](#host-functions)
+of LogSquirl 26.11, and the encoding of 26.12. A member the running host does not offer stays empty,
 and the session goes without it, so an older host is just the default
 value. `HostApiAdapter` fills it from the host's function table; tests
 fill it with lambdas. The controller gets its warning sink from the
 session as a plain function, built from `log`. `has( HostFeature )` tells
-whether the host offers `HostFeature::RegexLab`, `GoToLogLine` or
-`SelectedLogLines`, derived from which members are set. The editor gets
+whether the host offers `HostFeature::RegexLab`, `GoToLogLine`,
+`SelectedLogLines` or `LogFileEncoding`, derived from which members are
+set.
+
+**The active file's encoding.** Where `HostFunctions::logFileEncoding` is
+set, `setActiveFile()` asks the host, on the UI thread, which encoding it
+reads the new active file in, and hands the name with the path to the
+controller and the editor (`setActiveFile( path, hostEncoding )`, an empty
+name where the host does not say). The host tells of every later change
+through its encoding callback, which `plugin.cpp` registers and forwards to
+`encodingChanged( path, encoding )`: for the active file in another
+encoding, the controller and the editor's previewer follow the file afresh,
+so the footer is cleared and scanned from the start, and the preview made
+again; a change for another file is ignored. The first load of a file in
+LogSquirl detects its encoding only once it has read it, so the encoding
+asked for at activation may be the locale's, and the callback then brings
+the detected one. The editor gets
 what it needs of them when the session opens it: `openEditor()` hands
 it the Regex Lab with `FooterEditor::setRegexLab()`, wrapped in
 `guarded()` so that a throwing host function is logged and counts as a
@@ -352,6 +365,7 @@ the C details, and sets it only when `LOGSQUIRL_HOST_API_HAS( api_size,
 | `bool openRegexLab( const RegexLabPattern& pattern, const QObject* context, RegexLabDone done )` | `open_regex_lab` | Opens the Regex Lab with the pattern and its Match case flag and returns at once: true when it opened. `done` is called later, at most once: with the applied pattern on Apply, with `std::nullopt` on Cancel or when the Lab's window closes. Never once `context` (the editor that asked) is destroyed, nor after shutdown. |
 | `bool goToLogLine( std::uint64_t lineNumber )` | `go_to_log_line` | Selects the line in the tab in front and scrolls it into view, as Go to line does. Lines count from 1, as LogSquirl shows them. False without a Log File, or for a line it does not have (yet). |
 | `std::optional<SelectedLogLines> selectedLogLines()` | `get_selected_log_lines` | The selected Log Lines, copied at once (the host's buffer lasts only until the next call), split at `'\n'`, `truncated` when the host handed over only the first ones (1000 lines, 1 MiB). `std::nullopt` without a selection or a Log File. |
+| `std::optional<QByteArray> logFileEncoding( const QString& filePath )` | `get_log_file_encoding` (26.12) | The IANA name of the encoding the host reads the open Log File in (`"UTF-16LE"`, `"windows-1252"`, …), copied at once. `std::nullopt` when no tab shows the file. Set only where the table also has `register_encoding_callback`, which `plugin.cpp` registers so that the session learns of every change. |
 
 **The Regex Lab's answer.** The host calls back once, on the UI thread,
 with the `user_data` the plugin passed. The adapter owns what the answer
@@ -369,8 +383,8 @@ answers after shutdown and closes a Lab still open then (LogSquirl ADR
 
 At the end of `init_ex()` the plugin logs which host functions the session
 has: `Custom Footer plugin ready. Host functions: Regex Lab, Go to line,
-selected Log Lines.` on LogSquirl 26.11, `… Host functions: none.` on
-26.10. Users see no change. `tests/hostapiadapter_test.cpp` drives the
+selected Log Lines.` on LogSquirl 26.11, with `, Log File encoding` on
+26.12, `… Host functions: none.` on 26.10. Users see no change. `tests/hostapiadapter_test.cpp` drives the
 adapter with a fake table that records calls, answers the Lab with Apply
 or Cancel, and answers late, after the editor or the adapter is gone;
 `tests/pluginlifecycle_test.cpp` loads the plugin through `init_ex()` with
@@ -402,8 +416,9 @@ host must unregister it after the session is gone) and the session.
 order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
-the active-file callback, and pushes `get_active_file_path()` into the
-session. Where `HostFunctions::selectedLogLines` is set (LogSquirl 26.11;
+the active-file callback, then, where `HostFunctions::logFileEncoding` is
+set (26.12), the encoding callback, and pushes `get_active_file_path()`
+into the session, which asks `get_log_file_encoding()` for it. Where `HostFunctions::selectedLogLines` is set (LogSquirl 26.11;
 the same test as `has( HostFeature::SelectedLogLines )`, used for both
 menus), "Custom Footer…" is not registered; instead, right after creating
 the session, it registers `( "Custom Footer", "Edit Rules…" )` and
@@ -572,11 +587,26 @@ hidden global test state.
    bytes. The encoding is kept in the scan's `Progress`, and a continued
    scan reads on in it; its offsets are always on code unit boundaries, and
    half a code unit at the end of a file being written is left for the
-   next scan. Encodings LogSquirl guesses or the user chooses need the host
-   to say which one it uses (#60); `Encoding` is where that will come in.
+   next scan.
+   **The host's encoding** (LogSquirl 26.12) wins over all this: where the
+   host names the encoding it reads the file in, `scanFrom()` and
+   `preview()` get the name as `hostEncoding`, and
+   `Encoding::forHost( name, firstBytes )` makes it UTF-16 or UTF-32 of
+   the named byte order (`UTF-16`/`UTF-32` without one take the mark's, or
+   this machine's), UTF-8, or `Form::Named` for any other name: lines end
+   at the byte `0x0A` and are decoded with a `QStringDecoder` of that name,
+   or as Latin-1 where this Qt does not know it (a Qt without ICU knows
+   only the Unicode encodings and ISO-8859-1), which still splits lines and
+   reads ASCII right. A byte order mark of the named UTF-16 or UTF-32 is
+   skipped; any other leading bytes are text, as the user chose the
+   encoding. A continued scan resumes only in the encoding it was made
+   with: in another one it starts afresh. An empty name is `detect()`.
    `forEachLine()` is the one place that splits and decodes lines, for the
-   scan and the preview alike. `tests/footerscanner_utf16_test.cpp` covers
-   UTF-16 files, also across continued scans and in the live preview.
+   scan and the preview alike, with one decoder per scan.
+   `tests/footerscanner_utf16_test.cpp` covers UTF-16 files with a mark,
+   also across continued scans and in the live preview;
+   `tests/footerscanner_hostencoding_test.cpp` the host's encodings, in the
+   scanner, the preview and the session.
 4. For each line, check every rule whose key has no value yet:
    - **Stage 1 — Line Pattern**: If `linePattern` matches the line, proceed.
    - **Stage 2 — Value Pattern** (optional): If `valuePattern` is set, apply
@@ -886,8 +916,11 @@ shutdown) and checks the disabled buttons after `init()`.
   (the default, also for single-byte files) it counts each character's
   UTF-8 bytes, so 65536 ASCII characters or 21845 CJK ones; in UTF-16 it
   is 32768 code units whatever the characters, one less where a surrogate
-  pair straddles the limit. The `encoding` is a value given by the caller,
-  never told from a file here, so that the host can report it (#60).
+  pair straddles the limit; in UTF-32 every code point takes four bytes;
+  in an encoding the host names, each code point takes the bytes a
+  `QStringEncoder` of that name makes of it (one in a single-byte
+  encoding), or one where this Qt does not know it. The `encoding` is a
+  value given by the caller, never told from a file here.
 - **`suggestedKey( textBefore )`** is the text's longest word, the last of
   equally long ones, where a word is letters and digits of any script and
   `_`, with `.` and `-` inside it: `VIN:` → `VIN`, `[sensor.temp](°C):` →

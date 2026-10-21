@@ -50,15 +50,16 @@ RulePreviewer::~RulePreviewer()
     stop();
 }
 
-void RulePreviewer::setActiveFile( const QString& filePath )
+void RulePreviewer::setActiveFile( const QString& filePath, const QByteArray& hostEncoding )
 {
-    if ( filePath == activeFile_ ) {
+    if ( filePath == activeFile_ && hostEncoding == activeFileEncoding_ ) {
         // A change of the file: followed only while its preview is.
         follower_.nudge();
         return;
     }
 
     activeFile_ = filePath;
+    activeFileEncoding_ = hostEncoding;
     if ( request_ ) {
         auto request = *request_;
         schedule( request.entries, request.rule, Start::Soon );
@@ -151,10 +152,12 @@ void RulePreviewer::start()
 
     follower_.follow(
         activeFile_,
-        [ function = previewFunction_, request, maxLines = maxLines_ ](
-            const QString& filePath, const Preview*, const std::atomic_bool& cancelled ) {
+        [ function = previewFunction_, request, maxLines = maxLines_,
+          hostEncoding = activeFileEncoding_ ]( const QString& filePath, const Preview*,
+                                                const std::atomic_bool& cancelled ) {
             try {
-                return function( filePath, request.entries, request.rule, maxLines, &cancelled );
+                return function( filePath, request.entries, request.rule, maxLines, &cancelled,
+                                 hostEncoding );
             } catch ( ... ) {
                 // E.g. out of memory: better no preview than a dead host.
                 Preview failed;

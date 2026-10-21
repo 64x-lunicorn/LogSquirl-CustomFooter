@@ -124,14 +124,14 @@ typedef void ( *LogSquirlRegexLabCallbackFn )( void* user_data, int result, cons
 /* ── Log Lines ───────────────────────────────────────────────────────────── */
 
 /**
- * What go_to_log_line and get_selected_log_lines return.  Not negative is
- * success; negative says why nothing was done.
+ * What go_to_log_line, get_selected_log_lines and get_log_file_encoding
+ * return.  Not negative is success; negative says why nothing was done.
  */
 typedef enum {
     LOGSQUIRL_LOG_LINES_OK = 0,                /**< Done                                     */
     LOGSQUIRL_LOG_LINES_TRUNCATED = 1,         /**< Done, with the first selected lines only */
     LOGSQUIRL_LOG_LINES_NOT_ON_UI_THREAD = -1, /**< Called off the UI thread                 */
-    LOGSQUIRL_LOG_LINES_NO_LOG_FILE = -2,      /**< The tab in front shows no Log File       */
+    LOGSQUIRL_LOG_LINES_NO_LOG_FILE = -2,      /**< No Log File in front, or none named open */
     LOGSQUIRL_LOG_LINES_OUT_OF_RANGE = -3,     /**< The Log File has no line of that number  */
     LOGSQUIRL_LOG_LINES_NO_SELECTION = -4,     /**< No Log Line is selected                  */
     LOGSQUIRL_LOG_LINES_INVALID_ARGUMENT = -5  /**< A NULL handle or text                    */
@@ -143,6 +143,20 @@ typedef enum {
 /** At most this many bytes (1 MiB, without the NUL) are returned by get_selected_log_lines. */
 #define LOGSQUIRL_SELECTED_LOG_LINES_MAX_BYTES 1048576
 
+/* ── Encoding ────────────────────────────────────────────────────────────── */
+
+/**
+ * Called on the UI thread when the host reads an open Log File in another
+ * text encoding (see register_encoding_callback).
+ * @param user_data  The user_data passed to register_encoding_callback, unchanged.
+ * @param file_path  The Log File (UTF-8), as get_active_file_path names it;
+ *                   valid during the call only.
+ * @param encoding   The name of the encoding it is read in now, as
+ *                   get_log_file_encoding returns it; valid during the call only.
+ */
+typedef void ( *LogSquirlEncodingCallbackFn )( void* user_data, const char* file_path,
+                                               const char* encoding );
+
 /* ── Host API (provided by host, called by plugin) ───────────────────────── */
 
 /**
@@ -152,8 +166,11 @@ typedef enum {
  * was passed to logsquirl_plugin_init() — it identifies the plugin instance.
  *
  * **Lifetime**: the struct is valid from init until shutdown.
- * **Thread safety**: all functions are safe to call from any thread, unless
- * their comment says they must be called on the UI thread.
+ * **Thread safety**: all functions are safe to call from any thread, except
+ * open_regex_lab, go_to_log_line, get_selected_log_lines,
+ * get_log_file_encoding and get_active_file_path, which must be called on the
+ * UI thread; a call that changes the user interface, open_file included, is
+ * dispatched to the UI thread by the host.
  * **Growth**: functions added later are appended at the end, below "Added
  * later"; nothing is reordered, removed or changed in size, and only function
  * pointers are appended.  A host older than a function passes a shorter
@@ -196,7 +213,10 @@ typedef struct {
     void ( *show_notification )( void* handle, const char* message );
 
     /**
-     * Open a file in the main viewer.
+     * Open a file in the main viewer.  May be called from any thread: the
+     * file opens on the UI thread, at once when called there, else once the
+     * host's event loop turns; a call queued by a plugin that is unloaded
+     * before then is dropped.
      * @param file_path  Absolute UTF-8 path to the file.
      * @param follow     Non-zero to open in follow/tail mode.
      */
@@ -254,6 +274,8 @@ typedef struct {
      * Return the file path of the currently active (focused) log tab.
      * Returns an empty string if no file is open.
      * The returned pointer is valid until the next host API call.
+     * Call on the UI thread only: called on another thread, it returns an
+     * empty string, as without a file.
      */
     const char* ( *get_active_file_path )( void* handle );
 
@@ -339,6 +361,52 @@ typedef struct {
     int ( *get_selected_log_lines )( void* handle, const char** text, size_t* length,
                                      size_t* line_count );
 
+    /**
+     * Read which text encoding LogSquirl reads a Log File in (LogSquirl
+     * 26.12): the one the user chose for its tab, else the one detected from
+     * a byte order mark or guessed from the bytes, else the locale's.  A
+     * plugin that reads the Log File itself reads it in this encoding, so its
+     * Log Lines are those the views show.
+     *
+     * The name is the encoding's IANA name, e.g. "UTF-8", "UTF-16LE",
+     * "UTF-16BE", "ISO-8859-1" or "windows-1252", NUL-terminated.  The host
+     * owns it: it is valid until the plugin calls get_log_file_encoding again
+     * or is shut down.
+     *
+     * The encoding changes when the user chooses another one for the tab,
+     * and may change when a load of the Log File detects another one: the
+     * callback of register_encoding_callback tells of every change.  Ask
+     * again in the active-file callback for the new tab in front.
+     *
+     * Call on the UI thread only.
+     * @param file_path  The Log File (UTF-8 path), as get_active_file_path
+     *                   names it; NULL or "" for the tab in front.
+     * @param encoding   Receives the name; NULL when the result is negative.
+     *                   Must not be NULL.
+     * @return LOGSQUIRL_LOG_LINES_OK with the name;
+     *         LOGSQUIRL_LOG_LINES_NO_LOG_FILE when the tab in front shows no
+     *         Log File, or no tab shows the one named;
+     *         LOGSQUIRL_LOG_LINES_NOT_ON_UI_THREAD off the UI thread;
+     *         LOGSQUIRL_LOG_LINES_INVALID_ARGUMENT for a NULL handle or
+     *         encoding.
+     */
+    int ( *get_log_file_encoding )( void* handle, const char* file_path, const char** encoding );
+
+    /**
+     * Register a callback invoked, on the UI thread, whenever LogSquirl reads
+     * an open Log File in another text encoding (LogSquirl 26.12): the user
+     * chose one for its tab, or a load detected another one.  It is called
+     * for the Log File of any tab, in front or not, with the new encoding's
+     * name: once for each tab, so twice for a Log File two windows show
+     * when both read it in another encoding.  A plugin has one such
+     * callback: registering another replaces it, and a NULL callback removes
+     * it.
+     * @param callback   Function called with the Log File and the encoding.
+     * @param user_data  Passed back to callback unchanged.
+     */
+    void ( *register_encoding_callback )( void* handle, LogSquirlEncodingCallbackFn callback,
+                                          void* user_data );
+
 } LogSquirlHostApi;
 
 /**
@@ -421,11 +489,70 @@ typedef const char* ( *LogSquirlConverterGetExtsFn )( void );
 
 /**
  * Convert a file from a proprietary format to plain-text logs.
+ * Called on a host worker thread, never on the UI thread, and never while
+ * another conversion of the same plugin runs: a plugin's conversions run one
+ * after the other, those of different plugins at the same time.  The host
+ * API may be called from inside, under its thread rules.
  * @param input_path   Absolute UTF-8 path to source file.
  * @param output_path  Absolute UTF-8 path where plain text must be written.
  * @return 0 on success, non-zero on failure.
  */
 typedef int ( *LogSquirlConverterConvertFn )( const char* input_path, const char* output_path );
+
+/**
+ * What the host hands a conversion that reports progress and can be cancelled
+ * (see LogSquirlConverterConvertExFn).  The host owns it: it is valid for the
+ * duration of the convert_ex call, and its functions are called on the
+ * thread convert_ex runs on only, each with the control itself as the first
+ * argument.  It grows by appending members, and size says how many of them
+ * the running host filled: check LOGSQUIRL_CONVERT_CONTROL_HAS before reading
+ * a member added later.  Keep the pointer the host passes and never copy the
+ * struct.
+ */
+typedef struct LogSquirlConvertControl {
+    /** sizeof( LogSquirlConvertControl ) in the host's build: how far the host filled it. */
+    size_t size;
+
+    /** The host's own; never dereference or interpret it. */
+    void* host;
+
+    /**
+     * Report how far the conversion is: done of total units of the plugin's
+     * choosing (bytes, lines, records).  A total of 0 means unknown; the host
+     * then shows the conversion as busy, without a share done.
+     */
+    void ( *report_progress )( const struct LogSquirlConvertControl* control, uint64_t done,
+                               uint64_t total );
+
+    /**
+     * Non-zero once the user cancelled the conversion: return as soon as
+     * possible then, with any code; what was written is discarded.
+     */
+    int ( *is_cancelled )( const struct LogSquirlConvertControl* control );
+} LogSquirlConvertControl;
+
+/**
+ * Non-zero when the control the host passed holds the whole member, i.e.
+ * the running host filled it; the members above are always there.
+ */
+#define LOGSQUIRL_CONVERT_CONTROL_HAS( control, member )                                           \
+    ( offsetof( LogSquirlConvertControl, member )                                                  \
+          + sizeof( ( (const LogSquirlConvertControl*)0 )->member )                                \
+      <= ( control )->size )
+
+/**
+ * Convert a file, reporting progress and polling for cancellation through
+ * control (optional).  A host that knows this entry point calls it instead of
+ * convert, on a host worker thread and under the same rules; an older host
+ * calls convert, so a plugin that exports convert_ex still exports convert.
+ * A plugin may export either one, or both.
+ * @param input_path   Absolute UTF-8 path to source file.
+ * @param output_path  Absolute UTF-8 path where plain text must be written.
+ * @param control      Progress out, cancellation in; valid during the call.
+ * @return 0 on success, non-zero on failure or once cancelled.
+ */
+typedef int ( *LogSquirlConverterConvertExFn )( const char* input_path, const char* output_path,
+                                                const LogSquirlConvertControl* control );
 
 /* ── Canonical exported symbol names ─────────────────────────────────────── */
 
@@ -443,6 +570,11 @@ typedef int ( *LogSquirlConverterConvertFn )( const char* input_path, const char
  * FileConverter plugins additionally export:
  *   LOGSQUIRL_PLUGIN_EXPORT const char* logsquirl_converter_get_extensions( void );
  *   LOGSQUIRL_PLUGIN_EXPORT int         logsquirl_converter_convert( const char*, const char* );
+ *
+ * A converter that reports progress and hears a cancellation also exports
+ * (optional):
+ *   LOGSQUIRL_PLUGIN_EXPORT int logsquirl_converter_convert_ex( const char*, const char*,
+ *                                                               const LogSquirlConvertControl* );
  */
 
 #define LOGSQUIRL_PLUGIN_ENTRY_GET_INFO "logsquirl_plugin_get_info"
@@ -452,6 +584,7 @@ typedef int ( *LogSquirlConverterConvertFn )( const char* input_path, const char
 #define LOGSQUIRL_PLUGIN_ENTRY_INIT_EX "logsquirl_plugin_init_ex"
 #define LOGSQUIRL_CONVERTER_ENTRY_GET_EXTS "logsquirl_converter_get_extensions"
 #define LOGSQUIRL_CONVERTER_ENTRY_CONVERT "logsquirl_converter_convert"
+#define LOGSQUIRL_CONVERTER_ENTRY_CONVERT_EX "logsquirl_converter_convert_ex"
 
 #ifdef __cplusplus
 } /* extern "C" */

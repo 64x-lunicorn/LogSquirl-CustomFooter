@@ -50,8 +50,11 @@ namespace custom_footer {
  * Every value found carries the Log Line it was found in
  * (FooterValue::lineNumber), counting from 1 in the whole file as the host
  * does: a line ends with "\n", so a "\r\n" ends one line too, and a last
- * line without a line break counts as well. In a UTF-16 file with a byte
- * order mark, "\n" is a whole code unit (Encoding).
+ * line without a line break counts as well. In a UTF-16 or UTF-32 file,
+ * "\n" is a whole code unit (Encoding).
+ *
+ * A file is read in the encoding the host reads it in, given by its name as
+ * hostEncoding; an empty name tells it from the file's byte order mark.
  */
 class FooterScanner {
 public:
@@ -75,36 +78,51 @@ public:
      * How a file's bytes are text: how wide a code unit is, which code unit
      * ends a line, how a line is decoded, and where the first line starts.
      *
-     * A scan from the start of a file tells it from the file's first bytes
-     * (detect()), as LogSquirl does for a byte order mark: a UTF-16 mark
-     * makes the file UTF-16 of that byte order, the mark not part of the
-     * first line. Any other file is read as UTF-8: also one with a UTF-8
-     * mark, which is in the first line but not in its decoded text, and a
-     * single-byte or a UTF-16 file without a mark. (A continued scan keeps
-     * the encoding it was made with, in its progress.)
+     * A scan from the start of a file reads it in the encoding the host
+     * names for it, where the host says (forHost()): UTF-16 or UTF-32 of
+     * either byte order, with or without a byte order mark, UTF-8, or any
+     * other encoding the host names, such as windows-1252, whose lines end
+     * at the byte 0x0A. Where the host does not say, the encoding is told
+     * from the file's first bytes (detect()), as LogSquirl does for a byte
+     * order mark: a UTF-16 mark makes the file UTF-16 of that byte order.
+     * Any other file is then read as UTF-8: also one with a UTF-8 mark, a
+     * single-byte one, and a UTF-16 file without a mark. A byte order mark
+     * of the encoding's UTF-16 or UTF-32 is not part of the first line; a
+     * UTF-8 mark is in the first line but not in its decoded text. (A
+     * continued scan keeps the encoding it was made with, in its progress.)
      */
     struct Encoding {
         enum class Form {
             Utf8,    ///< Lines end at the byte 0x0A.
             Utf16LE, ///< Lines end at the code unit 0x000A, low byte first.
             Utf16BE, ///< Lines end at the code unit 0x000A, high byte first.
+            Utf32LE, ///< Lines end at the code unit 0x0000000A, low byte first.
+            Utf32BE, ///< Lines end at the code unit 0x0000000A, high byte first.
+            Named,   ///< Lines end at the byte 0x0A; decoded as name says.
         };
         Form form = Form::Utf8;
         /// Bytes of a byte order mark before the first line, not part of it.
         qint64 textStart = 0;
+        /// With Form::Named, the host's name of the encoding, such as
+        /// "windows-1252"; a name this Qt cannot decode is read as Latin-1.
+        QByteArray name;
 
-        /// The encoding of a file starting with @p start.
+        /// The encoding of a file starting with @p start, told from a byte
+        /// order mark.
         static Encoding detect( const QByteArray& start );
 
-        /// The encoding of the file at @p filePath, told from its first
-        /// bytes (detect()); UTF-8 if it cannot be read.
-        static Encoding ofFile( const QString& filePath );
+        /// The encoding the host reads a file starting with @p start in, by
+        /// its IANA name @p hostName ("UTF-16LE", "windows-1252", …, in any
+        /// case); detect( @p start ) for an empty name.
+        static Encoding forHost( const QByteArray& hostName, const QByteArray& start );
 
-        /// Bytes per code unit: 1 or 2.
-        int unitBytes() const
-        {
-            return form == Form::Utf8 ? 1 : 2;
-        }
+        /// The encoding of the file at @p filePath, from its first bytes
+        /// and @p hostName (forHost()); UTF-8 if it cannot be read and no
+        /// name is given.
+        static Encoding ofFile( const QString& filePath, const QByteArray& hostName = {} );
+
+        /// Bytes per code unit: 1, 2 or 4.
+        int unitBytes() const;
 
         /// Whether the code unit at @p at is @p unit (an ASCII character).
         bool isUnit( const char* at, char unit ) const;
@@ -114,7 +132,7 @@ public:
 
         bool operator==( const Encoding& other ) const
         {
-            return form == other.form && textStart == other.textStart;
+            return form == other.form && textStart == other.textStart && name == other.name;
         }
     };
 
@@ -245,10 +263,16 @@ public:
      * the values it finds are those in the whole file; values kept from
      * @p from keep theirs. A scan from the start numbers them afresh.
      *
+     * The file is read in @p hostEncoding, the name of the encoding the
+     * host reads it in (Encoding::forHost()); an empty name tells it from
+     * the file's byte order mark. A file read in another encoding than
+     * @p from is scanned from its start.
+     *
      * A cancelled scan returns no values and empty progress.
      */
     Scan scanFrom( const QString& filePath, const Progress& from, int maxLines = kDefaultMaxLines,
-                   const std::atomic_bool* cancelled = nullptr ) const;
+                   const std::atomic_bool* cancelled = nullptr,
+                   const QByteArray& hostEncoding = {} ) const;
 
     /**
      * Preview what the rule at @p rule of @p entries finds in a file, with
@@ -259,11 +283,13 @@ public:
      * disabled; which rule supplies its key's value is decided among the
      * enabled rules with that key, as the footer does.
      *
-     * @param cancelled  Checked per line, and while skipping over-long lines.
+     * @param cancelled     Checked per line, and while skipping over-long lines.
+     * @param hostEncoding  The encoding the file is read in, as scanFrom() takes it.
      */
     static Preview preview( const QString& filePath, const QList<FooterEntry>& entries, int rule,
                             int maxLines = kDefaultMaxLines,
-                            const std::atomic_bool* cancelled = nullptr );
+                            const std::atomic_bool* cancelled = nullptr,
+                            const QByteArray& hostEncoding = {} );
 
     /**
      * Whether a change of @p filePath since @p preview was made cannot alter

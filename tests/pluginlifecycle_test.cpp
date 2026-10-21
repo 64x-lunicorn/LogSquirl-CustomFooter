@@ -93,6 +93,10 @@ struct FakeHost {
     void* regexLabUserData = nullptr;
     /// The lines go_to_log_line() was asked for, in order.
     QList<uint64_t> wentTo;
+    /// The encoding get_log_file_encoding() names for every Log File.
+    QByteArray encoding = "UTF-8";
+    LogSquirlEncodingCallbackFn encodingCallback = nullptr;
+    void* encodingUserData = nullptr;
 };
 
 FakeHost& host()
@@ -190,6 +194,25 @@ LogSquirlHostApi fakeApi()
         }
         return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
     };
+    return api;
+}
+
+/// fakeApi() with the functions of LogSquirl 26.12: the encoding of a Log
+/// File, and the callback that tells of a change of it.
+LogSquirlHostApi fakeApiWithEncoding()
+{
+    auto api = fakeApi();
+    api.get_log_file_encoding = []( void*, const char*, const char** encoding ) {
+        host().calls.append( "get_log_file_encoding" );
+        *encoding = host().encoding.constData();
+        return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
+    };
+    api.register_encoding_callback
+        = []( void*, LogSquirlEncodingCallbackFn callback, void* userData ) {
+              host().calls.append( "register_encoding_callback" );
+              host().encodingCallback = callback;
+              host().encodingUserData = userData;
+          };
     return api;
 }
 
@@ -1099,4 +1122,72 @@ SCENARIO( "The plugin makes a rule from the Log Line selected in LogSquirl 26.11
     }
 
     logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin reads the active file in the encoding LogSquirl 26.12 reports",
+          "[plugin][hostencoding]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    // windows-1252 "VIN: GRÜN", no UTF-8.
+    const auto path = logDir.path() + "/latin.log";
+    writeFile( path, "VIN: GR\xDCN\n" );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = path.toUtf8();
+    host().encoding = "windows-1252";
+    const auto api = fakeApiWithEncoding();
+    int handle = 0;
+
+    WHEN( "LogSquirl 26.12 loads it through init_ex(), with its whole table" )
+    {
+        REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+
+        THEN( "it registers for changes of the encoding, and asks for the active file's" )
+        {
+            REQUIRE( host().encodingCallback );
+            REQUIRE( host().calls.contains( "get_log_file_encoding" ) );
+            REQUIRE( host().infos.contains(
+                "Custom Footer plugin ready. Host functions: Regex Lab, Go to line, "
+                "selected Log Lines, Log File encoding." ) );
+        }
+
+        THEN( "the footer decodes the file in that encoding" )
+        {
+            REQUIRE( waitForText( QStringLiteral( "GRÜN" ) ) );
+        }
+
+        AND_WHEN( "the user chooses UTF-8 for the tab" )
+        {
+            REQUIRE( waitForText( QStringLiteral( "GRÜN" ) ) );
+            const auto file = path.toUtf8();
+            host().encodingCallback( host().encodingUserData, file.constData(), "UTF-8" );
+
+            THEN( "the file is scanned again, in UTF-8" )
+            {
+                REQUIRE( waitForText( QString::fromUtf8( "GR\xEF\xBF\xBDN" ) ) );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+
+    WHEN( "a 26.11 table, which ends before the encoding, is passed" )
+    {
+        REQUIRE( logsquirl_plugin_init_ex( &api, &handle,
+                                           offsetof( LogSquirlHostApi, get_log_file_encoding ) )
+                 == 0 );
+
+        THEN( "it neither asks for the encoding nor registers for its changes" )
+        {
+            REQUIRE_FALSE( host().calls.contains( "get_log_file_encoding" ) );
+            REQUIRE_FALSE( host().calls.contains( "register_encoding_callback" ) );
+        }
+
+        logsquirl_plugin_shutdown();
+    }
 }

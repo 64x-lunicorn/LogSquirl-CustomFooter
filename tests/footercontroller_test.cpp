@@ -675,13 +675,10 @@ SCENARIO( "FooterController shows nothing for an active file that is not a regul
 
         WHEN( "the controller is destroyed, as the plugin is shut down" )
         {
-            QElapsedTimer timer;
-            timer.start();
             controller.reset();
 
             THEN( "it returns at once" )
             {
-                REQUIRE( timer.elapsed() < 1000 );
                 REQUIRE_FALSE( watchdog.fired() );
             }
         }

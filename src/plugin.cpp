@@ -168,36 +168,38 @@ bool onUiThread()
 
 // ── Callbacks ───────────────────────────────────────────────────────────
 
-/// Called by the host, on the UI thread, when the active file changes. The
-/// plugin API does not promise that thread, and the session's widgets and
-/// timers live there: a call from another thread is logged (log_message
-/// may be called from any thread) and ignored.
+/// Whether a callback of the host runs on the UI thread, where the
+/// session's widgets and timers live. The plugin API does not promise
+/// that thread: off it, logs @p ignored as an error (log_message may be
+/// called from any thread), and the callback is to do nothing.
+static bool calledOnUiThread( const char* ignored )
+{
+    if ( onUiThread() ) {
+        return true;
+    }
+    plugin().host().logMessage( LOGSQUIRL_LOG_ERROR, QString::fromUtf8( ignored ) );
+    return false;
+}
+
+static bool menuActionOnUiThread()
+{
+    return calledOnUiThread( "Custom Footer: the host called a menu action off the UI thread; "
+                             "ignored" );
+}
+
+/// Called by the host, on the UI thread, when the active file changes;
+/// ignored, and logged, off it.
 static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
     guarded( plugin().host(), "scanning the active file", [ filePath ] {
-        if ( !onUiThread() ) {
-            plugin().host().logMessage(
-                LOGSQUIRL_LOG_ERROR, QStringLiteral( "Custom Footer: the host reported the "
-                                                     "active file off the UI thread; ignored" ) );
+        if ( !calledOnUiThread( "Custom Footer: the host reported the active file off the UI "
+                                "thread; ignored" ) ) {
             return;
         }
         if ( auto* session = plugin().session.get() ) {
             session->setActiveFile( fromHost( filePath ) );
         }
     } );
-}
-
-/// Whether a menu action is called on the UI thread, where it opens the
-/// editor; logs an error if not, as onActiveFileChanged() does.
-static bool menuActionOnUiThread()
-{
-    if ( onUiThread() ) {
-        return true;
-    }
-    plugin().host().logMessage( LOGSQUIRL_LOG_ERROR,
-                                QStringLiteral( "Custom Footer: the host called a menu action off "
-                                                "the UI thread; ignored" ) );
-    return false;
 }
 
 /// Called when the user clicks "Custom Footer…" in the Plugins menu, or

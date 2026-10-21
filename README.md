@@ -321,8 +321,9 @@ as before, and the button is not shown.
 - A rule without a line pattern is ignored. The editor marks invalid
   patterns, patterns longer than 4096 characters, and enabled rules with a
   line pattern but no key, at the field with the reason and in the rule
-  list, and won't save until they are fixed. The pattern fields take no
-  more than one character over that limit.
+  list, and won't save until they are fixed. Typing or pasting into the
+  text before and pattern fields stops one character over that limit; a
+  longer pattern from an imported rule set is shown whole, and marked.
 - The file is scanned in the background whenever it becomes the active file
   and when rules are applied. A rule the editor would mark, e.g. with an
   invalid pattern, is skipped and reported in the LogSquirl log in the

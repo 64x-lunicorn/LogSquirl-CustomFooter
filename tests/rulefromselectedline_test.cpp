@@ -26,6 +26,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "elidedtext.h"
 #include "eventloopwait.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
@@ -532,10 +533,10 @@ SCENARIO( "The rule editor's hints show a long value elided", "[rulefromline][fo
             THEN( "the rule has the whole value, but the hint shows both values elided" )
             {
                 REQUIRE( editor.entries().last().linePattern.startsWith( "id=" ) );
-                const auto shown = QString( FooterValueItem::kMaxShownLength, 'S' ) + "…";
+                const auto shown = QString( kMaxShownValueLength, 'S' ) + "…";
                 REQUIRE( ui.hint->text().contains( "“" + shown + "”" ) );
                 REQUIRE_FALSE( ui.hint->text().contains( QString( 101, 'S' ) ) );
-                const auto shownEarlier = QString( FooterValueItem::kMaxShownLength, 'E' ) + "…";
+                const auto shownEarlier = QString( kMaxShownValueLength, 'E' ) + "…";
                 REQUIRE( ui.hint->text().contains( "“" + shownEarlier + "”" ) );
                 REQUIRE_FALSE( ui.hint->text().contains( QString( 101, 'E' ) ) );
             }

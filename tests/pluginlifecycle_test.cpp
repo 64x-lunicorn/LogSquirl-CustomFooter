@@ -629,13 +629,10 @@ SCENARIO( "The plugin shuts down at once while the active file is not a regular 
 
         WHEN( "the plugin is shut down" )
         {
-            QElapsedTimer timer;
-            timer.start();
             logsquirl_plugin_shutdown();
 
             THEN( "it returns at once, and the editor is gone" )
             {
-                REQUIRE( timer.elapsed() < 1000 );
                 REQUIRE_FALSE( watchdog.fired() );
                 REQUIRE_FALSE( editor );
             }

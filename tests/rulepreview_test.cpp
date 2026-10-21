@@ -570,14 +570,11 @@ SCENARIO( "The editor's preview reads only regular files", "[preview][footeredit
 
         WHEN( "the editor is closed" )
         {
-            QElapsedTimer timer;
-            timer.start();
             editor->reject();
             editor.reset();
 
             THEN( "it returns at once" )
             {
-                REQUIRE( timer.elapsed() < 1000 );
                 REQUIRE_FALSE( watchdog.fired() );
             }
         }

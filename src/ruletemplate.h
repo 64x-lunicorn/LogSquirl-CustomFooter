@@ -50,8 +50,9 @@ struct RuleTemplate {
     /// stands for the given key, escaped to match literally.
     QString linePattern;
     /// The group the dialog shows it under, e.g. "General"; set for all
-    /// templates of a group by makeTemplates(). The initializers leave it
-    /// and the mappings out: the default initializers say so.
+    /// templates of a group by makeTemplates(). The templates' aggregate
+    /// initializers leave it and the mappings out; the default member
+    /// initializers keep -Wmissing-field-initializers quiet about that.
     QString group{};
     /// Value mappings the new rule starts with, e.g. a code to its name;
     /// empty for most templates.

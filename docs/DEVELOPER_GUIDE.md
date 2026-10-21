@@ -614,7 +614,12 @@ hidden global test state.
    editor's closing and the plugin's shutdown wait for the worker that
    would block. Such a file has no values, and the preview says it cannot
    be read (`Preview::Status::Unreadable`). The follower still watches the
-   path, so a regular file that replaces it is scanned.
+   path, so a regular file that replaces it is scanned. The check and the
+   open are two steps: a path replaced by a FIFO between them is still
+   opened, and blocks. Closing that gap would take a non-blocking POSIX
+   `open()` and an `fstat()` of the descriptor, and a `QFile` opened from a
+   descriptor has no name for `QFileInfo::birthTime()`; a rotation does
+   not create a FIFO, so the plugin accepts the race.
    `tests/footerscanner_fifo_test.cpp` covers the scanner with a FIFO;
    the footer, the preview and the shutdown are covered by the `[fifo]`
    scenarios of `footercontroller_test.cpp`, `rulepreview_test.cpp` and
@@ -1199,7 +1204,9 @@ The JSON import/export uses a versioned format (`version: 1`) to allow
 forward-compatible changes.  See the README for format examples.
 `FooterConfig::importFromJson()` reads at most one byte more than
 `FooterConfig::kMaxImportBytes` (4 MiB), whatever the file claims its size
-to be, and refuses a file that has more, with a message naming the limit.
+to be, and refuses a file that has more, with a message naming the limit.  It refuses a path that is not a
+regular file, or a link to one, before opening it (#75): a FIFO chosen in
+the import dialog would block the UI thread in `open()`.
 
 `FooterConfig::exportToJson()` writes through a `QSaveFile`: the JSON goes
 to a temporary file next to the target, which is renamed over the target
@@ -1207,7 +1214,11 @@ only once every byte was written.  The target is therefore either the
 previous file or the complete export, never a partial one, and a failed
 write removes the temporary file.  On failure it returns false with the
 `QSaveFile` error as the reason, which the editor shows in its export
-error box (`exportErrorBox`) after the path.  The INI file is written by
+error box (`exportErrorBox`) after the path.  The temporary file needs a
+directory the user may write to: exporting over a writable file in a
+read-only directory fails, where a direct write used to succeed
+(`setDirectWriteFallback()` is deliberately off, as it would give up the
+guarantee).  The INI file is written by
 `QSettings`, which also writes through a `QSaveFile` and reports a failed
 `sync()` in `status()`.
 

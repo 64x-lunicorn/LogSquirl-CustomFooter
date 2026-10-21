@@ -329,6 +329,13 @@ SCENARIO( "FooterEditor starts a new rule in simple mode", "[footereditor][simpl
                             REQUIRE_FALSE( ui.endCharacterMarked() );
                             REQUIRE( ui.canAccept() );
                         }
+
+                        THEN( "the field shows its hint again" )
+                        {
+                            REQUIRE( ui.endCharacter->toolTip()
+                                     == "The character before which the value ends, e.g. a "
+                                        "comma or a semicolon" );
+                        }
                     }
                 }
 

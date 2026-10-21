@@ -61,9 +61,11 @@ QString problemFieldStyle()
         .arg( css( problemColor() ), css( problemBackgroundColor() ) );
 }
 
-void markField( QLineEdit* field, QLabel* label, const QString& problem )
+/// Marks @p field with @p problem, or shows its @p hint when there is none.
+void markField( QLineEdit* field, QLabel* label, const QString& problem,
+                const QString& hint = {} )
 {
-    const auto toolTip = plainToolTip( problem );
+    const auto toolTip = problem.isEmpty() ? hint : plainToolTip( problem );
     if ( field->toolTip() == toolTip ) {
         return;
     }
@@ -91,6 +93,11 @@ public:
 };
 
 } // namespace
+
+QString RuleDetailPanel::endCharacterHint()
+{
+    return tr( "The character before which the value ends, e.g. a comma or a semicolon" );
+}
 
 RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     : QGroupBox( tr( "Rule" ), parent )
@@ -141,8 +148,7 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     endCharacterEdit_->setMaxLength( 2 );
     endCharacterEdit_->setValidator( new OneCharacterValidator( endCharacterEdit_ ) );
     endCharacterEdit_->setPlaceholderText( QStringLiteral( "," ) );
-    endCharacterEdit_->setToolTip(
-        tr( "The character before which the value ends, e.g. a comma or a semicolon" ) );
+    endCharacterEdit_->setToolTip( endCharacterHint() );
     endCharacterEdit_->setMaximumWidth( 4 * fontMetrics().horizontalAdvance( QLatin1Char( 'M' ) ) );
     watchField( endCharacterEdit_ );
     valueEndLayout->addWidget( endCharacterEdit_ );
@@ -300,7 +306,8 @@ std::optional<SimpleRule> RuleDetailPanel::unfinishedSimpleRule() const
 void RuleDetailPanel::setProblems( const RuleProblems& problems )
 {
     markField( keyEdit_, keyProblem_, problems.key );
-    markField( endCharacterEdit_, endCharacterProblem_, problems.endCharacter );
+    markField( endCharacterEdit_, endCharacterProblem_, problems.endCharacter,
+               endCharacterHint() );
     markField( linePatternEdit_, linePatternProblem_, problems.linePattern );
     markField( valuePatternEdit_, valuePatternProblem_, problems.valuePattern );
 }

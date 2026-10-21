@@ -154,6 +154,8 @@ private:
     /// A hidden label for why a field keeps the rules from being saved.
     QLabel* newProblemLabel( const QString& objectName );
     void setMappings( const QList<ValueMapping>& mappings );
+    /// The end character field's tooltip while it has no problem.
+    static QString endCharacterHint();
 
     /// Show @p rule in the simple fields, without emitting edited().
     void setSimpleFields( const SimpleRule& rule );

@@ -41,24 +41,10 @@ QString keyAndValue( const FooterValue& value )
     return QStringLiteral( "%1: %2" ).arg( value.key, value.value );
 }
 
-/// @p text as shown: cut at FooterValueItem::kMaxShownLength, before a
-/// character rather than within it, with an ellipsis, if it is longer.
-QString elided( const QString& text )
-{
-    if ( text.size() <= FooterValueItem::kMaxShownLength ) {
-        return text;
-    }
-    qsizetype length = FooterValueItem::kMaxShownLength;
-    if ( text.at( length - 1 ).isHighSurrogate() && text.at( length ).isLowSurrogate() ) {
-        --length;
-    }
-    return text.left( length ) + QChar( 0x2026 );
-}
-
 /// The key and the value as shown, for the accessible name.
 QString shownKeyAndValue( const FooterValue& value )
 {
-    return QStringLiteral( "%1: %2" ).arg( value.key, elided( value.value ) );
+    return QStringLiteral( "%1: %2" ).arg( value.key, elidedText( value.value ) );
 }
 
 /// Keys a focused value handles itself, before the window's shortcuts.
@@ -83,11 +69,12 @@ QString withoutMnemonics( QString text )
 QString toolTipOf( const FooterValue& value, bool canGoToLine )
 {
     QStringList lines;
-    lines.append( QStringLiteral( "<b>%1:</b> %2" )
-                      .arg( value.key.toHtmlEscaped(), elided( value.value ).toHtmlEscaped() ) );
+    lines.append(
+        QStringLiteral( "<b>%1:</b> %2" )
+            .arg( value.key.toHtmlEscaped(), elidedText( value.value ).toHtmlEscaped() ) );
     if ( value.isMapped() ) {
         lines.append( FooterValueItem::tr( "Raw value: %1" )
-                          .arg( elided( value.rawValue ).toHtmlEscaped() ) );
+                          .arg( elidedText( value.rawValue ).toHtmlEscaped() ) );
     }
     if ( value.rule >= 0 ) {
         lines.append( FooterValueItem::tr( "From rule %1" ).arg( value.rule + 1 ) );
@@ -108,7 +95,8 @@ QString descriptionOf( const FooterValue& value, bool canGoToLine )
 {
     QStringList sentences;
     if ( value.isMapped() ) {
-        sentences.append( FooterValueItem::tr( "Raw value: %1." ).arg( elided( value.rawValue ) ) );
+        sentences.append(
+            FooterValueItem::tr( "Raw value: %1." ).arg( elidedText( value.rawValue ) ) );
     }
     if ( value.rule >= 0 ) {
         sentences.append( FooterValueItem::tr( "From rule %1." ).arg( value.rule + 1 ) );
@@ -158,7 +146,7 @@ void FooterValueItem::setValue( const FooterValue& value )
 {
     value_ = value;
     // Shown elided, but copied in full.
-    setText( withoutMnemonics( elided( value.value ) ) );
+    setText( withoutMnemonics( elidedText( value.value ) ) );
     setAccessibleName( shownKeyAndValue( value ) );
     updateOffers();
 }

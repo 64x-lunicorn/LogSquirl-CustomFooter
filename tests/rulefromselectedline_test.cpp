@@ -507,6 +507,42 @@ SCENARIO( "The rule editor shows only the part of a long Log Line the footer rea
     }
 }
 
+SCENARIO( "The rule editor's hints show a long value elided", "[rulefromline][footereditor]" )
+{
+    QTemporaryDir logDir;
+    REQUIRE( logDir.isValid() );
+    const auto log = logDir.path() + "/long.log";
+    const QString earlier = "id=" + QString( 300, 'E' ) + " end";
+    const QString selected = "id=" + QString( 300, 'S' ) + " end";
+    writeFile( log, earlier + "\n" + selected + "\n" );
+
+    GIVEN( "a rule made from a line whose value is longer than the footer shows" )
+    {
+        FooterEditor editor( {} );
+        editor.setActiveFile( log );
+        FromLineUi ui( editor );
+        editor.addRuleFromLine( selected );
+
+        WHEN( "the value is marked, and an earlier line with a long value matches first" )
+        {
+            ui.mark( QString( 300, 'S' ) );
+            REQUIRE( processUntil(
+                [ &ui ] { return ui.hint->text().contains( "Log Line 1 matches first" ); } ) );
+
+            THEN( "the rule has the whole value, but the hint shows both values elided" )
+            {
+                REQUIRE( editor.entries().last().linePattern.startsWith( "id=" ) );
+                const auto shown = QString( FooterValueItem::kMaxShownLength, 'S' ) + "…";
+                REQUIRE( ui.hint->text().contains( "“" + shown + "”" ) );
+                REQUIRE_FALSE( ui.hint->text().contains( QString( 101, 'S' ) ) );
+                const auto shownEarlier = QString( FooterValueItem::kMaxShownLength, 'E' ) + "…";
+                REQUIRE( ui.hint->text().contains( "“" + shownEarlier + "”" ) );
+                REQUIRE_FALSE( ui.hint->text().contains( QString( 101, 'E' ) ) );
+            }
+        }
+    }
+}
+
 SCENARIO( "The rule editor says when an earlier Log Line supplies the rule's value",
           "[rulefromline][footereditor]" )
 {

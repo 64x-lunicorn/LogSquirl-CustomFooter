@@ -354,7 +354,10 @@ to the button text, the tooltip (cut first, then HTML-escaped) and the
 accessible name and description. `value()` keeps the full value, so a
 click, Space, Return, the copy shortcut, the context menu and
 "Copy All" copy all of it. The rule editor's picker cuts the selected
-Log Line itself, to what the footer reads (`footerReadLength()`).
+Log Line itself, to what the footer reads (`footerReadLength()`); its
+hints show the marked value, its text before and an earlier Log Line's
+value elided the same way (#71). Both use `elidedText()` and
+`kMaxShownValueLength` from `elidedtext.h`.
 
 ### Host functions
 

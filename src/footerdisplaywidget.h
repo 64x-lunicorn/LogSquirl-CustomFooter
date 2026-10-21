@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "elidedtext.h"
 #include "footervalue.h"
 
 #include <QList>
@@ -58,7 +59,7 @@ public:
     /// its tooltip and its accessible texts show at most. A longer one is
     /// cut there, before a character rather than within it, and shown with
     /// an ellipsis; copying it still copies all of it.
-    static constexpr int kMaxShownLength = 100;
+    static constexpr int kMaxShownLength = kMaxShownValueLength;
 
     explicit FooterValueItem( const FooterValue& value, QWidget* parent = nullptr );
 

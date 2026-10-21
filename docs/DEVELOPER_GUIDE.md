@@ -338,6 +338,16 @@ offer the double-click goes to `QToolButton` as before (two copies of
 the same value). `notify()` shows a message at a key's value through
 `FooterValueItem::showNotice()`, which "Copied" uses as well.
 
+**Long values (#68).** A rule may capture up to a whole 64 KiB line. A
+`FooterValueItem` shows at most `kMaxShownLength` (100) UTF-16 units of
+its value and raw value: a longer one is cut there, one unit earlier
+where a surrogate pair would be split, and ends in "…". The cut applies
+to the button text, the tooltip (cut first, then HTML-escaped) and the
+accessible name and description. `value()` keeps the full value, so a
+click, Space, Return, the copy shortcut, the context menu and
+"Copy All" copy all of it. The rule editor's picker cuts the selected
+Log Line itself, to what the footer reads (`footerReadLength()`).
+
 ### Host functions
 
 LogSquirl 26.11 appended three functions to the host API (LogSquirl

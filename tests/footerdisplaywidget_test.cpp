@@ -379,6 +379,149 @@ SCENARIO( "A footer value tells where it came from", "[footerdisplaywidget][tool
     }
 }
 
+SCENARIO( "A long footer value is shown elided, and copied in full",
+          "[footerdisplaywidget][elide]" )
+{
+    constexpr int kLimit = FooterValueItem::kMaxShownLength;
+    const QString ellipsis( QChar( 0x2026 ) );
+    FooterDisplayWidget widget;
+    widget.show();
+    QApplication::clipboard()->setText( "before" );
+
+    GIVEN( "a value just as long as the limit" )
+    {
+        const QString value( kLimit, 'a' );
+        widget.updateValues( { { "Data", value, value, 0 } } );
+        const auto* item = items( widget ).value( 0 );
+        REQUIRE( item != nullptr );
+
+        THEN( "it is shown in full" )
+        {
+            REQUIRE( item->text() == value );
+            REQUIRE( item->accessibleName() == "Data: " + value );
+            REQUIRE_FALSE( item->toolTip().contains( ellipsis ) );
+        }
+    }
+
+    GIVEN( "a mapped value and raw value of 64 KiB" )
+    {
+        const QString value = QString( 64 * 1024, 'v' );
+        const QString raw = QString( 64 * 1024, 'r' );
+        widget.updateValues( {
+            { "Data", value, raw, 0 },
+            { "Mode", "on", "on", 1 },
+        } );
+        const auto shown = items( widget );
+        REQUIRE( shown.size() == 2 );
+        auto* item = shown[ 0 ];
+
+        THEN( "the button shows its start, with an ellipsis" )
+        {
+            REQUIRE( item->text() == value.left( kLimit ) + ellipsis );
+        }
+
+        THEN( "the tooltip shows the value and raw value elided the same way" )
+        {
+            const auto tip = item->toolTip();
+            REQUIRE( tip.contains( value.left( kLimit ) + ellipsis ) );
+            REQUIRE_FALSE( tip.contains( value.left( kLimit + 1 ) ) );
+            REQUIRE( tip.contains( raw.left( kLimit ) + ellipsis ) );
+            REQUIRE_FALSE( tip.contains( raw.left( kLimit + 1 ) ) );
+        }
+
+        THEN( "the accessible name and description are elided the same way" )
+        {
+            REQUIRE( item->accessibleName() == "Data: " + value.left( kLimit ) + ellipsis );
+            const auto description = item->accessibleDescription();
+            REQUIRE( description.contains( raw.left( kLimit ) + ellipsis ) );
+            REQUIRE_FALSE( description.contains( raw.left( kLimit + 1 ) ) );
+        }
+
+        THEN( "the full value is kept" )
+        {
+            REQUIRE( item->value().value == value );
+            REQUIRE( widget.values()[ 0 ].value == value );
+        }
+
+        WHEN( "it is clicked" )
+        {
+            click( item );
+
+            THEN( "the full value is copied" )
+            {
+                REQUIRE( clipboardText() == value );
+            }
+        }
+
+        WHEN( "it has the keyboard focus and Space is pressed" )
+        {
+            pressKey( item, Qt::Key_Space );
+
+            THEN( "the full value is copied" )
+            {
+                REQUIRE( clipboardText() == value );
+            }
+        }
+
+        WHEN( "it has the keyboard focus and the copy shortcut is pressed" )
+        {
+            const auto copy = QKeySequence( QKeySequence::Copy )[ 0 ];
+            pressKey( item, copy.key(), copy.keyboardModifiers() );
+
+            THEN( "the full value is copied" )
+            {
+                REQUIRE( clipboardText() == value );
+            }
+        }
+
+        THEN( "the context menu copies the full value, and key and value" )
+        {
+            action( item->contextMenu(), "copyValue" )->trigger();
+            REQUIRE( clipboardText() == value );
+            action( item->contextMenu(), "copyKeyAndValue" )->trigger();
+            REQUIRE( clipboardText() == "Data: " + value );
+        }
+
+        THEN( "\"Copy All\" copies the full values" )
+        {
+            action( shown[ 1 ]->contextMenu(), "copyAll" )->trigger();
+            REQUIRE( clipboardText() == "Data: " + value + "\nMode: on" );
+        }
+    }
+
+    GIVEN( "a long value with a character of two UTF-16 units across the limit" )
+    {
+        // U+1F600, a surrogate pair, takes the units kLimit - 1 and kLimit.
+        const QString value
+            = QString( kLimit - 1, 'a' ) + QString::fromUcs4( U"\U0001F600" ) + "tail";
+        widget.updateValues( { { "Data", value, value, 0 } } );
+        const auto* item = items( widget ).value( 0 );
+        REQUIRE( item != nullptr );
+
+        THEN( "it is cut before the character, not within it" )
+        {
+            REQUIRE( item->text() == QString( kLimit - 1, 'a' ) + ellipsis );
+            REQUIRE( item->accessibleName() == "Data: " + QString( kLimit - 1, 'a' ) + ellipsis );
+        }
+    }
+
+    GIVEN( "a long value with HTML and an ampersand in its shown part" )
+    {
+        const QString value = "<b>a & b</b>" + QString( kLimit, 'x' );
+        widget.updateValues( { { "Data", value, value, 0 } } );
+        const auto* item = items( widget ).value( 0 );
+        REQUIRE( item != nullptr );
+
+        THEN( "the tooltip still escapes it, and the button shows the ampersand as it is" )
+        {
+            REQUIRE( item->toolTip().contains( "&lt;b&gt;a &amp; b&lt;/b&gt;" ) );
+            REQUIRE_FALSE( item->toolTip().contains( "<b>a" ) );
+            REQUIRE( item->text().startsWith( "<b>a && b</b>" ) );
+            REQUIRE( item->text().endsWith( ellipsis ) );
+        }
+    }
+}
+
 SCENARIO( "Footer values are reachable with the keyboard and a screen reader",
           "[footerdisplaywidget][accessibility]" )
 {

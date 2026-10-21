@@ -463,6 +463,28 @@ SCENARIO( "The rule editor shows only the part of a long Log Line the footer rea
         }
     }
 
+    WHEN( "a rule is made from a line of 1 MiB with a value at the end of the part shown" )
+    {
+        // The footer reads 65536 bytes of UTF-8: the value ends at the last.
+        const QString head = QString( 64 * 1024 - 15, 'x' ) + " tail=END12345";
+        const QString line = head + " rest=" + QString( 1024 * 1024, 'y' );
+        editor.addRuleFromLine( line );
+        REQUIRE( ui.line->text() == line.left( 64 * 1024 ) );
+        REQUIRE( ui.line->text().endsWith( "tail=END12345 " ) );
+        REQUIRE( cut->isVisibleTo( &editor ) );
+
+        AND_WHEN( "that value is marked" )
+        {
+            ui.mark( "END12345" );
+
+            THEN( "the rule is made, as the footer reads that value" )
+            {
+                REQUIRE( ui.textBefore->text() == "tail=" );
+                REQUIRE( ui.key->text() == "tail" );
+            }
+        }
+    }
+
     WHEN( "a rule is made from a long line of a UTF-16 file" )
     {
         editor.addRuleFromLine( kLongUtf16Line, 1, { FooterScanner::Encoding::Form::Utf16LE, 2 } );

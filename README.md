@@ -338,7 +338,9 @@ as before, and the button is not shown.
   which rule supplied it and, for a mapped value, the raw value it replaced.
   With the keyboard, Tab to a value and press Space, Return or the copy
   shortcut. The context menu of a value offers "Copy Value", "Copy Key and
-  Value", and "Copy All" for every key and value shown, one per line.
+  Value", and "Copy All" for every key and value shown, one per line. A
+  value longer than 100 characters is shown cut off with "…", in the footer
+  and its tooltip; copying it still copies all of it.
 - **Go to the Log Line of a value** (LogSquirl 26.11 or later) by
   double-clicking it, or with "Go to Log Line" in its context menu (with
   the keyboard: Tab to the value and press the context menu key). LogSquirl

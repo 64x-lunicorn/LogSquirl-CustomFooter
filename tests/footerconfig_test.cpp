@@ -411,7 +411,9 @@ SCENARIO( "FooterConfig imports only regular files", "[footerconfig][import]" )
         }
     }
 
-    GIVEN( "a link to an exported rule file" )
+#if defined( Q_OS_UNIX )
+    // On Windows QFile::link() makes a shortcut, a file of its own.
+    GIVEN( "a symbolic link to an exported rule file" )
     {
         const auto target = dir.filePath( "rules.json" );
         REQUIRE( FooterConfig::exportToJson( target, { { "VIN", "VIN:(\\S+)", "", true, {} } } ) );
@@ -434,7 +436,6 @@ SCENARIO( "FooterConfig imports only regular files", "[footerconfig][import]" )
         }
     }
 
-#if defined( Q_OS_UNIX )
     GIVEN( "a FIFO chosen as the rule file" )
     {
         const auto fifo = dir.filePath( "rules.fifo" );

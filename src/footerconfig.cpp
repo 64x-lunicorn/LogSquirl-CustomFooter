@@ -21,6 +21,7 @@
 #include "footerscanner.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -170,6 +171,15 @@ bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntr
 QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath, QString* errorOut )
 {
     QList<FooterEntry> entries;
+
+    // Opening a FIFO or a device blocks the UI thread until someone writes
+    // to it, as in the scanner (#66): only a regular file, or a link to one.
+    if ( !QFileInfo( filePath ).isFile() ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "Not a regular file: %1" ).arg( filePath );
+        }
+        return entries;
+    }
 
     QFile file( filePath );
     if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) ) {

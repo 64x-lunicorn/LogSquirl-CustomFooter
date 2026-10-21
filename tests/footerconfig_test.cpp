@@ -24,6 +24,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "fifo.h"
 #include "footerconfig.h"
 
 #include <QDir>
@@ -388,4 +389,70 @@ SCENARIO( "FooterConfig reads the legacy regex key", "[footerconfig]" )
             }
         }
     }
+}
+
+SCENARIO( "FooterConfig imports only regular files", "[footerconfig][import]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    GIVEN( "a directory chosen as the rule file" )
+    {
+        WHEN( "it is imported" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( dir.path(), &error );
+
+            THEN( "it is refused, saying it is no regular file" )
+            {
+                REQUIRE( imported.isEmpty() );
+                REQUIRE( error.contains( "Not a regular file" ) );
+            }
+        }
+    }
+
+    GIVEN( "a link to an exported rule file" )
+    {
+        const auto target = dir.filePath( "rules.json" );
+        REQUIRE( FooterConfig::exportToJson( target, { { "VIN", "VIN:(\\S+)", "", true, {} } } ) );
+        const auto link = dir.filePath( "link.json" );
+        if ( !QFile::link( target, link ) ) {
+            WARN( "Skipped: links cannot be made here" );
+            return;
+        }
+
+        WHEN( "the link is imported" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( link, &error );
+
+            THEN( "the rules are read" )
+            {
+                REQUIRE( error.isEmpty() );
+                REQUIRE( imported.size() == 1 );
+            }
+        }
+    }
+
+#if defined( Q_OS_UNIX )
+    GIVEN( "a FIFO chosen as the rule file" )
+    {
+        const auto fifo = dir.filePath( "rules.fifo" );
+        REQUIRE( makeFifo( fifo ) );
+        FifoWatchdog watchdog( fifo );
+
+        WHEN( "it is imported" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( fifo, &error );
+
+            THEN( "it is refused without being opened" )
+            {
+                REQUIRE_FALSE( watchdog.fired() );
+                REQUIRE( imported.isEmpty() );
+                REQUIRE( error.contains( "Not a regular file" ) );
+            }
+        }
+    }
+#endif
 }

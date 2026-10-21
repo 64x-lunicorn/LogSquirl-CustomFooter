@@ -248,7 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file, such as a FIFO or a device, is no longer opened: the footer shows
   no values for it and the preview says the file cannot be read, so
   closing the rule editor and shutting the plugin down no longer hang. A
-  regular file that replaces it is scanned as usual (#66).
+  regular file that replaces it is scanned as usual (#66). Import
+  refuses such a file too, instead of hanging LogSquirl (#75).
 - **Hardened build** — the plugin library is built with `-Wall -Wextra`,
   `-fstack-protector-strong` and, in optimized builds,
   `_FORTIFY_SOURCE=2` where the compiler supports them, and the tests

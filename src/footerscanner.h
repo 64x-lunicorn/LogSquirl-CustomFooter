@@ -104,7 +104,8 @@ public:
         /// Bytes of a byte order mark before the first line, not part of it.
         qint64 textStart = 0;
         /// With Form::Named, the host's name of the encoding, such as
-        /// "windows-1252"; a name this Qt cannot decode is read as Latin-1.
+        /// "windows-1252"; a name this Qt cannot decode is read as Latin-1,
+        /// windows-1252 as Windows decodes it.
         QByteArray name;
 
         /// The encoding of a file starting with @p start, told from a byte
@@ -113,7 +114,9 @@ public:
 
         /// The encoding the host reads a file starting with @p start in, by
         /// its IANA name @p hostName ("UTF-16LE", "windows-1252", …, in any
-        /// case); detect( @p start ) for an empty name.
+        /// case); detect( @p start ) for an empty name. A UTF-16 byte order
+        /// mark wins over a name that is not UTF-16 or UTF-32: the host
+        /// names the locale's encoding until it has detected the file's.
         static Encoding forHost( const QByteArray& hostName, const QByteArray& start );
 
         /// The encoding of the file at @p filePath, from its first bytes
@@ -126,9 +129,6 @@ public:
 
         /// Whether the code unit at @p at is @p unit (an ASCII character).
         bool isUnit( const char* at, char unit ) const;
-
-        /// The text of @p bytes, whole code units of a line.
-        QString decode( const QByteArray& bytes ) const;
 
         bool operator==( const Encoding& other ) const
         {

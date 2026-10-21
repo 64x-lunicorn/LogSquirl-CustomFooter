@@ -119,8 +119,9 @@ struct HostFunctions {
     /**
      * The name of the text encoding the host reads the open Log File
      * @p filePath in, such as "UTF-16LE" or "windows-1252": the one the user
-     * chose for its tab, else the one detected. Nothing when no tab shows
-     * that file.
+     * chose for its tab, else the one detected, else the locale's. An empty
+     * path asks for the Log File of the tab in front. Nothing when no tab
+     * shows that file.
      *
      * Set only where the host also tells of every change of a Log File's
      * encoding, which the plugin then hands to the session

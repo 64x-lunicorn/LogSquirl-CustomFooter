@@ -90,9 +90,11 @@ public:
     void setActiveFile( const QString& filePath );
 
     /// The host reads the Log File @p filePath in the encoding named
-    /// @p encoding now. For the active file in another encoding than
-    /// before, the footer and the editor's preview read it afresh in that
-    /// one; for any other file nothing changes.
+    /// @p encoding now. For the active file, the encoding of the tab in
+    /// front is asked again (@p encoding where the host offers no such
+    /// question), and in another encoding than before, the footer and the
+    /// editor's preview read it afresh in that one; for any other file
+    /// nothing changes.
     void encodingChanged( const QString& filePath, const QByteArray& encoding );
 
     /**
@@ -150,6 +152,14 @@ private:
     /// The Log Lines selected in the host, read now; nothing, after the
     /// message why over @p messageOver, without a selected Log Line.
     std::optional<SelectedLogLines> selectedLinesOrSayWhy( QWidget* messageOver );
+
+    /// Hand the active file and its encoding to the controller and the
+    /// editor.
+    void pushActiveFile();
+
+    /// The encoding the host reads the tab in front's Log File in, asked
+    /// now; empty without an active file or where the host does not say.
+    QByteArray frontEncoding() const;
 
     /// Make a rule in @p editor from the first of the @p selected Log
     /// Lines, read as the footer reads the active file: in the host's

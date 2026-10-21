@@ -1165,6 +1165,7 @@ SCENARIO( "The plugin reads the active file in the encoding LogSquirl 26.12 repo
         {
             REQUIRE( waitForText( QStringLiteral( "GRÜN" ) ) );
             const auto file = path.toUtf8();
+            host().encoding = "UTF-8";
             host().encodingCallback( host().encodingUserData, file.constData(), "UTF-8" );
 
             THEN( "the file is scanned again, in UTF-8" )

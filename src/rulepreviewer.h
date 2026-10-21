@@ -99,6 +99,8 @@ public:
     {
         return activeFile_;
     }
+    /// The name of the encoding the active file is read in; empty where
+    /// the host does not say.
     const QByteArray& activeFileEncoding() const
     {
         return activeFileEncoding_;

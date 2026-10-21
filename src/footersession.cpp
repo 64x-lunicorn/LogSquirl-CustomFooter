@@ -199,22 +199,37 @@ void FooterSession::setActiveFile( const QString& filePath )
     activeFile_ = filePath;
     // Asked now, on the UI thread, as the host requires; a change later is
     // told by encodingChanged().
-    activeFileEncoding_.clear();
-    if ( host_.logFileEncoding && !filePath.isEmpty() ) {
-        activeFileEncoding_ = host_.logFileEncoding( filePath ).value_or( QByteArray() );
+    activeFileEncoding_ = frontEncoding();
+    pushActiveFile();
+}
+
+QByteArray FooterSession::frontEncoding() const
+{
+    if ( !host_.logFileEncoding || activeFile_.isEmpty() ) {
+        return {};
     }
-    controller_->setActiveFile( activeFile_, activeFileEncoding_ );
-    if ( editor_ ) {
-        editor_->setActiveFile( activeFile_, activeFileEncoding_ );
-    }
+    // The tab in front's, which shows the active file: asked by its path,
+    // the host would answer for the first tab showing it, in any window.
+    return host_.logFileEncoding( QString() ).value_or( QByteArray() );
 }
 
 void FooterSession::encodingChanged( const QString& filePath, const QByteArray& encoding )
 {
-    if ( activeFile_.isEmpty() || filePath != activeFile_ || encoding == activeFileEncoding_ ) {
+    if ( activeFile_.isEmpty() || filePath != activeFile_ ) {
         return;
     }
-    activeFileEncoding_ = encoding;
+    // Asked again for the tab in front: the change may be that of another
+    // window's tab showing the same file.
+    const auto now = host_.logFileEncoding ? frontEncoding() : encoding;
+    if ( now == activeFileEncoding_ ) {
+        return;
+    }
+    activeFileEncoding_ = now;
+    pushActiveFile();
+}
+
+void FooterSession::pushActiveFile()
+{
     controller_->setActiveFile( activeFile_, activeFileEncoding_ );
     if ( editor_ ) {
         editor_->setActiveFile( activeFile_, activeFileEncoding_ );

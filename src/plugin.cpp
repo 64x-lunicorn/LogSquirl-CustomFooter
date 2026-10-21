@@ -276,7 +276,8 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         }
 
         // Initial scan if a file is already open. Read here, on the UI
-        // thread, and pushed into the session, which never asks the host.
+        // thread, and pushed into the session, which never asks the host
+        // for it (only for its encoding, through its host functions).
         state.session->setActiveFile( fromHost( api->get_active_file_path( handle ) ) );
 
         host.logMessage( LOGSQUIRL_LOG_INFO, readyMessage( *state.session ) );

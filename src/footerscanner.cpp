@@ -157,18 +157,55 @@ FooterScanner::Encoding encodingOf( QFile& file, const QByteArray& hostEncoding 
     return FooterScanner::Encoding::forHost( hostEncoding, readAt( file, 0, markBytes ) );
 }
 
+/// Whether @p name is windows-1252, by one of its usual names.
+bool isWindows1252( const QByteArray& name )
+{
+    const auto key = name.toUpper().replace( '-', "" ).replace( '_', "" );
+    return key == "WINDOWS1252" || key == "CP1252";
+}
+
+/// windows-1252 bytes as text, where Qt has no decoder for it (one without
+/// ICU): Latin-1 but for 0x80 to 0x9F, as Windows decodes them.
+QString fromWindows1252( const QByteArray& bytes )
+{
+    static const char16_t high[ 32 ] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160,
+        0x2039, 0x0152, 0x008D, 0x017D, 0x008F, 0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022,
+        0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    };
+    QString text( bytes.size(), Qt::Uninitialized );
+    for ( qsizetype at = 0; at < bytes.size(); ++at ) {
+        const auto byte = static_cast<unsigned char>( bytes.at( at ) );
+        text[ at ] = byte >= 0x80 && byte < 0xA0 ? QChar( high[ byte - 0x80 ] ) : QChar( byte );
+    }
+    return text;
+}
+
 /// Decodes the lines of one scan: made once, for the many lines it reads.
 class LineDecoder {
 public:
     explicit LineDecoder( const Encoding& encoding )
         : utf8_( encoding.form == Encoding::Form::Utf8 )
         , decoder_( decoderFor( encoding ) )
+        , windows1252_( encoding.form == Encoding::Form::Named && !decoder_.isValid()
+                        && isWindows1252( encoding.name ) )
     {
     }
 
     QString operator()( const QByteArray& bytes )
     {
-        return utf8_ ? QString::fromUtf8( bytes ) : decoder_.decode( bytes );
+        if ( utf8_ ) {
+            return QString::fromUtf8( bytes );
+        }
+        if ( windows1252_ ) {
+            return fromWindows1252( bytes );
+        }
+        if ( !decoder_.isValid() ) {
+            // Not one this Qt decodes: its lines are still split right, and
+            // their ASCII is still read right.
+            return QString::fromLatin1( bytes );
+        }
+        return decoder_.decode( bytes );
     }
 
 private:
@@ -189,21 +226,16 @@ private:
             return QStringDecoder( QStringConverter::Utf32LE, flags );
         case Encoding::Form::Utf32BE:
             return QStringDecoder( QStringConverter::Utf32BE, flags );
-        case Encoding::Form::Named: {
-            QStringDecoder named( encoding.name.constData(), flags );
-            if ( named.isValid() ) {
-                return named;
-            }
-            // Not one this Qt decodes: its lines are still split right, and
-            // their ASCII is still read right.
-            return QStringDecoder( QStringConverter::Latin1, flags );
-        }
+        case Encoding::Form::Named:
+            // Invalid where this Qt does not know the name.
+            return QStringDecoder( encoding.name.constData(), flags );
         }
         return QStringDecoder( QStringConverter::Utf8, flags );
     }
 
     bool utf8_;
     QStringDecoder decoder_;
+    bool windows1252_;
 };
 
 /// A raw value as shown: the display value of the first mapping of exactly
@@ -325,63 +357,51 @@ FooterScanner::Encoding FooterScanner::Encoding::forHost( const QByteArray& host
     }
 
     // The names Qt gives the Unicode encodings, as LogSquirl passes them on,
-    // and their usual spellings.
-    const auto key = hostName.toUpper().replace( '-', "" ).replace( '_', "" );
-    const bool littleEndianHost = QSysInfo::ByteOrder == QSysInfo::LittleEndian;
-    Form unicode = Form::Named;
+    // in any case and with or without '-'; each with its byte order mark.
+    struct Unicode {
+        QByteArray key;
+        Form form;
+        QByteArray mark;
+    };
+    static const Unicode unicode[] = {
+        { "UTF16LE", Form::Utf16LE, QByteArray( "\xFF\xFE", 2 ) },
+        { "UTF16BE", Form::Utf16BE, QByteArray( "\xFE\xFF", 2 ) },
+        { "UTF32LE", Form::Utf32LE, QByteArray( "\xFF\xFE\x00\x00", 4 ) },
+        { "UTF32BE", Form::Utf32BE, QByteArray( "\x00\x00\xFE\xFF", 4 ) },
+    };
+    const auto find = []( const QByteArray& key ) -> const Unicode* {
+        for ( const auto& encoding : unicode ) {
+            if ( encoding.key == key ) {
+                return &encoding;
+            }
+        }
+        return nullptr;
+    };
+
+    auto key = hostName.toUpper().replace( '-', "" ).replace( '_', "" );
+    // A UTF-16 mark wins over a name of another encoding: until its first
+    // load has detected the encoding, the host names the locale's, and a
+    // file with a UTF-16 mark read in any other encoding is no text anyway.
+    const auto marked = detect( start );
+    if ( marked.form != Form::Utf8 && !key.startsWith( "UTF16" ) && !key.startsWith( "UTF32" ) ) {
+        return marked;
+    }
     if ( key == "UTF8" ) {
         // A UTF-8 mark stays in the first line, as it always has.
         return {};
     }
-    if ( key == "UTF16LE" ) {
-        unicode = Form::Utf16LE;
-    }
-    else if ( key == "UTF16BE" ) {
-        unicode = Form::Utf16BE;
-    }
-    else if ( key == "UTF16" ) {
+    if ( key == "UTF16" || key == "UTF32" ) {
         // Of the mark's byte order, else of this machine's, as Qt decodes it.
-        const bool bigEndian = start.startsWith( "\xFE\xFF" )
-                               || ( !start.startsWith( "\xFF\xFE" ) && !littleEndianHost );
-        unicode = bigEndian ? Form::Utf16BE : Form::Utf16LE;
+        const bool bigEndian = start.startsWith( find( key + "BE" )->mark )
+                               || ( !start.startsWith( find( key + "LE" )->mark )
+                                    && QSysInfo::ByteOrder == QSysInfo::BigEndian );
+        key += bigEndian ? "BE" : "LE";
     }
-    else if ( key == "UTF32LE" ) {
-        unicode = Form::Utf32LE;
+    if ( const auto* found = find( key ) ) {
+        // The mark of this encoding, if the file starts with it, is no text.
+        return { found->form, start.startsWith( found->mark ) ? found->mark.size() : 0, {} };
     }
-    else if ( key == "UTF32BE" ) {
-        unicode = Form::Utf32BE;
-    }
-    else if ( key == "UTF32" ) {
-        const bool bigEndian
-            = start.startsWith( QByteArray( "\x00\x00\xFE\xFF", 4 ) )
-              || ( !start.startsWith( QByteArray( "\xFF\xFE\x00\x00", 4 ) ) && !littleEndianHost );
-        unicode = bigEndian ? Form::Utf32BE : Form::Utf32LE;
-    }
-    if ( unicode == Form::Named ) {
-        return { Form::Named, 0, hostName };
-    }
-
-    // The mark of this encoding, if the file starts with it, is no text.
-    QByteArray ownMark;
-    switch ( unicode ) {
-    case Form::Utf16LE:
-        ownMark = QByteArray( "\xFF\xFE", 2 );
-        break;
-    case Form::Utf16BE:
-        ownMark = QByteArray( "\xFE\xFF", 2 );
-        break;
-    case Form::Utf32LE:
-        ownMark = QByteArray( "\xFF\xFE\x00\x00", 4 );
-        break;
-    default:
-        ownMark = QByteArray( "\x00\x00\xFE\xFF", 4 );
-        break;
-    }
-    Encoding encoding{ unicode, 0, {} };
-    if ( start.startsWith( ownMark ) ) {
-        encoding.textStart = ownMark.size();
-    }
-    return encoding;
+    return { Form::Named, 0, hostName };
 }
 
 FooterScanner::Encoding FooterScanner::Encoding::ofFile( const QString& filePath,
@@ -426,11 +446,6 @@ bool FooterScanner::Encoding::isUnit( const char* at, char unit ) const
         break;
     }
     return at[ 0 ] == unit;
-}
-
-QString FooterScanner::Encoding::decode( const QByteArray& bytes ) const
-{
-    return LineDecoder( *this )( bytes );
 }
 
 FooterScanner::FooterScanner( const QList<FooterEntry>& entries )

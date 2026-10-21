@@ -39,7 +39,6 @@
 #include "rulepreviewer.h"
 
 #include <QFile>
-#include <QStringDecoder>
 #include <QTemporaryDir>
 
 #include <vector>
@@ -326,11 +325,9 @@ SCENARIO( "FooterScanner reads a file in a single-byte encoding the host names",
             const auto scan = scanner.scanFrom( path, {}, FooterScanner::kDefaultMaxLines, nullptr,
                                                 "windows-1252" );
 
-            THEN( "it is the euro sign where this Qt decodes windows-1252, else Latin-1's" )
+            THEN( "it is the euro sign, also where this Qt has no windows-1252 decoder" )
             {
-                const bool qtKnowsIt = QStringDecoder( "windows-1252" ).isValid();
-                REQUIRE( scan.values[ "VIN" ].value
-                         == ( qtKnowsIt ? QStringLiteral( "€" ) : QString( QChar( 0x80 ) ) ) );
+                REQUIRE( scan.values[ "VIN" ].value == QStringLiteral( "€" ) );
             }
         }
     }
@@ -380,9 +377,17 @@ SCENARIO( "The encoding the host names wins over a byte order mark",
         REQUIRE( Encoding::forHost( {}, "VIN" ) == Encoding() );
     }
 
-    THEN( "UTF-8 chosen for a file with a UTF-16 mark reads it as UTF-8" )
+    THEN( "a file with a UTF-16 mark is read as UTF-16 while the host names the locale's UTF-8 "
+          "or windows-1252, as before it has detected the encoding" )
     {
-        REQUIRE( Encoding::forHost( "UTF-8", utf16Mark ) == Encoding() );
+        REQUIRE( Encoding::forHost( "UTF-8", utf16Mark ) == Encoding::detect( utf16Mark ) );
+        REQUIRE( Encoding::forHost( "windows-1252", utf16Mark ) == Encoding::detect( utf16Mark ) );
+    }
+
+    THEN( "a UTF-8 mark is no reason to doubt the host's name" )
+    {
+        REQUIRE( Encoding::forHost( "windows-1252", "\xEF\xBB\xBF" ).form
+                 == Encoding::Form::Named );
     }
 
     THEN( "UTF-16BE chosen for a file with a UTF-16LE mark keeps the mark as text" )
@@ -408,7 +413,7 @@ SCENARIO( "The encoding the host names wins over a byte order mark",
 
     THEN( "any other name is read with a one-byte line feed, under that name" )
     {
-        const auto encoding = Encoding::forHost( "Shift_JIS", utf16Mark );
+        const auto encoding = Encoding::forHost( "Shift_JIS", "VIN" );
         REQUIRE( encoding.form == Encoding::Form::Named );
         REQUIRE( encoding.name == "Shift_JIS" );
         REQUIRE( encoding.unitBytes() == 1 );
@@ -571,7 +576,8 @@ SCENARIO( "A footer session reads the active file in the encoding the host repor
             REQUIRE( processUntil( [ & ] {
                 return shownWithLines( footer ) == QStringList{ "VIN=" + cDot + "AR@2", "ID=42@3" };
             } ) );
-            REQUIRE( encodingHost.askedFor == QStringList{ noBom } );
+            // For the tab in front, which shows the active file.
+            REQUIRE( encodingHost.askedFor == QStringList{ QString() } );
         }
 
         WHEN( "the editor is opened" )
@@ -587,6 +593,7 @@ SCENARIO( "A footer session reads the active file in the encoding the host repor
 
             AND_WHEN( "the host reads the file in another encoding" )
             {
+                encodingHost.encoding = "UTF-8";
                 session.encodingChanged( noBom, "UTF-8" );
 
                 THEN( "the preview follows" )
@@ -607,6 +614,7 @@ SCENARIO( "A footer session reads the active file in the encoding the host repor
 
         WHEN( "the user chooses windows-1252 for its tab in LogSquirl" )
         {
+            encodingHost.encoding = "windows-1252";
             session.encodingChanged( latin, "windows-1252" );
 
             THEN( "the file is scanned again, and its values decoded in windows-1252" )
@@ -619,6 +627,18 @@ SCENARIO( "A footer session reads the active file in the encoding the host repor
             }
         }
 
+        WHEN( "the same file's tab in another window is read in another encoding" )
+        {
+            const auto before = shownWithLines( footer );
+            session.encodingChanged( latin, "windows-1252" );
+
+            THEN( "the footer keeps the tab in front's encoding, asked for again" )
+            {
+                REQUIRE( encodingHost.askedFor.size() == 2 );
+                REQUIRE( shownWithLines( footer ) == before );
+            }
+        }
+
         WHEN( "another file's encoding changes" )
         {
             const auto before = shownWithLines( footer );
@@ -628,6 +648,23 @@ SCENARIO( "A footer session reads the active file in the encoding the host repor
             {
                 REQUIRE( shownWithLines( footer ) == before );
             }
+        }
+    }
+
+    GIVEN( "a session on a host that names the locale's UTF-8 for a UTF-16 file with mark it "
+           "has not loaded yet" )
+    {
+        const auto withBom = logDir.path() + "/bom.log";
+        writeBytes( withBom, "\xFF\xFE" + utf16LE( sampleLog() ) );
+        encodingHost.encoding = "UTF-8";
+        FooterSession session( configDir.path(), &footer, encodingHost.host() );
+        session.setActiveFile( withBom );
+
+        THEN( "the footer reads it as UTF-16LE, told from its mark, as with #42" )
+        {
+            REQUIRE( processUntil( [ & ] {
+                return shownWithLines( footer ) == QStringList{ "VIN=" + cDot + "AR@2", "ID=42@3" };
+            } ) );
         }
     }
 

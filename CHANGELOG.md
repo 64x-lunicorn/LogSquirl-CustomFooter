@@ -198,6 +198,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line appended to the active file just as the preview finished reading
   could be skipped as a change that cannot alter the preview, until the
   file changed again. It is now previewed.
+- **A failed export is reported and leaves no partial file** — Export
+  writes the rules to a temporary file and renames it into place only
+  once it is complete, so the chosen file either stays as it was or holds
+  the whole export. When writing fails, e.g. on a full disk or when a
+  folder is chosen as the file, the export error names the file and the
+  reason. Before, a failed write could leave an incomplete JSON file
+  without a message. A successful export is written exactly as before
+  (#67).
+- **Long values no longer flood the footer** — a value longer than 100
+  characters is shown cut off with "…" in the footer, in its tooltip and
+  to screen readers; a click, Space, Return, the copy shortcut, the
+  context menu and "Copy All" still copy the whole value. A mapped
+  value's raw value is cut off the same way in the tooltip (#68). The
+  hints of **Rule from Selected Line…** show a long marked value, its
+  text before and an earlier Log Line's value cut off the same way (#71).
+- **A broken host table no longer crashes LogSquirl** — when the host's
+  function table lacks a function the plugin calls (config directory,
+  footer widget, menu action, active file), initialisation fails with a
+  logged error, and shutdown afterwards is clean (#69).
+- **Calls off the UI thread are ignored** — an active-file notification
+  or a menu action the host calls from a thread other than the UI thread
+  is logged and ignored, instead of touching the footer and the rule
+  editor from that thread (#69, #72).
+- **The end character field keeps its hint** — in simple mode, the end
+  character field's tooltip explains the field again once it has no
+  problem; before, the first check emptied it (#73).
+
+### Security
+- **Rule text is never shown as rich text** — a line pattern, a key, a
+  file path or a pattern error is shown as it is, whatever it contains.
+  Before, the rule list's tooltip showed a line pattern such as
+  `<img src="file:///dev/zero">` (a valid regex, e.g. from an imported
+  rule set) as HTML, and loaded the file it names when the rule was
+  hovered; on Windows a UNC path in it opened an SMB connection. The
+  preview's tooltip, the import and export error messages and the
+  problem notes below the fields and the rule list show their text as
+  plain text too. The footer's tooltips escape keys and values as before
+  (#64).
+- **Rule files and patterns have limits** — Import refuses a file larger
+  than 4 MiB, saying so, without reading it. A line or value pattern
+  longer than 4096 characters is a problem of its rule, as an invalid
+  pattern is: the editor marks it at the field and in the list, lists it,
+  and does not save until it is fixed; the footer skips the rule and
+  reports it in the LogSquirl log. The pattern fields no longer take
+  patterns of any length. The README says to trust a rule set like code,
+  as a pathological pattern can make a scan slow (#65).
+- **Only regular files are read** — an active file that is not a regular
+  file, such as a FIFO or a device, is no longer opened: the footer shows
+  no values for it and the preview says the file cannot be read, so
+  closing the rule editor and shutting the plugin down no longer hang. A
+  regular file that replaces it is scanned as usual (#66).
+- **Hardened build** — the plugin library is built with `-Wall -Wextra`,
+  `-fstack-protector-strong` and, in optimized builds,
+  `_FORTIFY_SOURCE=2` where the compiler supports them, and the tests
+  fetch Catch2 at a fixed commit instead of a tag. The Developer Guide
+  says that a continued scan tells a replaced file by its first and last
+  bytes and its birth time, so a file rewritten in place with the same
+  size and ends keeps its values until it changes again (#70).
 
 ## [0.4.0] — 2026-10-01
 

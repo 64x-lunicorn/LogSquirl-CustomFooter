@@ -34,13 +34,15 @@
  *   2. Host calls init_ex(api, handle, api_size), or an older host
  *      init(api, handle), which is init_ex() with the base table's size —
  *      we turn the table into HostFunctions (HostApiAdapter, which reads
- *      only the members api_size reports), make the footer widget and a
+ *      only the members api_size reports), refuse a table that lacks a base
+ *      function we call, make the footer widget and a
  *      FooterSession on it, and register the widget, a menu action and an
  *      active-file callback. The menu action is "Custom Footer…", or, where
  *      the host hands over the selected Log Lines (26.11), a submenu
  *      "Custom Footer" with "Edit Rules…" and "Rule from Selected Line…".
  *   3. When the active file changes, onActiveFileChanged() hands it to the
- *      session, for the footer and the rule editor.
+ *      session, for the footer and the rule editor; a call off the UI
+ *      thread is logged and ignored.
  *   4. Host calls shutdown() — destroying the session stops everything of
  *      the plugin; then the footer widget is unregistered and deleted, and
  *      the adapter drops the Regex Lab answers still awaited.
@@ -56,8 +58,10 @@
 #include "hostapiadapter.h"
 #include "hostfunctions.h"
 
+#include <QCoreApplication>
 #include <QString>
 #include <QStringList>
+#include <QThread>
 
 #include <memory>
 
@@ -134,14 +138,49 @@ QString fromHost( const char* text )
     return text ? QString::fromUtf8( text ) : QString();
 }
 
+/// The names of the base table's functions that the plugin calls without
+/// asking, and @p api has as NULL.
+QStringList missingFunctions( const LogSquirlHostApi& api )
+{
+    QStringList missing;
+    const auto need = [ &missing ]( bool present, const char* name ) {
+        if ( !present ) {
+            missing.append( QString::fromLatin1( name ) );
+        }
+    };
+    need( api.get_config_dir, "get_config_dir" );
+    need( api.register_menu_action, "register_menu_action" );
+    need( api.register_footer_widget, "register_footer_widget" );
+    need( api.unregister_footer_widget, "unregister_footer_widget" );
+    need( api.get_active_file_path, "get_active_file_path" );
+    need( api.register_active_file_callback, "register_active_file_callback" );
+    return missing;
+}
+
+/// Whether this is the thread of the application, where the widgets live.
+bool onUiThread()
+{
+    const auto* app = QCoreApplication::instance();
+    return app && QThread::currentThread() == app->thread();
+}
+
 } // namespace
 
 // ── Callbacks ───────────────────────────────────────────────────────────
 
-/// Called by the host, on the UI thread, when the active file changes.
+/// Called by the host, on the UI thread, when the active file changes. The
+/// plugin API does not promise that thread, and the session's widgets and
+/// timers live there: a call from another thread is logged (log_message
+/// may be called from any thread) and ignored.
 static void onActiveFileChanged( void* /* userData */, const char* filePath )
 {
     guarded( plugin().host(), "scanning the active file", [ filePath ] {
+        if ( !onUiThread() ) {
+            plugin().host().logMessage( LOGSQUIRL_LOG_ERROR,
+                                        QStringLiteral( "Custom Footer: the host reported the "
+                                                        "active file off the UI thread; ignored" ) );
+            return;
+        }
         if ( auto* session = plugin().session.get() ) {
             session->setActiveFile( fromHost( filePath ) );
         }
@@ -211,10 +250,23 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
     state.api = api;
     state.handle = handle;
 
-    const bool ok = guarded( state.host(), "initialisation", [ &state, api, handle ] {
+    bool complete = false;
+    const bool ok = guarded( state.host(), "initialisation", [ &state, &complete, api, handle ] {
         const auto& host = state.host();
         host.logMessage( LOGSQUIRL_LOG_INFO,
                          QStringLiteral( "Custom Footer plugin initialising…" ) );
+
+        // Every function called below, and unregister_footer_widget at
+        // shutdown, is called without asking; a table that lacks one is
+        // refused before anything is registered.
+        const auto missing = missingFunctions( *api );
+        if ( !missing.isEmpty() ) {
+            host.logMessage( LOGSQUIRL_LOG_ERROR,
+                             QStringLiteral( "Custom Footer: the host's table has no %1; the "
+                                             "plugin is not initialised" )
+                                 .arg( missing.join( QStringLiteral( ", " ) ) ) );
+            return;
+        }
 
         const auto configDir = fromHost( api->get_config_dir( handle ) );
         if ( configDir.isEmpty() ) {
@@ -257,9 +309,10 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         state.session->setActiveFile( fromHost( api->get_active_file_path( handle ) ) );
 
         host.logMessage( LOGSQUIRL_LOG_INFO, readyMessage( *state.session ) );
+        complete = true;
     } );
 
-    if ( !ok ) {
+    if ( !ok || !complete ) {
         logsquirl_plugin_shutdown();
         return 1;
     }

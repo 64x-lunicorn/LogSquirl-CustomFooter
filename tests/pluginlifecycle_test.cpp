@@ -48,6 +48,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <thread>
 
 using namespace custom_footer;
 
@@ -80,6 +81,7 @@ struct FakeHost {
     QByteArray selectedLines;
     QStringList warnings; ///< The messages logged as warnings.
     QStringList infos;    ///< The messages logged as information.
+    QStringList errors;   ///< The messages logged as errors.
     /// Every call of the plugin, in order: the function's name, and for a
     /// log message its level ("log info", "log warning", "log error").
     QStringList calls;
@@ -124,6 +126,9 @@ LogSquirlHostApi fakeApi()
         }
         else if ( level == LOGSQUIRL_LOG_INFO ) {
             host().infos.append( QString::fromUtf8( message ) );
+        }
+        else if ( level == LOGSQUIRL_LOG_ERROR ) {
+            host().errors.append( QString::fromUtf8( message ) );
         }
     };
     api.get_config_dir = []( void* ) {
@@ -190,6 +195,34 @@ LogSquirlHostApi fakeApi()
         }
         return static_cast<int>( LOGSQUIRL_LOG_LINES_OK );
     };
+    return api;
+}
+
+/// fakeApi() with the base function @p name set to NULL, as a broken host's table.
+LogSquirlHostApi fakeApiWithout( const QString& name )
+{
+    auto api = fakeApi();
+    if ( name == "get_config_dir" ) {
+        api.get_config_dir = nullptr;
+    }
+    else if ( name == "register_menu_action" ) {
+        api.register_menu_action = nullptr;
+    }
+    else if ( name == "register_footer_widget" ) {
+        api.register_footer_widget = nullptr;
+    }
+    else if ( name == "unregister_footer_widget" ) {
+        api.unregister_footer_widget = nullptr;
+    }
+    else if ( name == "get_active_file_path" ) {
+        api.get_active_file_path = nullptr;
+    }
+    else if ( name == "register_active_file_callback" ) {
+        api.register_active_file_callback = nullptr;
+    }
+    else {
+        FAIL( "no such host function: " << name.toStdString() );
+    }
     return api;
 }
 
@@ -702,6 +735,102 @@ SCENARIO( "The plugin's entry points cope with the host's unusual calls", "[plug
             {
                 REQUIRE( host().calls.isEmpty() );
                 REQUIRE_FALSE( openEditorWindow() );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin refuses a host table with a missing function", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    int handle = 0;
+    const QString missing
+        = GENERATE( as<QString>{}, "get_config_dir", "register_menu_action",
+                    "register_footer_widget", "unregister_footer_widget", "get_active_file_path",
+                    "register_active_file_callback" );
+    const auto api = fakeApiWithout( missing );
+
+    WHEN( "init() is called with a table whose " + missing.toStdString() + " is NULL" )
+    {
+        const int result = logsquirl_plugin_init( &api, &handle );
+
+        THEN( "it fails, logging which function is missing, and registers nothing" )
+        {
+            REQUIRE( result == 1 );
+            REQUIRE( host().errors
+                     == QStringList{ "Custom Footer: the host's table has no " + missing
+                                     + "; the plugin is not initialised" } );
+            for ( const auto& call : host().calls ) {
+                REQUIRE( call.startsWith( "log " ) );
+            }
+            REQUIRE_FALSE( host().footerWidget );
+            REQUIRE( host().menuItems.isEmpty() );
+            REQUIRE_FALSE( host().activeFileCallback );
+        }
+
+        AND_WHEN( "the host shuts it down all the same, and calls configure()" )
+        {
+            host().calls.clear();
+            logsquirl_plugin_shutdown();
+            logsquirl_plugin_configure( nullptr );
+
+            THEN( "nothing happens" )
+            {
+                REQUIRE( host().calls.isEmpty() );
+                REQUIRE_FALSE( openEditorWindow() );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin ignores an active-file callback off the UI thread", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    writeFile( logDir.path() + "/first.log", "VIN: FIRST\n" );
+    writeFile( logDir.path() + "/second.log", "VIN: SECOND\n" );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = ( logDir.path() + "/first.log" ).toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    GIVEN( "an initialised plugin showing the first file, with the rule editor open" )
+    {
+        REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+        REQUIRE( waitForText( "FIRST" ) );
+        logsquirl_plugin_configure( nullptr );
+        QPointer<FooterEditor> editor = openEditorWindow();
+        REQUIRE( editor );
+
+        WHEN( "the host calls the active-file callback from a worker thread" )
+        {
+            const auto second = ( logDir.path() + "/second.log" ).toUtf8();
+            std::thread worker( [ &second ] {
+                host().activeFileCallback( host().activeFileUserData, second.constData() );
+            } );
+            worker.join();
+
+            THEN( "it is logged as an error and ignored: the session keeps the first file" )
+            {
+                REQUIRE( host().errors
+                         == QStringList{ "Custom Footer: the host reported the active file off "
+                                         "the UI thread; ignored" } );
+                REQUIRE( editor );
+                REQUIRE( editor->activeFile() == logDir.path() + "/first.log" );
+                REQUIRE_FALSE( waitForText( "SECOND", 200 ) );
+                REQUIRE( waitForText( "FIRST" ) );
             }
         }
     }

@@ -225,7 +225,11 @@ must `get_active_file_path`: the host refuses them elsewhere
 actions, host callbacks and widget signals all run there, so the editor
 calls them from its handlers; never from a scan or preview worker. The
 Regex Lab's answer comes on the UI thread too, and the adapter's table of
-Labs awaiting an answer is touched there only, without a lock.
+Labs awaiting an answer is touched there only, without a lock. That the
+host calls back on the UI thread is something the plugin relies on (see
+*What the plugin relies on from the host* in
+[Host functions](#host-functions)); the
+active-file callback checks it and ignores a call from another thread.
 
 ## Footer Session
 
@@ -408,8 +412,15 @@ only: the host's table and handle, the `HostApiAdapter` with the
 `HostFunctions` built from it, the footer widget (owned there, as the
 host must unregister it after the session is gone) and the session.
 `init_ex()` refuses a table smaller than `LOGSQUIRL_HOST_API_BASE_SIZE`;
-`init()` is `init_ex()` with that size. Either calls the host in the same
-order as 0.4.0 did: it reads the config dir (warning if there is none),
+`init()` is `init_ex()` with that size. A table whose `get_config_dir`,
+`register_menu_action`, `register_footer_widget`,
+`unregister_footer_widget`, `get_active_file_path` or
+`register_active_file_callback` is NULL is refused too: `init_ex()` logs
+an error naming them (`Custom Footer: the host's table has no …; the
+plugin is not initialised`), registers nothing, shuts down and fails, and a
+`shutdown()` afterwards does nothing. `log_message` may be NULL (nothing
+is logged), and the 26.11 functions are optional anyway. Otherwise either
+calls the host in the same order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
 the active-file callback, and pushes `get_active_file_path()` into the
@@ -430,6 +441,26 @@ session, then unregisters and deletes the footer widget, and destroys the
 FakeHost tests in `tests/pluginlifecycle_test.cpp` drive these entry
 points and observe only what a host and a user see: registrations, the
 editor's window, saved files and log messages.
+
+**What the plugin relies on from the host.** The plugin API header does
+not promise these; LogSquirl keeps them, and the plugin is correct only
+with them:
+
+- *Callbacks on the UI thread.* The menu actions, the active-file
+  callback and the Regex Lab's answer are called on the UI thread, where
+  the footer widget, the editor and the session's timers live. The
+  active-file callback checks it: called from another thread, it logs an
+  error (`Custom Footer: the host reported the active file off the UI
+  thread; ignored`; `log_message` may be called from any thread) and
+  leaves the session alone. The menu actions and the Regex Lab's answer
+  do not check.
+- *The host drops the plugin's registrations at shutdown and after a
+  failed initialisation.* The API has no way to unregister a menu action
+  or the active-file callback, so after `shutdown()`, or an `init_ex()`
+  that failed part way and registered some of them, they stay with the
+  host. Until the library is unloaded they do nothing (there is no
+  session), but the host must not call them once it has unloaded it, nor
+  call the active-file callback during `shutdown()`.
 
 **Why this design.** The session has two verbs, `setActiveFile()` and
 `openEditor()` (with `ruleFromSelectedLine()` as a second way to open the

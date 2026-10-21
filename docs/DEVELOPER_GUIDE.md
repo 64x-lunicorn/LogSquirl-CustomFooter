@@ -587,10 +587,13 @@ hidden global test state.
 1. Build compiled `QRegularExpression` objects for each enabled rule, once
    per set of rules. The `RuleCheck` decides which: a rule without a line
    pattern is incomplete and ignored (`RuleCheck::isUsed()`); one with a
-   problem, such as no key or an invalid line or value pattern, is skipped
-   and reported in `FooterScanner::problems()` with the lines the editor
-   lists for it (`RuleCheck::listing()`). Each pattern is compiled once:
-   the check tells the problems from the scanner's compiled patterns.
+   problem, such as no key or an invalid line or value pattern, or one
+   longer than `RuleCheck::kMaxPatternLength`, is skipped and reported in
+   `FooterScanner::problems()` with the lines the editor lists for it
+   (`RuleCheck::listing()`). Each pattern is compiled once: the check tells
+   the problems from the scanner's compiled patterns, and compiles none that
+   is too long. Matching itself has no time limit, as Qt offers no PCRE2
+   match limit: a pathological pattern can keep a scan busy.
 2. Rules sharing a key are **alternatives**: the key's value comes from the
    first line that any of them matches; if several match that line, the
    rule higher in the list wins. The key is shown once, at the position of
@@ -698,7 +701,12 @@ in a detail panel on the right.
   and Escape reverts it, instead of closing the dialog. Actions that do not
   take the focus (the tool buttons, OK and Apply) first call
   `commitPendingEdit()`, so a mapping cell still being typed is kept. The
-  fields take patterns of any length. The panel is a column of sections
+  key field takes keys of any length; the pattern and text fields take one
+  character more than `RuleCheck::kMaxPatternLength`, so a pattern cut
+  there by typing or pasting is still too long, and marked, rather than a
+  shorter one that can be saved. A longer pattern from the rules, e.g. an
+  imported one, is shown whole (`setFieldText()`), marked too long, and
+  kept whole when other fields are edited. The panel is a column of sections
   (fields, mappings), so a live preview can be added as a further section.
 - **Reordering**: ↑/↓, Ctrl+Shift+Up/Down in the list (`RuleListView`
   emits `moveUpRequested()` / `moveDownRequested()`; the keypad modifier,
@@ -727,7 +735,9 @@ in a detail panel on the right.
   (of the rules the scanner uses, for the template dialog) and, per rule,
   the first problem that keeps it from matching anything, which the
   preview shows instead of a result (`RuleProblems::preventingMatches()`).
-  An invalid pattern, also of a disabled rule, an enabled rule with a line
+  An invalid pattern or one longer than `kMaxPatternLength` (4096
+  characters, which is then not compiled), also of a disabled rule, an
+  enabled rule with a line
   pattern but no key, and an unfinished simple rule's end character are
   problems, always listed in that order: key, line pattern, value pattern,
   end character. The editor's `RuleCheck` is where `RuleListModel` keeps
@@ -1168,6 +1178,9 @@ plugin's config directory provided by the host.
 
 The JSON import/export uses a versioned format (`version: 1`) to allow
 forward-compatible changes.  See the README for format examples.
+`FooterConfig::importFromJson()` reads at most one byte more than
+`FooterConfig::kMaxImportBytes` (4 MiB), whatever the file claims its size
+to be, and refuses a file that has more, with a message naming the limit.
 
 `FooterConfig::exportToJson()` writes through a `QSaveFile`: the JSON goes
 to a temporary file next to the target, which is renamed over the target

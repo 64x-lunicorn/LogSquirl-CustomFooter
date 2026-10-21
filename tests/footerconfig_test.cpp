@@ -176,6 +176,47 @@ SCENARIO( "FooterConfig JSON export and import round-trip", "[footerconfig]" )
             }
         }
     }
+
+    GIVEN( "rule files of the import limit and one byte over it" )
+    {
+        // A valid rule set, padded with whitespace to the size wanted.
+        const QByteArray rules
+            = R"({ "version": 1, "entries": [ { "key": "VIN", "linePattern": "VIN:" } ] })";
+        const auto writeRules = [ & ]( const QString& path, qint64 size ) {
+            QFile file( path );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+            file.write( rules + QByteArray( size - rules.size(), ' ' ) );
+        };
+        const QString atLimit = tmpDir.path() + "/at-limit.json";
+        const QString overLimit = tmpDir.path() + "/over-limit.json";
+        writeRules( atLimit, FooterConfig::kMaxImportBytes );
+        writeRules( overLimit, FooterConfig::kMaxImportBytes + 1 );
+
+        WHEN( "importing the file of the limit" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( atLimit, &error );
+
+            THEN( "its rules are imported" )
+            {
+                REQUIRE( error.isEmpty() );
+                REQUIRE( imported.size() == 1 );
+                REQUIRE( imported[ 0 ].key == "VIN" );
+            }
+        }
+
+        WHEN( "importing the larger file" )
+        {
+            QString error;
+            const auto imported = FooterConfig::importFromJson( overLimit, &error );
+
+            THEN( "it is refused with a message naming the limit" )
+            {
+                REQUIRE( imported.isEmpty() );
+                REQUIRE( error.contains( "4 MiB" ) );
+            }
+        }
+    }
 }
 
 SCENARIO( "FooterConfig export reports a failed write and leaves no partial file",

@@ -32,6 +32,9 @@ namespace custom_footer {
 /// Without a config directory nothing is loaded or saved: the defaults apply.
 class FooterConfig {
 public:
+    /// The largest file importFromJson() reads: plenty for rule sets.
+    static constexpr qint64 kMaxImportBytes = 4 * 1024 * 1024;
+
     /// Load all entries from the config directory.
     static QList<FooterEntry> loadEntries( const QString& configDir );
 
@@ -53,7 +56,8 @@ public:
     static bool exportToJson( const QString& filePath, const QList<FooterEntry>& entries,
                               QString* errorOut = nullptr );
 
-    /// Import entries from a JSON file.  Returns empty list on error.
+    /// Import entries from a JSON file.  Returns empty list on error, also
+    /// for a file over kMaxImportBytes, of which no more is read.
     static QList<FooterEntry> importFromJson( const QString& filePath,
                                               QString* errorOut = nullptr );
 

@@ -19,6 +19,7 @@
 
 #include "ruledetailpanel.h"
 #include "plaintooltip.h"
+#include "rulecheck.h"
 #include "rulepreviewview.h"
 
 #include <QCheckBox>
@@ -35,12 +36,21 @@
 #include <QVBoxLayout>
 #include <QValidator>
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
 namespace custom_footer {
 
 namespace {
+
+/// What a pattern or text field takes: one character more than a pattern may
+/// have, so that a pattern cut there is still too long, and shown as such,
+/// rather than a shorter one that can be saved.
+constexpr int kPatternFieldLength = RuleCheck::kMaxPatternLength + 1;
+
+/// What a key field takes: any key, not the default 32767 characters.
+constexpr int kKeyFieldLength = std::numeric_limits<int>::max();
 
 /// A colour for style sheets.
 QString css( const QColor& color )
@@ -113,13 +123,14 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     enabledCheck_->setObjectName( "ruleEnabledCheck" );
     form->addRow( QString(), enabledCheck_ );
 
-    keyEdit_ = addField( form, tr( "&Key:" ), "keyEdit", &keyProblem_ );
+    keyEdit_ = addField( form, tr( "&Key:" ), "keyEdit", kKeyFieldLength, &keyProblem_ );
     keyEdit_->setPlaceholderText( tr( "Shown in the footer, e.g. VIN" ) );
 
     // ── Simple mode: the text before the value, and where it ends ────────
     textBeforeEdit_ = new QLineEdit( this );
     textBeforeEdit_->setObjectName( "textBeforeEdit" );
-    textBeforeEdit_->setMaxLength( std::numeric_limits<int>::max() );
+    // Its pattern is at least as long.
+    textBeforeEdit_->setMaxLength( kPatternFieldLength );
     textBeforeEdit_->setPlaceholderText( tr( "Matched literally, e.g. VIN:" ) );
     watchField( textBeforeEdit_ );
     auto* textBeforeLabel = new QLabel( tr( "&Text before the value:" ), this );
@@ -167,9 +178,11 @@ RuleDetailPanel::RuleDetailPanel( QWidget* parent )
     form->addRow( QString(), advancedCheck_ );
 
     linePatternEdit_ = addField( form, tr( "&Line pattern:" ), "linePatternEdit",
-                                 &linePatternProblem_, &testLinePatternButton_ );
+                                 kPatternFieldLength, &linePatternProblem_,
+                                 &testLinePatternButton_ );
     valuePatternEdit_ = addField( form, tr( "&Value pattern:" ), "valuePatternEdit",
-                                  &valuePatternProblem_, &testValuePatternButton_ );
+                                  kPatternFieldLength, &valuePatternProblem_,
+                                  &testValuePatternButton_ );
 
     // ── Its value mappings ───────────────────────────────────────────────
     auto* mappings = new QWidget( this );
@@ -245,8 +258,8 @@ void RuleDetailPanel::showEntry( const FooterEntry& entry,
         const QSignalBlocker valueBlocker( valuePatternEdit_ );
         enabledCheck_->setChecked( entry.enabled );
         keyEdit_->setText( entry.key );
-        linePatternEdit_->setText( entry.linePattern );
-        valuePatternEdit_->setText( entry.valuePattern );
+        setFieldText( linePatternEdit_, entry.linePattern );
+        setFieldText( valuePatternEdit_, entry.valuePattern );
         setMappings( entry.mappings );
     }
     // A simple rule still missing its end character has no patterns yet.
@@ -328,7 +341,7 @@ void RuleDetailPanel::setPattern( PatternField field, const QString& pattern )
         setAdvanced( true );
     }
     // Emits edited() through patternEdited(), as typing does.
-    edit->setText( pattern );
+    setFieldText( edit, pattern );
 }
 
 void RuleDetailPanel::focusKey()
@@ -372,7 +385,7 @@ bool RuleDetailPanel::eventFilter( QObject* watched, QEvent* event )
         if ( isField ) {
             // A read-only pattern is simple mode's: it never changes by hand.
             if ( !field->isReadOnly() && field->text() != revertText_.value( field ) ) {
-                field->setText( revertText_.value( field ) );
+                setFieldText( field, revertText_.value( field ) );
             }
         }
         else if ( watched == valueEndCombo_ ) {
@@ -439,7 +452,7 @@ void RuleDetailPanel::simpleFieldEdited()
     {
         const QSignalBlocker lineBlocker( linePatternEdit_ );
         const QSignalBlocker valueBlocker( valuePatternEdit_ );
-        linePatternEdit_->setText( simpleLinePattern( simpleRule() ) );
+        setFieldText( linePatternEdit_, simpleLinePattern( simpleRule() ) );
         valuePatternEdit_->clear();
     }
     Q_EMIT edited();
@@ -497,13 +510,12 @@ void RuleDetailPanel::updateMappingButtons()
 }
 
 QLineEdit* RuleDetailPanel::addField( QFormLayout* form, const QString& label,
-                                      const QString& objectName, QLabel** problemLabel,
-                                      QToolButton** testButton )
+                                      const QString& objectName, int maxLength,
+                                      QLabel** problemLabel, QToolButton** testButton )
 {
     auto* field = new QLineEdit( this );
     field->setObjectName( objectName );
-    // Not the default 32767 characters, which would cut long patterns.
-    field->setMaxLength( std::numeric_limits<int>::max() );
+    field->setMaxLength( maxLength );
     watchField( field );
 
     auto* problem = newProblemLabel( objectName.chopped( 4 ) + "Problem" ); // keyEdit → keyProblem
@@ -553,12 +565,25 @@ void RuleDetailPanel::watchField( QLineEdit* field )
     revertText_.insert( field, QString() );
 }
 
+void RuleDetailPanel::setFieldText( QLineEdit* field, const QString& text )
+{
+    if ( field != textBeforeEdit_ && field != linePatternEdit_ && field != valuePatternEdit_ ) {
+        field->setText( text );
+        return;
+    }
+    const int length = static_cast<int>( std::max<qsizetype>( kPatternFieldLength, text.size() ) );
+    // Never below the text, which it would cut, nor the field's text now.
+    field->setMaxLength( std::max( field->maxLength(), length ) );
+    field->setText( text );
+    field->setMaxLength( length );
+}
+
 void RuleDetailPanel::setSimpleFields( const SimpleRule& rule )
 {
     const QSignalBlocker textBlocker( textBeforeEdit_ );
     const QSignalBlocker endBlocker( valueEndCombo_ );
     const QSignalBlocker characterBlocker( endCharacterEdit_ );
-    textBeforeEdit_->setText( rule.textBefore );
+    setFieldText( textBeforeEdit_, rule.textBefore );
     valueEndCombo_->setCurrentIndex(
         valueEndCombo_->findData( static_cast<int>( rule.valueEnd ) ) );
     endCharacterEdit_->setText( rule.endCharacter );

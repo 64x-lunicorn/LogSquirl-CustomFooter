@@ -29,23 +29,37 @@ namespace custom_footer {
 
 namespace {
 
+/// The problem of @p pattern: that it is too long, as @p tooLong says, or
+/// else why it does not compile, which @p error tells only then.
+template <typename Error>
+QString patternProblem( const QString& pattern, const QString& tooLong, const QString& invalid,
+                        Error error )
+{
+    if ( pattern.size() > RuleCheck::kMaxPatternLength ) {
+        return tooLong.arg( RuleCheck::kMaxPatternLength );
+    }
+    const QString why = error();
+    return why.isEmpty() ? QString() : RuleCheck::tr( "%1: %2" ).arg( invalid, why );
+}
+
 /// The problems of @p rule, whose line and value patterns do not compile
-/// for the given reasons, or do where these are empty.
-RuleProblems problemsWith( const RuleCheck::Rule& rule, const QString& linePatternError,
-                           const QString& valuePatternError )
+/// for the reasons @p linePatternError and @p valuePatternError give, or do
+/// where these are empty. They are asked only of patterns not too long.
+template <typename LineError, typename ValueError>
+RuleProblems problemsWith( const RuleCheck::Rule& rule, LineError linePatternError,
+                           ValueError valuePatternError )
 {
     const auto& entry = rule.entry;
     RuleProblems problems;
     if ( RuleCheck::isUsed( entry ) && entry.key.trimmed().isEmpty() ) {
         problems.key = RuleCheck::tr( "a rule with a line pattern needs a key" );
     }
-    const auto patternProblem = []( const QString& error, const QString& what ) {
-        return error.isEmpty() ? QString() : RuleCheck::tr( "%1: %2" ).arg( what, error );
-    };
-    problems.linePattern
-        = patternProblem( linePatternError, RuleCheck::tr( "invalid line pattern" ) );
-    problems.valuePattern
-        = patternProblem( valuePatternError, RuleCheck::tr( "invalid value pattern" ) );
+    problems.linePattern = patternProblem(
+        entry.linePattern, RuleCheck::tr( "line pattern longer than %1 characters" ),
+        RuleCheck::tr( "invalid line pattern" ), linePatternError );
+    problems.valuePattern = patternProblem(
+        entry.valuePattern, RuleCheck::tr( "value pattern longer than %1 characters" ),
+        RuleCheck::tr( "invalid value pattern" ), valuePatternError );
     if ( rule.unfinishedSimpleRule ) {
         problems.endCharacter = endCharacterProblem( *rule.unfinishedSimpleRule );
     }
@@ -89,7 +103,7 @@ RuleProblems RuleCheck::problemsOf( const Rule& rule, const QRegularExpression& 
                                     const QRegularExpression& valuePattern )
 {
     const auto errorOf = []( const QRegularExpression& regex ) {
-        return regex.isValid() ? QString() : regex.errorString();
+        return [ &regex ] { return regex.isValid() ? QString() : regex.errorString(); };
     };
     return problemsWith( rule, errorOf( linePattern ), errorOf( valuePattern ) );
 }
@@ -196,8 +210,11 @@ RuleCheck::Row RuleCheck::check( const Rule& rule )
 {
     Row row;
     row.rule = rule;
-    row.problems = problemsWith( rule, patternError( rule.entry.linePattern ),
-                                 patternError( rule.entry.valuePattern ) );
+    const auto errorOf = [ this ]( const QString& pattern ) {
+        return [ this, &pattern ] { return patternError( pattern ); };
+    };
+    row.problems = problemsWith( rule, errorOf( rule.entry.linePattern ),
+                                 errorOf( rule.entry.valuePattern ) );
     row.used = isUsed( rule.entry ) && row.problems.isEmpty();
     return row;
 }

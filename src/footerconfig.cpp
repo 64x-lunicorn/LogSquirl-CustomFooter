@@ -179,8 +179,19 @@ QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath, QStrin
         return entries;
     }
 
+    // Read one byte past the limit at most, whatever the file claims its size
+    // to be, to tell whether it is over the limit.
+    const auto bytes = file.read( kMaxImportBytes + 1 );
+    if ( bytes.size() > kMaxImportBytes ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "File is larger than %1 MiB, the most a rule set may have" )
+                            .arg( kMaxImportBytes / ( 1024 * 1024 ) );
+        }
+        return entries;
+    }
+
     QJsonParseError parseError;
-    const auto doc = QJsonDocument::fromJson( file.readAll(), &parseError );
+    const auto doc = QJsonDocument::fromJson( bytes, &parseError );
     if ( doc.isNull() ) {
         if ( errorOut ) {
             *errorOut = QStringLiteral( "JSON parse error: %1" ).arg( parseError.errorString() );

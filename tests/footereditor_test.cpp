@@ -26,6 +26,7 @@
 
 #include "footereditor.h"
 #include "footerscanner.h"
+#include "rulecheck.h"
 #include "rulelistmodel.h"
 #include "shownastooltip.h"
 
@@ -784,6 +785,24 @@ SCENARIO( "FooterEditor shows the rules' problems and blocks OK and Apply", "[fo
             }
         }
 
+        WHEN( "its value pattern becomes longer than the limit" )
+        {
+            ui.select( 1 );
+            ui.valuePattern->setText( QString( RuleCheck::kMaxPatternLength + 1, QLatin1Char( 'a' ) ) );
+
+            THEN( "the field, the list row and the listing show why, and OK and Apply are blocked" )
+            {
+                REQUIRE( EditorUi::marked( ui.valuePattern, ui.valuePatternProblem ) );
+                REQUIRE( ui.valuePatternProblem->text() == ui.model->problems( 1 ).valuePattern );
+                REQUIRE( ui.listMarked( 1 ) );
+                REQUIRE_FALSE( ui.listMarked( 0 ) );
+                REQUIRE( ui.problems->text()
+                         == QString( "Rule 2: value pattern longer than %1 characters" )
+                                .arg( RuleCheck::kMaxPatternLength ) );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+        }
+
         WHEN( "an enabled rule with a line pattern loses its key" )
         {
             ui.select( 1 );
@@ -1070,8 +1089,38 @@ SCENARIO( "FooterEditor keeps a mapping still being typed", "[footereditor]" )
     }
 }
 
-SCENARIO( "FooterEditor keeps long patterns whole", "[footereditor]" )
+SCENARIO( "FooterEditor limits patterns but keeps long ones whole", "[footereditor]" )
 {
+    GIVEN( "an editor with a rule" )
+    {
+        FooterEditor editor( { entryWithMapping( "A" ) } );
+        EditorUi ui( editor );
+        ui.select( 0 );
+        auto* textBefore = EditorUi::find<QLineEdit>( editor, "textBeforeEdit" );
+
+        THEN( "the pattern and text fields take one character more than a pattern may have" )
+        {
+            // One more, so that a pattern cut at the field's limit is still
+            // shown as too long rather than silently becoming a shorter one.
+            for ( auto* field : { ui.linePattern, ui.valuePattern, textBefore } ) {
+                INFO( field->objectName().toStdString() );
+                REQUIRE( field->maxLength() == RuleCheck::kMaxPatternLength + 1 );
+            }
+        }
+
+        WHEN( "a pattern longer than that is pasted" )
+        {
+            ui.linePattern->setText( QString( 40000, QLatin1Char( 'a' ) ) );
+
+            THEN( "it is cut, and still too long" )
+            {
+                REQUIRE( ui.linePattern->text().size() == RuleCheck::kMaxPatternLength + 1 );
+                REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
+                REQUIRE_FALSE( ui.canAccept() );
+            }
+        }
+    }
+
     GIVEN( "a rule with a 40 000 character line pattern" )
     {
         const QString longPattern = QString( 40000, QLatin1Char( 'a' ) ) + "(\\S+)";
@@ -1079,16 +1128,18 @@ SCENARIO( "FooterEditor keeps long patterns whole", "[footereditor]" )
         EditorUi ui( editor );
         ui.select( 0 );
 
-        THEN( "the panel shows all of it" )
+        THEN( "the panel shows all of it, as too long" )
         {
             REQUIRE( ui.linePattern->text() == longPattern );
+            REQUIRE( EditorUi::marked( ui.linePattern, ui.linePatternProblem ) );
+            REQUIRE_FALSE( ui.canAccept() );
         }
 
         WHEN( "another field of the rule is edited" )
         {
             ui.key->setText( "Longer" );
 
-            THEN( "the pattern is saved whole" )
+            THEN( "the pattern is kept whole" )
             {
                 REQUIRE( editor.entries()[ 0 ].linePattern == longPattern );
             }

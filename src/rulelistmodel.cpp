@@ -19,6 +19,8 @@
 
 #include "rulelistmodel.h"
 
+#include "plaintooltip.h"
+
 #include <QBrush>
 #include <QDataStream>
 #include <QFont>
@@ -178,7 +180,8 @@ QVariant RuleListModel::data( const QModelIndex& index, int role ) const
             lines.append( rule.entry.linePattern );
         }
         lines += problems.all();
-        return lines.isEmpty() ? QVariant() : QVariant( lines.join( QLatin1Char( '\n' ) ) );
+        return lines.isEmpty() ? QVariant()
+                               : QVariant( plainToolTip( lines.join( QLatin1Char( '\n' ) ) ) );
     }
     default:
         return {};

@@ -142,6 +142,19 @@ ReadResult readBoundedLine( QFile& file, const Encoding& encoding, qint64 maxByt
     return ReadResult::Line;
 }
 
+/// Open the file at @p filePath to read, if it is a regular file, or a link
+/// to one. Anything else, such as a FIFO or a device, is not opened: opening
+/// or reading it can block until someone writes to it, and with it the
+/// worker that the editor's closing and the plugin's shutdown wait for.
+bool openRegularFile( QFile& file, const QString& filePath )
+{
+    if ( filePath.isEmpty() || !QFileInfo( filePath ).isFile() ) {
+        return false;
+    }
+    file.setFileName( filePath );
+    return file.open( QIODevice::ReadOnly );
+}
+
 /// Read size bytes at offset, or fewer at the end of the file.
 QByteArray readAt( QFile& file, qint64 offset, qint64 size )
 {
@@ -268,8 +281,8 @@ FooterScanner::Encoding FooterScanner::Encoding::detect( const QByteArray& start
 
 FooterScanner::Encoding FooterScanner::Encoding::ofFile( const QString& filePath )
 {
-    QFile file( filePath );
-    if ( filePath.isEmpty() || !file.open( QIODevice::ReadOnly ) ) {
+    QFile file;
+    if ( !openRegularFile( file, filePath ) ) {
         return {};
     }
     return encodingOf( file );
@@ -358,8 +371,8 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
         return scan;
     }
 
-    QFile file( filePath );
-    if ( !file.open( QIODevice::ReadOnly ) ) {
+    QFile file;
+    if ( !openRegularFile( file, filePath ) ) {
         return scan;
     }
     // Before reading: bytes appended while the scan reads count as unread.
@@ -540,8 +553,8 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     preview.sharedKey = std::any_of( keyRules.begin(), keyRules.end(),
                                      [ rule ]( const Rule& r ) { return r.index != rule; } );
 
-    QFile file( filePath );
-    if ( !file.open( QIODevice::ReadOnly ) ) {
+    QFile file;
+    if ( !openRegularFile( file, filePath ) ) {
         preview.status = Preview::Status::Unreadable;
         return preview;
     }
@@ -649,8 +662,8 @@ bool FooterScanner::fileUnchangedFor( const QString& filePath, const Scan& scan 
 bool FooterScanner::unchangedSince( const QString& filePath, const Progress& read, bool beyondRead,
                                     qint64 size )
 {
-    QFile file( filePath );
-    if ( !file.open( QIODevice::ReadOnly ) || !continues( file, read ) ) {
+    QFile file;
+    if ( !openRegularFile( file, filePath ) || !continues( file, read ) ) {
         return false;
     }
     // Bytes after what was read, such as a last line without a line break,

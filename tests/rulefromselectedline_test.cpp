@@ -26,6 +26,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "elidedtext.h"
 #include "eventloopwait.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
@@ -463,6 +464,28 @@ SCENARIO( "The rule editor shows only the part of a long Log Line the footer rea
         }
     }
 
+    WHEN( "a rule is made from a line of 1 MiB with a value at the end of the part shown" )
+    {
+        // The footer reads 65536 bytes of UTF-8: the value ends at the last.
+        const QString head = QString( 64 * 1024 - 15, 'x' ) + " tail=END12345";
+        const QString line = head + " rest=" + QString( 1024 * 1024, 'y' );
+        editor.addRuleFromLine( line );
+        REQUIRE( ui.line->text() == line.left( 64 * 1024 ) );
+        REQUIRE( ui.line->text().endsWith( "tail=END12345 " ) );
+        REQUIRE( cut->isVisibleTo( &editor ) );
+
+        AND_WHEN( "that value is marked" )
+        {
+            ui.mark( "END12345" );
+
+            THEN( "the rule is made, as the footer reads that value" )
+            {
+                REQUIRE( ui.textBefore->text() == "tail=" );
+                REQUIRE( ui.key->text() == "tail" );
+            }
+        }
+    }
+
     WHEN( "a rule is made from a long line of a UTF-16 file" )
     {
         editor.addRuleFromLine( kLongUtf16Line, 1, { FooterScanner::Encoding::Form::Utf16LE, 2 } );
@@ -480,6 +503,42 @@ SCENARIO( "The rule editor shows only the part of a long Log Line the footer rea
             THEN( "the rule is made" )
             {
                 REQUIRE( ui.textBefore->text() == "a:" );
+            }
+        }
+    }
+}
+
+SCENARIO( "The rule editor's hints show a long value elided", "[rulefromline][footereditor]" )
+{
+    QTemporaryDir logDir;
+    REQUIRE( logDir.isValid() );
+    const auto log = logDir.path() + "/long.log";
+    const QString earlier = "id=" + QString( 300, 'E' ) + " end";
+    const QString selected = "id=" + QString( 300, 'S' ) + " end";
+    writeFile( log, earlier + "\n" + selected + "\n" );
+
+    GIVEN( "a rule made from a line whose value is longer than the footer shows" )
+    {
+        FooterEditor editor( {} );
+        editor.setActiveFile( log );
+        FromLineUi ui( editor );
+        editor.addRuleFromLine( selected );
+
+        WHEN( "the value is marked, and an earlier line with a long value matches first" )
+        {
+            ui.mark( QString( 300, 'S' ) );
+            REQUIRE( processUntil(
+                [ &ui ] { return ui.hint->text().contains( "Log Line 1 matches first" ); } ) );
+
+            THEN( "the rule has the whole value, but the hint shows both values elided" )
+            {
+                REQUIRE( editor.entries().last().linePattern.startsWith( "id=" ) );
+                const auto shown = QString( kMaxShownValueLength, 'S' ) + "…";
+                REQUIRE( ui.hint->text().contains( "“" + shown + "”" ) );
+                REQUIRE_FALSE( ui.hint->text().contains( QString( 101, 'S' ) ) );
+                const auto shownEarlier = QString( kMaxShownValueLength, 'E' ) + "…";
+                REQUIRE( ui.hint->text().contains( "“" + shownEarlier + "”" ) );
+                REQUIRE_FALSE( ui.hint->text().contains( QString( 101, 'E' ) ) );
             }
         }
     }

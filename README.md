@@ -319,8 +319,11 @@ as before, and the button is not shown.
   file provides the value, and if several match the same line, the one
   higher in the list wins. The key is shown once, where its first rule is.
 - A rule without a line pattern is ignored. The editor marks invalid
-  patterns, and enabled rules with a line pattern but no key, at the field
-  with the reason and in the rule list, and won't save until they are fixed.
+  patterns, patterns longer than 4096 characters, and enabled rules with a
+  line pattern but no key, at the field with the reason and in the rule
+  list, and won't save until they are fixed. Typing or pasting into the
+  text before and pattern fields stops one character over that limit; a
+  longer pattern from an imported rule set is shown whole, and marked.
 - The file is scanned in the background whenever it becomes the active file
   and when rules are applied. A rule the editor would mark, e.g. with an
   invalid pattern, is skipped and reported in the LogSquirl log in the
@@ -338,7 +341,9 @@ as before, and the button is not shown.
   which rule supplied it and, for a mapped value, the raw value it replaced.
   With the keyboard, Tab to a value and press Space, Return or the copy
   shortcut. The context menu of a value offers "Copy Value", "Copy Key and
-  Value", and "Copy All" for every key and value shown, one per line.
+  Value", and "Copy All" for every key and value shown, one per line. A
+  value longer than 100 characters is shown cut off with "…", in the footer
+  and its tooltip; copying it still copies all of it.
 - **Go to the Log Line of a value** (LogSquirl 26.11 or later) by
   double-clicking it, or with "Go to Log Line" in its context menu (with
   the keyboard: Tab to the value and press the context menu key). LogSquirl
@@ -382,6 +387,15 @@ as before, and the button is not shown.
 ```
 
 ### JSON Format (import / export)
+
+Import reads files of up to 4 MiB, plenty for rule sets; a larger file is
+refused with a message saying so, and is not read.
+
+**Trust a rule set like code.** Import only rule sets from sources you
+trust: the patterns run on every log file you open. A pathological pattern,
+e.g. one with nested repetition such as `(a+)+$`, can take a very long time
+on a long line and make a scan, or the editor's preview, slow; the pattern
+limit bounds its length, but not the time it takes to match.
 
 ```json
 {

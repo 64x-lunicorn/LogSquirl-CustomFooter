@@ -19,6 +19,8 @@
 
 #include "rulepreviewview.h"
 
+#include "plaintooltip.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -127,7 +129,7 @@ void RulePreviewView::showPreview( const FooterScanner::Preview& preview )
 
     const auto fileName = QFileInfo( preview.filePath ).fileName();
     setTitle( fileName.isEmpty() ? tr( "Preview" ) : tr( "Preview in %1" ).arg( fileName ) );
-    setToolTip( QDir::toNativeSeparators( preview.filePath ) );
+    setToolTip( plainToolTip( QDir::toNativeSeparators( preview.filePath ) ) );
 
     switch ( preview.status ) {
     case Status::NoFile:

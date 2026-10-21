@@ -72,6 +72,22 @@ QString invalidValue( const QString& pattern )
 
 const QString kNoEndCharacter = endCharacterProblem( withoutEndCharacter() );
 
+/// A valid pattern of @p length characters.
+QString patternOfLength( int length )
+{
+    return QString( length, QLatin1Char( 'a' ) );
+}
+
+const QString kLongest = patternOfLength( RuleCheck::kMaxPatternLength );
+const QString kTooLong = patternOfLength( RuleCheck::kMaxPatternLength + 1 );
+/// Too long, and invalid as well.
+const QString kTooLongInvalid = "(" + kLongest;
+
+const QString kLineTooLong
+    = QString( "line pattern longer than %1 characters" ).arg( RuleCheck::kMaxPatternLength );
+const QString kValueTooLong
+    = QString( "value pattern longer than %1 characters" ).arg( RuleCheck::kMaxPatternLength );
+
 struct Case {
     const char* name;
     QList<RuleCheck::Rule> rules;
@@ -130,6 +146,17 @@ std::vector<Case> cases()
           { "Rule 1: " + invalidValue( "(" ), "Rule 1: " + kNoEndCharacter },
           {},
           { invalidValue( "(" ) } },
+        { "patterns longer than the limit, also of a disabled rule",
+          { rule( "A", kLongest, kLongest ), rule( "B", kTooLong ), rule( "C", "c", kTooLong ),
+            rule( "D", kTooLongInvalid, kTooLongInvalid, false ) },
+          { {},
+            { "", kLineTooLong, "", "" },
+            { "", "", kValueTooLong, "" },
+            { "", kLineTooLong, kValueTooLong, "" } },
+          { "Rule 2: " + kLineTooLong, "Rule 3: " + kValueTooLong, "Rule 4: " + kLineTooLong,
+            "Rule 4: " + kValueTooLong },
+          { "A" },
+          { "", kLineTooLong, kValueTooLong, kLineTooLong } },
         { "no rules", {}, {}, {}, {}, {} },
     };
 }
@@ -288,6 +315,20 @@ SCENARIO( "RuleCheck checks only what changed, compiling each pattern once", "[r
                     REQUIRE( check.canSave() );
                     REQUIRE( check.listing().isEmpty() );
                 }
+            }
+        }
+
+        WHEN( "a pattern of one rule becomes longer than the limit" )
+        {
+            auto edited = rules.at( 42 );
+            edited.entry.linePattern = kTooLongInvalid;
+            check.setRule( 42, edited );
+
+            THEN( "it is not compiled, and its length is the rule's problem" )
+            {
+                REQUIRE( compilations == 400 );
+                REQUIRE( check.listing() == QStringList{ "Rule 43: " + kLineTooLong } );
+                REQUIRE_FALSE( check.canSave() );
             }
         }
 

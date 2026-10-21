@@ -37,7 +37,7 @@ using namespace custom_footer;
 
 namespace {
 
-/// The file as QSettings and a text-mode QFile write it on this platform.
+/// The file as QSettings and a text-mode QSaveFile write it on this platform.
 QByteArray withNativeLineEnds( QByteArray text )
 {
 #ifdef Q_OS_WIN

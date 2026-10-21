@@ -87,6 +87,8 @@ RuleTemplateDialog::RuleTemplateDialog( QWidget* parent )
     form->addRow( keyLabel_, keyEdit_ );
     keyHint_ = new QLabel( this );
     keyHint_->setObjectName( "templateKeyHint" );
+    // Names the key as typed: shown as it is, never as rich text.
+    keyHint_->setTextFormat( Qt::PlainText );
     keyHint_->setWordWrap( true );
     keyHint_->hide();
     form->addRow( QString(), keyHint_ );
@@ -94,6 +96,8 @@ RuleTemplateDialog::RuleTemplateDialog( QWidget* parent )
 
     note_ = new QLabel( this );
     note_->setObjectName( "templateKeyNote" );
+    // Names the keys of rules: shown as they are, never as rich text.
+    note_->setTextFormat( Qt::PlainText );
     note_->setWordWrap( true );
     note_->hide();
     layout->addWidget( note_ );
@@ -181,7 +185,7 @@ void RuleTemplateDialog::updateChoice()
         }
         newKeys.append( entry.key );
     }
-    const auto quotedList = [ this ]( const QStringList& keys ) {
+    const auto quotedList = []( const QStringList& keys ) {
         QStringList quoted;
         for ( const auto& key : keys ) {
             quoted.append( tr( "“%1”" ).arg( key ) );

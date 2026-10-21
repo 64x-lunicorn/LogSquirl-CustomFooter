@@ -8,7 +8,7 @@ include(FetchContent)
 FetchContent_Declare(
     Catch2
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v2.13.10
+    GIT_TAG        182c910b4b63ff587a3440e08f84f70497e49a81 # v2.13.10
 )
 FetchContent_MakeAvailable(Catch2)
 
@@ -28,6 +28,7 @@ add_executable(logsquirl_custom_footer_tests
     footerscanner_preview_test.cpp
     footerscanner_utf16_test.cpp
     footerscanner_hostencoding_test.cpp
+    footerscanner_fifo_test.cpp
     footerconfig_test.cpp
     footerconfig_maxlines_test.cpp
     footercontroller_test.cpp
@@ -59,6 +60,7 @@ add_executable(logsquirl_custom_footer_tests
     latestjob_test.cpp
     rulecheck_test.cpp
     regexlab_test.cpp
+    plaintext_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES

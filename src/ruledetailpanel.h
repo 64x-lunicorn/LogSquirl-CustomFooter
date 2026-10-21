@@ -145,15 +145,22 @@ private Q_SLOTS:
     void updateMappingButtons();
 
 private:
-    /// A line edit in the form, with the label below it that says why its
-    /// content keeps the rules from being saved.
+    /// A line edit in the form taking @p maxLength characters, with the label
+    /// below it that says why its content keeps the rules from being saved.
     QLineEdit* addField( QFormLayout* form, const QString& label, const QString& objectName,
-                         QLabel** problemLabel, QToolButton** testButton = nullptr );
+                         int maxLength, QLabel** problemLabel, QToolButton** testButton = nullptr );
     /// Handle Return and Escape in @p field, as in every field of the form.
     void watchField( QLineEdit* field );
+    /// Show @p text in @p field. A pattern or text field shows it whole, even
+    /// if it is longer than the field takes: its limit is for typing and
+    /// pasting, and a longer text, such as an imported pattern, is a problem
+    /// the rule check shows.
+    void setFieldText( QLineEdit* field, const QString& text );
     /// A hidden label for why a field keeps the rules from being saved.
     QLabel* newProblemLabel( const QString& objectName );
     void setMappings( const QList<ValueMapping>& mappings );
+    /// The end character field's tooltip while it has no problem.
+    static QString endCharacterHint();
 
     /// Show @p rule in the simple fields, without emitting edited().
     void setSimpleFields( const SimpleRule& rule );

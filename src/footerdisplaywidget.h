@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "elidedtext.h"
 #include "footervalue.h"
 
 #include <QList>
@@ -53,6 +54,12 @@ class FooterValueItem : public QToolButton {
 public:
     /// How long the confirmation of a copy is shown.
     static constexpr int kConfirmationMs = 1500;
+
+    /// How many UTF-16 units of a value, and of its raw value, the button,
+    /// its tooltip and its accessible texts show at most. A longer one is
+    /// cut there, before a character rather than within it, and shown with
+    /// an ellipsis; copying it still copies all of it.
+    static constexpr int kMaxShownLength = kMaxShownValueLength;
 
     explicit FooterValueItem( const FooterValue& value, QWidget* parent = nullptr );
 

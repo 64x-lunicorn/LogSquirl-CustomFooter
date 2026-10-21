@@ -26,6 +26,7 @@
 
 #include "footerentry.h"
 #include "footerscanner.h"
+#include "rulecheck.h"
 
 #include <QFile>
 #include <QTemporaryDir>
@@ -114,6 +115,40 @@ SCENARIO( "FooterScanner handles invalid regex gracefully", "[footerscanner][edg
             }
 
             THEN( "the valid rule still matches" )
+            {
+                const auto results = scanner.scanFile( filePath );
+                REQUIRE( results.size() == 1 );
+                REQUIRE( results[ "VIN" ] == "ABC123" );
+            }
+        }
+    }
+
+    GIVEN( "rules with patterns longer than the limit, which would match, next to a valid one" )
+    {
+        const QStringList lines = { "VIN: ABC123" };
+        const auto filePath = writeTempLines( tmpDir, lines );
+
+        // Valid patterns finding the VIN, made too long by an alternative.
+        const QString padding = "|" + QString( RuleCheck::kMaxPatternLength, QLatin1Char( 'x' ) );
+        QList<FooterEntry> entries;
+        entries.append( { "LongLine", "VIN:\\s+(\\S+)" + padding, "", true, {} } );
+        entries.append( { "LongValue", "VIN:", "VIN:\\s+(\\S+)" + padding, true, {} } );
+        entries.append( { "VIN", "VIN:\\s+(\\S+)", "", true, {} } );
+
+        WHEN( "compiling the rules" )
+        {
+            const FooterScanner scanner( entries );
+
+            THEN( "each is reported by rule number, as the rule check words it" )
+            {
+                const auto limit = QString::number( RuleCheck::kMaxPatternLength );
+                REQUIRE( scanner.problems()
+                         == QStringList{
+                             "Rule 1: line pattern longer than " + limit + " characters",
+                             "Rule 2: value pattern longer than " + limit + " characters" } );
+            }
+
+            THEN( "they are skipped, and the valid rule still matches" )
             {
                 const auto results = scanner.scanFile( filePath );
                 REQUIRE( results.size() == 1 );

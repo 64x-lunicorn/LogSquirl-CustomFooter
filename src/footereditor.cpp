@@ -219,6 +219,8 @@ FooterEditor::FooterEditor( const QList<FooterEntry>& entries, QWidget* parent )
     // ── Problems + Button Box ────────────────────────────────────────────
     problemLabel_ = new QLabel( this );
     problemLabel_->setObjectName( "problemLabel" );
+    // Rule text, e.g. a regex error: shown as it is, never as rich text.
+    problemLabel_->setTextFormat( Qt::PlainText );
     problemLabel_->setWordWrap( true );
     problemLabel_->hide();
     mainLayout->addWidget( problemLabel_ );
@@ -513,8 +515,10 @@ void FooterEditor::exportRules()
 
 void FooterEditor::exportTo( const QString& filePath )
 {
-    if ( !FooterConfig::exportToJson( filePath, entries() ) ) {
-        showError( tr( "Export Error" ), tr( "Could not write to file: %1" ).arg( filePath ),
+    QString error;
+    if ( !FooterConfig::exportToJson( filePath, entries(), &error ) ) {
+        showError( tr( "Export Error" ),
+                   tr( "Could not write to file: %1\n%2" ).arg( filePath, error ),
                    "exportErrorBox" );
     }
 }
@@ -522,6 +526,8 @@ void FooterEditor::exportTo( const QString& filePath )
 void FooterEditor::showError( const QString& title, const QString& text, const QString& objectName )
 {
     auto* box = new QMessageBox( QMessageBox::Warning, title, text, QMessageBox::Ok, this );
+    // It names a file, or quotes one: shown as it is, never as rich text.
+    box->setTextFormat( Qt::PlainText );
     box->setObjectName( objectName );
     box->setAttribute( Qt::WA_DeleteOnClose );
     box->open();

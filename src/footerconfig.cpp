@@ -21,9 +21,11 @@
 #include "footerscanner.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QSettings>
 
 namespace custom_footer {
@@ -123,7 +125,8 @@ bool FooterConfig::saveMaxLines( const QString& configDir, int maxLines )
     return settings.status() == QSettings::NoError;
 }
 
-bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntry>& entries )
+bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntry>& entries,
+                                 QString* errorOut )
 {
     QJsonArray jsonEntries;
     for ( const auto& entry : entries ) {
@@ -149,17 +152,34 @@ bool FooterConfig::exportToJson( const QString& filePath, const QList<FooterEntr
     root[ "version" ] = 1;
     root[ "entries" ] = jsonEntries;
 
-    QFile file( filePath );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-        return false;
+    // QSaveFile writes to a temporary file and renames it over filePath only
+    // on commit(), after every byte was written: a failed write leaves
+    // filePath as it was and removes the temporary file.
+    QSaveFile file( filePath );
+    if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+        file.write( QJsonDocument( root ).toJson( QJsonDocument::Indented ) );
+        if ( file.commit() ) {
+            return true;
+        }
     }
-    file.write( QJsonDocument( root ).toJson( QJsonDocument::Indented ) );
-    return true;
+    if ( errorOut ) {
+        *errorOut = file.errorString();
+    }
+    return false;
 }
 
 QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath, QString* errorOut )
 {
     QList<FooterEntry> entries;
+
+    // Opening a FIFO or a device blocks the UI thread until someone writes
+    // to it, as in the scanner (#66): only a regular file, or a link to one.
+    if ( !QFileInfo( filePath ).isFile() ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "Not a regular file: %1" ).arg( filePath );
+        }
+        return entries;
+    }
 
     QFile file( filePath );
     if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
@@ -169,8 +189,19 @@ QList<FooterEntry> FooterConfig::importFromJson( const QString& filePath, QStrin
         return entries;
     }
 
+    // Read one byte past the limit at most, whatever the file claims its size
+    // to be, to tell whether it is over the limit.
+    const auto bytes = file.read( kMaxImportBytes + 1 );
+    if ( bytes.size() > kMaxImportBytes ) {
+        if ( errorOut ) {
+            *errorOut = QStringLiteral( "File is larger than %1 MiB, the most a rule set may have" )
+                            .arg( kMaxImportBytes / ( 1024 * 1024 ) );
+        }
+        return entries;
+    }
+
     QJsonParseError parseError;
-    const auto doc = QJsonDocument::fromJson( file.readAll(), &parseError );
+    const auto doc = QJsonDocument::fromJson( bytes, &parseError );
     if ( doc.isNull() ) {
         if ( errorOut ) {
             *errorOut = QStringLiteral( "JSON parse error: %1" ).arg( parseError.errorString() );

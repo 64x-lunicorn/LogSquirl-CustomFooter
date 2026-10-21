@@ -169,7 +169,7 @@ public:
             NoFile,         ///< No file was given.
             NoLinePattern,  ///< The rule has no line pattern, so it finds nothing.
             InvalidPattern, ///< A pattern of the rule does not compile; see error.
-            Unreadable,     ///< The file could not be opened.
+            Unreadable,     ///< The file is not a regular file, or could not be opened.
             Cancelled,      ///< The preview was cancelled; nothing else is set.
         };
         Status status = Status::NoFile;
@@ -239,6 +239,10 @@ public:
      * value: the linePattern must match, and the valuePattern too if set; the
      * value is the first capturing group, or the full match without one.
      * Mappings are then applied.
+     *
+     * Only a regular file, or a link to one, is read; anything else, such as
+     * a FIFO or a device, is not even opened, as that could block, and has
+     * no values. So it is for every function here that reads a file.
      *
      * @param filePath   Path to the log file.
      * @param maxLines   Maximum number of lines to scan (0 = unlimited).

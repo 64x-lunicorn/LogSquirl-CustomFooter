@@ -18,6 +18,7 @@
  */
 
 #include "selectedlinepicker.h"
+#include "elidedtext.h"
 
 #include <QFontDatabase>
 #include <QLabel>
@@ -103,7 +104,7 @@ void SelectedLinePicker::showRule( const RuleFromLine& rule )
     switch ( rule.problem ) {
     case MarkProblem::None:
         setHint( tr( "Value: “%1”, after “%2”. Click or mark again to change it." )
-                     .arg( rule.value, rule.rule.textBefore ) );
+                     .arg( elidedText( rule.value ), elidedText( rule.rule.textBefore ) ) );
         return;
     case MarkProblem::NothingMarked:
         setHint( tr( "Click where the value starts in this Log Line, or mark the value." ) );
@@ -120,7 +121,7 @@ void SelectedLinePicker::showRule( const RuleFromLine& rule )
         setHint( tr( "The text before this value, “%1”, also appears earlier in the line, so "
                      "the rule would find the earlier value. Mark a value whose text before it "
                      "is unique, or write an advanced rule." )
-                     .arg( rule.rule.textBefore ) );
+                     .arg( elidedText( rule.rule.textBefore ) ) );
         return;
     case MarkProblem::NoSimpleRule:
         setHint( tr( "No simple rule finds exactly this value. Mark another value, or write an "
@@ -147,7 +148,7 @@ void SelectedLinePicker::showEarlierMatch( qint64 lineNumber, const QString& val
     earlierMatch_ = tr( "In the active file, Log Line %1 matches first: the footer shows its "
                         "value “%2”, not this line's." )
                         .arg( lineNumber )
-                        .arg( value );
+                        .arg( elidedText( value ) );
     updateHint();
 }
 

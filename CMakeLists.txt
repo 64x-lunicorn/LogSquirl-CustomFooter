@@ -63,6 +63,40 @@ if(NOT WIN32)
     target_compile_options(logsquirl_custom_footer PRIVATE -fvisibility=hidden)
 endif()
 
+# ── Warnings and hardening ────────────────────────────────────────────────
+# Set here, not by the shared Plugin-CI: its build only runs
+# `cmake -DCMAKE_BUILD_TYPE=Release` and adds no compiler flags.
+# MSVC needs nothing: it builds with /GS (stack protection) by default and
+# has no _FORTIFY_SOURCE.
+if(NOT MSVC)
+    include(CheckCXXCompilerFlag)
+    include(CheckCXXSourceCompiles)
+
+    target_compile_options(logsquirl_custom_footer PRIVATE -Wall -Wextra)
+
+    check_cxx_compiler_flag(-fstack-protector-strong LOGSQUIRL_HAVE_STACK_PROTECTOR_STRONG)
+    if(LOGSQUIRL_HAVE_STACK_PROTECTOR_STRONG)
+        target_compile_options(logsquirl_custom_footer PRIVATE -fstack-protector-strong)
+    endif()
+
+    # _FORTIFY_SOURCE only works with optimization. Some toolchains (Ubuntu's
+    # GCC) already define it when optimizing; keep their level then instead
+    # of redefining it.
+    set(CMAKE_REQUIRED_FLAGS "-O2")
+    check_cxx_source_compiles("
+        #ifdef _FORTIFY_SOURCE
+        #error _FORTIFY_SOURCE is predefined
+        #endif
+        int main() { return 0; }
+    " LOGSQUIRL_FORTIFY_SOURCE_NOT_PREDEFINED)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(LOGSQUIRL_FORTIFY_SOURCE_NOT_PREDEFINED)
+        target_compile_definitions(logsquirl_custom_footer PRIVATE
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:_FORTIFY_SOURCE=2>
+        )
+    endif()
+endif()
+
 target_include_directories(logsquirl_custom_footer
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"

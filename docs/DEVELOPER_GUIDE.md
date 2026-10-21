@@ -126,7 +126,10 @@ through a `QFutureWatcher` on the GUI thread. `logsquirl_plugin_shutdown()`
 destroys the footer session first, which deletes the editor and then the
 controller; that stops the follower, which cancels the running scan, waits
 for the worker and drops its wake-up: after it returns, no code of the
-plugin runs, and the host may unload the library.
+plugin runs, and the host may unload the library. That wait is short
+because no job blocks: the scanner never opens an active file that is
+not a regular file, such as a FIFO (see
+[Scanning Algorithm](#scanning-algorithm)).
 
 The controller keeps only its own concerns: the rules, the scan progress
 and showing values. The scan progress is the follower's previous result:
@@ -226,7 +229,12 @@ must `get_active_file_path`: the host refuses them elsewhere
 actions, host callbacks and widget signals all run there, so the editor
 calls them from its handlers; never from a scan or preview worker. The
 Regex Lab's answer comes on the UI thread too, and the adapter's table of
-Labs awaiting an answer is touched there only, without a lock.
+Labs awaiting an answer is touched there only, without a lock. That the
+host calls back on the UI thread is something the plugin relies on (see
+*What the plugin relies on from the host* in
+[Host functions](#host-functions)); the
+active-file callback, the encoding callback and the menu actions check
+it and ignore a call from another thread.
 
 ## Footer Session
 
@@ -354,6 +362,19 @@ offer the double-click goes to `QToolButton` as before (two copies of
 the same value). `notify()` shows a message at a key's value through
 `FooterValueItem::showNotice()`, which "Copied" uses as well.
 
+**Long values (#68).** A rule may capture up to a whole 64 KiB line. A
+`FooterValueItem` shows at most `kMaxShownLength` (100) UTF-16 units of
+its value and raw value: a longer one is cut there, one unit earlier
+where a surrogate pair would be split, and ends in "…". The cut applies
+to the button text, the tooltip (cut first, then HTML-escaped) and the
+accessible name and description. `value()` keeps the full value, so a
+click, Space, Return, the copy shortcut, the context menu and
+"Copy All" copy all of it. The rule editor's picker cuts the selected
+Log Line itself, to what the footer reads (`footerReadLength()`); its
+hints show the marked value, its text before and an earlier Log Line's
+value elided the same way (#71). Both use `elidedText()` and
+`kMaxShownValueLength` from `elidedtext.h`.
+
 ### Host functions
 
 LogSquirl 26.11 appended three functions to the host API (LogSquirl
@@ -415,8 +436,15 @@ only: the host's table and handle, the `HostApiAdapter` with the
 `HostFunctions` built from it, the footer widget (owned there, as the
 host must unregister it after the session is gone) and the session.
 `init_ex()` refuses a table smaller than `LOGSQUIRL_HOST_API_BASE_SIZE`;
-`init()` is `init_ex()` with that size. Either calls the host in the same
-order as 0.4.0 did: it reads the config dir (warning if there is none),
+`init()` is `init_ex()` with that size. A table whose `get_config_dir`,
+`register_menu_action`, `register_footer_widget`,
+`unregister_footer_widget`, `get_active_file_path` or
+`register_active_file_callback` is NULL is refused too: `init_ex()` logs
+an error naming them (`Custom Footer: the host's table has no …; the
+plugin is not initialised`), registers nothing, shuts down and fails, and a
+`shutdown()` afterwards does nothing. `log_message` may be NULL (nothing
+is logged), and the 26.11 functions are optional anyway. Otherwise either
+calls the host in the same order as 0.4.0 did: it reads the config dir (warning if there is none),
 registers the menu action, creates and registers the footer widget,
 creates the session on it (which logs the rules' problems), registers
 the active-file callback, then, where `HostFunctions::logFileEncoding` is
@@ -439,6 +467,29 @@ session, then unregisters and deletes the footer widget, and destroys the
 FakeHost tests in `tests/pluginlifecycle_test.cpp` drive these entry
 points and observe only what a host and a user see: registrations, the
 editor's window, saved files and log messages.
+
+**What the plugin relies on from the host.** The plugin API header does
+not promise these; LogSquirl keeps them, and the plugin is correct only
+with them:
+
+- *Callbacks on the UI thread.* The menu actions, the active-file
+  callback and the Regex Lab's answer are called on the UI thread, where
+  the footer widget, the editor and the session's timers live. The
+  active-file callback, the encoding callback (26.12) and the menu
+  actions check it: called from another thread, they log an error
+  (`Custom Footer: the host reported the active file off the UI thread;
+  ignored`, `… the host reported an encoding off the UI thread; ignored`
+  or `… the host called a menu action off the UI thread; ignored`;
+  `log_message` may be called from any thread) and leave the session
+  alone. The Regex Lab's answer
+  does not check.
+- *The host drops the plugin's registrations at shutdown and after a
+  failed initialisation.* The API has no way to unregister a menu action
+  or the active-file callback, so after `shutdown()`, or an `init_ex()`
+  that failed part way and registered some of them, they stay with the
+  host. Until the library is unloaded they do nothing (there is no
+  session), but the host must not call them once it has unloaded it, nor
+  call the active-file callback during `shutdown()`.
 
 **Why this design.** The session has two verbs, `setActiveFile()` and
 `openEditor()` (with `ruleFromSelectedLine()` as a second way to open the
@@ -564,10 +615,13 @@ hidden global test state.
 1. Build compiled `QRegularExpression` objects for each enabled rule, once
    per set of rules. The `RuleCheck` decides which: a rule without a line
    pattern is incomplete and ignored (`RuleCheck::isUsed()`); one with a
-   problem, such as no key or an invalid line or value pattern, is skipped
-   and reported in `FooterScanner::problems()` with the lines the editor
-   lists for it (`RuleCheck::listing()`). Each pattern is compiled once:
-   the check tells the problems from the scanner's compiled patterns.
+   problem, such as no key or an invalid line or value pattern, or one
+   longer than `RuleCheck::kMaxPatternLength`, is skipped and reported in
+   `FooterScanner::problems()` with the lines the editor lists for it
+   (`RuleCheck::listing()`). Each pattern is compiled once: the check tells
+   the problems from the scanner's compiled patterns, and compiles none that
+   is too long. Matching itself has no time limit, as Qt offers no PCRE2
+   match limit: a pathological pattern can keep a scan busy.
 2. Rules sharing a key are **alternatives**: the key's value comes from the
    first line that any of them matches; if several match that line, the
    rule higher in the list wins. The key is shown once, at the position of
@@ -575,6 +629,24 @@ hidden global test state.
 3. Read the log file line by line, up to `maxLines` lines and at most
    64 MiB, even inside a single huge line. Lines longer than 64 KiB are
    matched against their first 64 KiB.
+   **Regular files only:** the scan, the preview, `fileUnchangedFor()` and
+   `Encoding::ofFile()` open a path only when it is a regular file, or a
+   link to one (`openRegularFile()`). A FIFO or a device is not opened:
+   opening or reading one blocks until someone writes to it, and the
+   editor's closing and the plugin's shutdown wait for the worker that
+   would block. Such a file has no values, and the preview says it cannot
+   be read (`Preview::Status::Unreadable`). The follower still watches the
+   path, so a regular file that replaces it is scanned. The check and the
+   open are two steps: a path replaced by a FIFO between them is still
+   opened, and blocks. Closing that gap would take a non-blocking POSIX
+   `open()` and an `fstat()` of the descriptor, and a `QFile` opened from a
+   descriptor has no name for `QFileInfo::birthTime()`; a rotation does
+   not create a FIFO, so the plugin accepts the race.
+   `tests/footerscanner_fifo_test.cpp` covers the scanner with a FIFO;
+   the footer, the preview and the shutdown are covered by the `[fifo]`
+   scenarios of `footercontroller_test.cpp`, `rulepreview_test.cpp` and
+   `pluginlifecycle_test.cpp` (POSIX only; `tests/fifo.h` has a watchdog
+   that makes a reader of the FIFO fail the test instead of hanging it).
    **Encoding:** a scan from the start of a file tells how its bytes are
    text from its first bytes (`FooterScanner::Encoding::detect()`), as
    LogSquirl does for a byte order mark: `FF FE` makes it UTF-16LE,
@@ -646,6 +718,23 @@ hidden global test state.
    file that shrank, whose start or scanned end differs, or with another
    birth time, is scanned from its start. A last line without a line break
    is matched but not remembered, as it may still be being written.
+   **Limit — a file rewritten in place:** a continued scan tells a
+   replaced file only by its first and last bytes and its birth time
+   (`FooterScanner::continues()`): the file must be at least as long as
+   the part scanned, its first bytes and the bytes just before the
+   progress's offset (up to `FooterScanner::kIdentityBytes`, 256, each)
+   must be those the progress kept, and its birth time must be the same
+   where the platform reports one for both. The bytes in between are not
+   compared, and a file rewritten in place keeps its birth time. So a file
+   rewritten in place with the same size (or larger) and the same first
+   and last scanned bytes keeps the previous values and their line numbers
+   — a done scan is not even run again (`fileUnchangedFor()`) — until a
+   later change shrinks it or alters those bytes or its birth time, or
+   another file or reloaded rules make the footer scan it from its start.
+   Comparing the whole scanned part would mean reading it again on every
+   change, which continued scans exist to avoid. The live preview's skip
+   predicate (`fileUnchangedFor( path, preview )`) makes the same checks,
+   so it has the same limit.
    **Line numbers across rescans:** the progress counts the complete lines
    scanned, and a continued scan numbers its lines on from that count, so
    a value found in the appended part has its line in the whole file,
@@ -678,7 +767,12 @@ in a detail panel on the right.
   and Escape reverts it, instead of closing the dialog. Actions that do not
   take the focus (the tool buttons, OK and Apply) first call
   `commitPendingEdit()`, so a mapping cell still being typed is kept. The
-  fields take patterns of any length. The panel is a column of sections
+  key field takes keys of any length; the pattern and text fields take one
+  character more than `RuleCheck::kMaxPatternLength`, so a pattern cut
+  there by typing or pasting is still too long, and marked, rather than a
+  shorter one that can be saved. A longer pattern from the rules, e.g. an
+  imported one, is shown whole (`setFieldText()`), marked too long, and
+  kept whole when other fields are edited. The panel is a column of sections
   (fields, mappings), so a live preview can be added as a further section.
 - **Reordering**: ↑/↓, Ctrl+Shift+Up/Down in the list (`RuleListView`
   emits `moveUpRequested()` / `moveDownRequested()`; the keypad modifier,
@@ -707,7 +801,9 @@ in a detail panel on the right.
   (of the rules the scanner uses, for the template dialog) and, per rule,
   the first problem that keeps it from matching anything, which the
   preview shows instead of a result (`RuleProblems::preventingMatches()`).
-  An invalid pattern, also of a disabled rule, an enabled rule with a line
+  An invalid pattern or one longer than `kMaxPatternLength` (4096
+  characters, which is then not compiled), also of a disabled rule, an
+  enabled rule with a line
   pattern but no key, and an unfinished simple rule's end character are
   problems, always listed in that order: key, line pattern, value pattern,
   end character. The editor's `RuleCheck` is where `RuleListModel` keeps
@@ -754,6 +850,18 @@ in a detail panel on the right.
   constructor, so they wait for no real time, and replace the preview
   function (`setPreviewFunction()`) to hold a preview on the worker
   (`tests/rulepreview_test.cpp`).
+- **Text from a rule or a file is never rich text.** A pattern, key,
+  file path or regex error is shown as it is: an imported rule set must
+  not get Qt to render `<img src="file:///…">` or load what it names.
+  Labels and message boxes showing such text are `Qt::PlainText`. Qt has
+  no plain-text tooltip and renders one as HTML as soon as it looks like
+  HTML (`Qt::mightBeRichText()`), so tooltips with such text go through
+  `plainToolTip()` (`plaintooltip.h`): always rich text, the text escaped
+  with its spaces and line breaks kept. The footer's own rich tooltips
+  and key labels escape key, value and raw value with `toHtmlEscaped()`.
+  Tests read a tooltip as Qt shows it, and the resources showing it would
+  load, with `shownAsToolTip()` (`tests/shownastooltip.h`;
+  `tests/plaintext_test.cpp`).
 
 ### Simple mode
 
@@ -1117,6 +1225,21 @@ through it), and on `accepted` appends `entries()` after the existing
 rules and selects the first new one, like the add button, without
 touching other rows.
 
+## Build Flags
+
+The shared Plugin-CI (`plugin-build.yml`) only configures with
+`-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON` and adds no compiler flags,
+so the plugin's `CMakeLists.txt` sets them for the plugin library:
+`-Wall -Wextra`, `-fstack-protector-strong` where the compiler takes it
+(`check_cxx_compiler_flag`), and `_FORTIFY_SOURCE=2` in optimized builds
+(Release, RelWithDebInfo, MinSizeRel), unless the compiler already
+defines it when optimizing, as Ubuntu's GCC does, whose level is kept.
+MSVC gets none of them: it builds with `/GS` by default and has no
+`_FORTIFY_SOURCE`. Warnings are not errors, but the library builds without
+any; keep it so. The test binary compiles the same sources without these
+flags. Catch2 is fetched at the commit of its tag `v2.13.10`, not the tag,
+so a moved tag cannot change what the tests build with.
+
 ## Configuration Storage
 
 Rules are stored in `custom_footer.ini` (QSettings INI format) inside the
@@ -1124,6 +1247,25 @@ plugin's config directory provided by the host.
 
 The JSON import/export uses a versioned format (`version: 1`) to allow
 forward-compatible changes.  See the README for format examples.
+`FooterConfig::importFromJson()` reads at most one byte more than
+`FooterConfig::kMaxImportBytes` (4 MiB), whatever the file claims its size
+to be, and refuses a file that has more, with a message naming the limit.  It refuses a path that is not a
+regular file, or a link to one, before opening it (#75): a FIFO chosen in
+the import dialog would block the UI thread in `open()`.
+
+`FooterConfig::exportToJson()` writes through a `QSaveFile`: the JSON goes
+to a temporary file next to the target, which is renamed over the target
+only once every byte was written.  The target is therefore either the
+previous file or the complete export, never a partial one, and a failed
+write removes the temporary file.  On failure it returns false with the
+`QSaveFile` error as the reason, which the editor shows in its export
+error box (`exportErrorBox`) after the path.  The temporary file needs a
+directory the user may write to: exporting over a writable file in a
+read-only directory fails, where a direct write used to succeed
+(`setDirectWriteFallback()` is deliberately off, as it would give up the
+guarantee).  The INI file is written by
+`QSettings`, which also writes through a `QSaveFile` and reports a failed
+`sync()` in `status()`.
 
 ## Adding a New Feature
 

@@ -72,25 +72,30 @@ struct RuleProblems {
  * Decides whether rules are usable and, if not, why: the one place that
  * knows what makes a rule unusable, for the scanner and the editor alike.
  *
- * A rule is checked on its own. An invalid line or value pattern is a
- * problem, whether the rule is enabled or not; an enabled rule with a line
- * pattern needs a key, as rules sharing a key are alternatives, but a rule
- * without a line pattern is incomplete and needs nothing; and a simple rule
- * still being written whose end character cannot be used has a problem
- * there. The scanner uses an enabled rule with a line pattern (isUsed()),
- * unless it has problems; the rules can be saved only without any.
+ * A rule is checked on its own. An invalid line or value pattern, or one
+ * longer than kMaxPatternLength, is a problem, whether the rule is enabled or
+ * not; an enabled rule with a line pattern needs a key, as rules sharing a
+ * key are alternatives, but a rule without a line pattern is incomplete and
+ * needs nothing; and a simple rule still being written whose end character
+ * cannot be used has a problem there. The scanner uses an enabled rule with
+ * a line pattern (isUsed()), unless it has problems; the rules can be saved
+ * only without any.
  *
  * The check holds a list of rules with their problems: the editor's rule
  * list keeps its rows in it, so a rule and its problems are changed, moved
  * and removed together. setRule() checks only the rule it is given,
  * inserted rules are checked once, and removing or moving rules checks
  * nothing. Each pattern is compiled once per check, however often it is
- * checked; its error is remembered.
+ * checked, and its error is remembered; one too long is never compiled.
  */
 class RuleCheck {
     Q_DECLARE_TR_FUNCTIONS( RuleCheck )
 
 public:
+    /// The most characters (UTF-16 code units) a line or value pattern may
+    /// have. A longer one is a problem of its rule, and is not compiled.
+    static constexpr int kMaxPatternLength = 4096;
+
     /// Why a pattern does not compile, or an empty string if it does.
     using PatternCompiler = std::function<QString( const QString& pattern )>;
 
@@ -118,7 +123,8 @@ public:
     static bool isUsed( const FooterEntry& entry );
 
     /// The problems of one rule whose patterns @p linePattern and
-    /// @p valuePattern are compiled already, so they are not compiled again.
+    /// @p valuePattern are set already, so they are not compiled again. One
+    /// that is too long is not compiled at all.
     static RuleProblems problemsOf( const Rule& rule, const QRegularExpression& linePattern,
                                     const QRegularExpression& valuePattern );
 

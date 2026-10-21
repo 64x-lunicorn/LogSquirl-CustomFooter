@@ -41,6 +41,12 @@ QString keyAndValue( const FooterValue& value )
     return QStringLiteral( "%1: %2" ).arg( value.key, value.value );
 }
 
+/// The key and the value as shown, for the accessible name.
+QString shownKeyAndValue( const FooterValue& value )
+{
+    return QStringLiteral( "%1: %2" ).arg( value.key, elidedText( value.value ) );
+}
+
 /// Keys a focused value handles itself, before the window's shortcuts.
 bool isCopyKey( const QKeyEvent* event )
 {
@@ -63,11 +69,12 @@ QString withoutMnemonics( QString text )
 QString toolTipOf( const FooterValue& value, bool canGoToLine )
 {
     QStringList lines;
-    lines.append( QStringLiteral( "<b>%1:</b> %2" )
-                      .arg( value.key.toHtmlEscaped(), value.value.toHtmlEscaped() ) );
+    lines.append(
+        QStringLiteral( "<b>%1:</b> %2" )
+            .arg( value.key.toHtmlEscaped(), elidedText( value.value ).toHtmlEscaped() ) );
     if ( value.isMapped() ) {
-        lines.append(
-            FooterValueItem::tr( "Raw value: %1" ).arg( value.rawValue.toHtmlEscaped() ) );
+        lines.append( FooterValueItem::tr( "Raw value: %1" )
+                          .arg( elidedText( value.rawValue ).toHtmlEscaped() ) );
     }
     if ( value.rule >= 0 ) {
         lines.append( FooterValueItem::tr( "From rule %1" ).arg( value.rule + 1 ) );
@@ -88,7 +95,8 @@ QString descriptionOf( const FooterValue& value, bool canGoToLine )
 {
     QStringList sentences;
     if ( value.isMapped() ) {
-        sentences.append( FooterValueItem::tr( "Raw value: %1." ).arg( value.rawValue ) );
+        sentences.append(
+            FooterValueItem::tr( "Raw value: %1." ).arg( elidedText( value.rawValue ) ) );
     }
     if ( value.rule >= 0 ) {
         sentences.append( FooterValueItem::tr( "From rule %1." ).arg( value.rule + 1 ) );
@@ -137,8 +145,9 @@ FooterValueItem::FooterValueItem( const FooterValue& value, QWidget* parent )
 void FooterValueItem::setValue( const FooterValue& value )
 {
     value_ = value;
-    setText( withoutMnemonics( value.value ) );
-    setAccessibleName( keyAndValue( value ) );
+    // Shown elided, but copied in full.
+    setText( withoutMnemonics( elidedText( value.value ) ) );
+    setAccessibleName( shownKeyAndValue( value ) );
     updateOffers();
 }
 

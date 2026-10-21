@@ -26,6 +26,7 @@
 
 #include "basehosttable.h"
 #include "eventloopwait.h"
+#include "fifo.h"
 #include "footerconfig.h"
 #include "footerdisplaywidget.h"
 #include "footereditor.h"
@@ -37,7 +38,9 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPointer>
@@ -48,6 +51,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <thread>
 
 using namespace custom_footer;
 
@@ -80,6 +84,7 @@ struct FakeHost {
     QByteArray selectedLines;
     QStringList warnings; ///< The messages logged as warnings.
     QStringList infos;    ///< The messages logged as information.
+    QStringList errors;   ///< The messages logged as errors.
     /// Every call of the plugin, in order: the function's name, and for a
     /// log message its level ("log info", "log warning", "log error").
     QStringList calls;
@@ -128,6 +133,9 @@ LogSquirlHostApi fakeApi()
         }
         else if ( level == LOGSQUIRL_LOG_INFO ) {
             host().infos.append( QString::fromUtf8( message ) );
+        }
+        else if ( level == LOGSQUIRL_LOG_ERROR ) {
+            host().errors.append( QString::fromUtf8( message ) );
         }
     };
     api.get_config_dir = []( void* ) {
@@ -213,6 +221,34 @@ LogSquirlHostApi fakeApiWithEncoding()
               host().encodingCallback = callback;
               host().encodingUserData = userData;
           };
+    return api;
+}
+
+/// fakeApi() with the base function @p name set to NULL, as a broken host's table.
+LogSquirlHostApi fakeApiWithout( const QString& name )
+{
+    auto api = fakeApi();
+    if ( name == "get_config_dir" ) {
+        api.get_config_dir = nullptr;
+    }
+    else if ( name == "register_menu_action" ) {
+        api.register_menu_action = nullptr;
+    }
+    else if ( name == "register_footer_widget" ) {
+        api.register_footer_widget = nullptr;
+    }
+    else if ( name == "unregister_footer_widget" ) {
+        api.unregister_footer_widget = nullptr;
+    }
+    else if ( name == "get_active_file_path" ) {
+        api.get_active_file_path = nullptr;
+    }
+    else if ( name == "register_active_file_callback" ) {
+        api.register_active_file_callback = nullptr;
+    }
+    else {
+        FAIL( "no such host function: " << name.toStdString() );
+    }
     return api;
 }
 
@@ -572,6 +608,65 @@ SCENARIO( "The plugin shows the values of the host's active file", "[plugin]" )
     }
 }
 
+#if defined( Q_OS_UNIX )
+
+SCENARIO( "The plugin shuts down at once while the active file is not a regular file",
+          "[plugin][fifo]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    const auto fifo = logDir.path() + "/fifo.log";
+    REQUIRE( makeFifo( fifo ) );
+    // Declared first, so that it outlives the plugin: a scan or preview
+    // opening the FIFO fails the test instead of hanging it.
+    FifoWatchdog watchdog( fifo );
+
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = fifo.toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    GIVEN( "an initialised plugin, and its rule editor open, with a FIFO as the active file" )
+    {
+        REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+        logsquirl_plugin_configure( nullptr );
+        QPointer<FooterEditor> editor = openEditorWindow();
+        REQUIRE( editor );
+        auto* message = editor->findChild<QLabel*>( "previewMessage" );
+        REQUIRE( message );
+
+        THEN( "the preview says the file cannot be read, and the footer shows no values" )
+        {
+            REQUIRE( processUntil(
+                [ message ] { return message->text().contains( "cannot be read" ); } ) );
+            const auto* footer = qobject_cast<FooterDisplayWidget*>( host().footerWidget );
+            REQUIRE( footer );
+            REQUIRE( footer->values().isEmpty() );
+            REQUIRE_FALSE( watchdog.fired() );
+        }
+
+        WHEN( "the plugin is shut down" )
+        {
+            logsquirl_plugin_shutdown();
+
+            THEN( "it returns at once, and the editor is gone" )
+            {
+                REQUIRE_FALSE( watchdog.fired() );
+                REQUIRE_FALSE( editor );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+}
+
+#endif
+
 SCENARIO( "The plugin logs what is wrong through the host", "[plugin]" )
 {
     host() = FakeHost();
@@ -724,6 +819,139 @@ SCENARIO( "The plugin's entry points cope with the host's unusual calls", "[plug
             THEN( "nothing happens" )
             {
                 REQUIRE( host().calls.isEmpty() );
+                REQUIRE_FALSE( openEditorWindow() );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin refuses a host table with a missing function", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    int handle = 0;
+    const QString missing = GENERATE( as<QString>{}, "get_config_dir", "register_menu_action",
+                                      "register_footer_widget", "unregister_footer_widget",
+                                      "get_active_file_path", "register_active_file_callback" );
+    const auto api = fakeApiWithout( missing );
+
+    WHEN( "init() is called with a table whose " + missing.toStdString() + " is NULL" )
+    {
+        const int result = logsquirl_plugin_init( &api, &handle );
+
+        THEN( "it fails, logging which function is missing, and registers nothing" )
+        {
+            REQUIRE( result == 1 );
+            REQUIRE( host().errors
+                     == QStringList{ "Custom Footer: the host's table has no " + missing
+                                     + "; the plugin is not initialised" } );
+            for ( const auto& call : host().calls ) {
+                REQUIRE( call.startsWith( "log " ) );
+            }
+            REQUIRE_FALSE( host().footerWidget );
+            REQUIRE( host().menuItems.isEmpty() );
+            REQUIRE_FALSE( host().activeFileCallback );
+        }
+
+        AND_WHEN( "the host shuts it down all the same, and calls configure()" )
+        {
+            host().calls.clear();
+            logsquirl_plugin_shutdown();
+            logsquirl_plugin_configure( nullptr );
+
+            THEN( "nothing happens" )
+            {
+                REQUIRE( host().calls.isEmpty() );
+                REQUIRE_FALSE( openEditorWindow() );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin ignores an active-file callback off the UI thread", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    QTemporaryDir logDir;
+    REQUIRE( configDir.isValid() );
+    REQUIRE( logDir.isValid() );
+    REQUIRE( FooterConfig::saveEntries( configDir.path(),
+                                        { { "VIN", "VIN:\\s+(\\S+)", "", true, {} } } ) );
+    writeFile( logDir.path() + "/first.log", "VIN: FIRST\n" );
+    writeFile( logDir.path() + "/second.log", "VIN: SECOND\n" );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().activeFile = ( logDir.path() + "/first.log" ).toUtf8();
+    const auto api = fakeApi();
+    int handle = 0;
+
+    GIVEN( "an initialised plugin showing the first file, with the rule editor open" )
+    {
+        REQUIRE( logsquirl_plugin_init( &api, &handle ) == 0 );
+        REQUIRE( waitForText( "FIRST" ) );
+        logsquirl_plugin_configure( nullptr );
+        QPointer<FooterEditor> editor = openEditorWindow();
+        REQUIRE( editor );
+
+        WHEN( "the host calls the active-file callback from a worker thread" )
+        {
+            const auto second = ( logDir.path() + "/second.log" ).toUtf8();
+            std::thread worker( [ &second ] {
+                host().activeFileCallback( host().activeFileUserData, second.constData() );
+            } );
+            worker.join();
+
+            THEN( "it is logged as an error and ignored: the session keeps the first file" )
+            {
+                REQUIRE( host().errors
+                         == QStringList{ "Custom Footer: the host reported the active file off "
+                                         "the UI thread; ignored" } );
+                REQUIRE( editor );
+                REQUIRE( editor->activeFile() == logDir.path() + "/first.log" );
+                REQUIRE_FALSE( waitForText( "SECOND", 200 ) );
+                REQUIRE( waitForText( "FIRST" ) );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
+SCENARIO( "The plugin ignores a menu action off the UI thread", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().selectedLines = "VIN: WDB1234567";
+    const auto api = fakeApi();
+    int handle = 0;
+    REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+    REQUIRE( host().menuItems.size() == 2 );
+    const auto item = GENERATE( 0, 1 );
+    const auto menuItem = host().menuItems.at( item );
+
+    GIVEN( "the menu item " + menuItem.label.toStdString() )
+    {
+        WHEN( "the host calls it from a worker thread" )
+        {
+            host().calls.clear();
+            std::thread worker( [ &menuItem ] { menuItem.callback( menuItem.userData ); } );
+            worker.join();
+            QCoreApplication::processEvents();
+
+            THEN( "it is logged as an error and ignored: no editor opens, the host is not asked "
+                  "for the selected line" )
+            {
+                REQUIRE( host().errors
+                         == QStringList{ "Custom Footer: the host called a menu action off the "
+                                         "UI thread; ignored" } );
+                REQUIRE_FALSE( host().calls.contains( "get_selected_log_lines" ) );
                 REQUIRE_FALSE( openEditorWindow() );
             }
         }
@@ -1171,6 +1399,28 @@ SCENARIO( "The plugin reads the active file in the encoding LogSquirl 26.12 repo
             THEN( "the file is scanned again, in UTF-8" )
             {
                 REQUIRE( waitForText( QString::fromUtf8( "GR\xEF\xBF\xBDN" ) ) );
+            }
+        }
+
+        AND_WHEN( "the host reports the change from a worker thread" )
+        {
+            REQUIRE( waitForText( QStringLiteral( "GRÜN" ) ) );
+            const auto file = path.toUtf8();
+            host().encoding = "UTF-8";
+            host().calls.clear();
+            std::thread worker( [ &file ] {
+                host().encodingCallback( host().encodingUserData, file.constData(), "UTF-8" );
+            } );
+            worker.join();
+
+            THEN( "it is logged as an error and ignored: the file is not scanned again" )
+            {
+                REQUIRE( host().errors
+                         == QStringList{ "Custom Footer: the host reported an encoding off the "
+                                         "UI thread; ignored" } );
+                REQUIRE_FALSE( host().calls.contains( "get_log_file_encoding" ) );
+                REQUIRE_FALSE( waitForText( QString::fromUtf8( "GR\xEF\xBF\xBDN" ), 200 ) );
+                REQUIRE( waitForText( QStringLiteral( "GRÜN" ) ) );
             }
         }
 

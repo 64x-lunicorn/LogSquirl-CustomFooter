@@ -26,6 +26,7 @@
 #include <catch2/catch.hpp>
 
 #include "eventloopwait.h"
+#include "fifo.h"
 #include "followerfakes.h"
 #include "footereditor.h"
 #include "footerscanner.h"
@@ -34,6 +35,7 @@
 #include "rulepreviewview.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -48,6 +50,7 @@
 #include <QToolButton>
 
 #include <atomic>
+#include <cstdio>
 #include <memory>
 
 using namespace custom_footer;
@@ -535,6 +538,70 @@ SCENARIO( "The editor's preview stops when the editor closes", "[preview][footer
         }
     }
 }
+
+#if defined( Q_OS_UNIX )
+
+SCENARIO( "The editor's preview reads only regular files", "[preview][footereditor][fifo]" )
+{
+    QTemporaryDir tmpDir;
+    REQUIRE( tmpDir.isValid() );
+    const auto fifo = tmpDir.path() + "/fifo.log";
+    REQUIRE( makeFifo( fifo ) );
+    // Declared first, so that it outlives the editor: a preview opening the
+    // FIFO fails the test instead of hanging it.
+    FifoWatchdog watchdog( fifo );
+
+    auto editor = std::make_unique<FooterEditor>( QList<FooterEntry>{ rule( "VIN", "VIN" ) } );
+    auto* previewer = child<RulePreviewer>( *editor, "rulePreviewer" );
+    auto* view = child<RulePreviewView>( *editor, "rulePreview" );
+    auto* message = child<QLabel>( *view, "previewMessage" );
+    auto* count = child<QLabel>( *view, "previewCount" );
+    previewer->setEditDelay( 0 );
+
+    GIVEN( "a FIFO, which no one writes to, as the active file" )
+    {
+        editor->setActiveFile( fifo );
+        previewer->flush();
+
+        THEN( "the preview finishes without opening it, and says the file cannot be read" )
+        {
+            REQUIRE( processUntil( [ previewer ] { return !previewer->isBusy(); } ) );
+            REQUIRE_FALSE( watchdog.fired() );
+            REQUIRE( message->text() == "The active file " + fifo + " cannot be read." );
+        }
+
+        WHEN( "the editor is closed" )
+        {
+            editor->reject();
+            editor.reset();
+
+            THEN( "it returns at once" )
+            {
+                REQUIRE_FALSE( watchdog.fired() );
+            }
+        }
+
+        WHEN( "a regular file replaces it" )
+        {
+            REQUIRE( processUntil( [ previewer ] { return !previewer->isBusy(); } ) );
+            const auto replacement = tmpDir.path() + "/replacement.log";
+            writeBytes( replacement, "VIN ABC\n" );
+            REQUIRE( std::rename( QFile::encodeName( replacement ).constData(),
+                                  QFile::encodeName( fifo ).constData() )
+                     == 0 );
+
+            THEN( "the regular file is previewed, as the path is still followed" )
+            {
+                REQUIRE( processUntil( [ count ] {
+                    return count->text() == "1 matching line in the file's only line.";
+                } ) );
+                REQUIRE_FALSE( watchdog.fired() );
+            }
+        }
+    }
+}
+
+#endif
 
 SCENARIO( "The editor previews the selected rule against the active file",
           "[preview][footereditor]" )

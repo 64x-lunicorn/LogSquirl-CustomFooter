@@ -181,7 +181,7 @@ void RuleTemplateDialog::updateChoice()
         }
         newKeys.append( entry.key );
     }
-    const auto quotedList = [ this ]( const QStringList& keys ) {
+    const auto quotedList = []( const QStringList& keys ) {
         QStringList quoted;
         for ( const auto& key : keys ) {
             quoted.append( tr( "“%1”" ).arg( key ) );

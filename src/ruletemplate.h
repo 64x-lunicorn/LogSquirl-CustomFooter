@@ -50,11 +50,12 @@ struct RuleTemplate {
     /// stands for the given key, escaped to match literally.
     QString linePattern;
     /// The group the dialog shows it under, e.g. "General"; set for all
-    /// templates of a group by makeTemplates().
-    QString group;
+    /// templates of a group by makeTemplates(). The initializers leave it
+    /// and the mappings out: the default initializers say so.
+    QString group {};
     /// Value mappings the new rule starts with, e.g. a code to its name;
     /// empty for most templates.
-    QList<ValueMapping> mappings;
+    QList<ValueMapping> mappings {};
 
     /// Whether the user gives the key, e.g. for `key=value`.
     bool asksForKey() const

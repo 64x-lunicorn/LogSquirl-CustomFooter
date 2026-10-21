@@ -649,6 +649,23 @@ hidden global test state.
    file that shrank, whose start or scanned end differs, or with another
    birth time, is scanned from its start. A last line without a line break
    is matched but not remembered, as it may still be being written.
+   **Limit — a file rewritten in place:** a continued scan tells a
+   replaced file only by its first and last bytes and its birth time
+   (`FooterScanner::continues()`): the file must be at least as long as
+   the part scanned, its first bytes and the bytes just before the
+   progress's offset (up to `FooterScanner::kIdentityBytes`, 256, each)
+   must be those the progress kept, and its birth time must be the same
+   where the platform reports one for both. The bytes in between are not
+   compared, and a file rewritten in place keeps its birth time. So a file
+   rewritten in place with the same size (or larger) and the same first
+   and last scanned bytes keeps the previous values and their line numbers
+   — a done scan is not even run again (`fileUnchangedFor()`) — until a
+   later change shrinks it or alters those bytes or its birth time, or
+   another file or reloaded rules make the footer scan it from its start.
+   Comparing the whole scanned part would mean reading it again on every
+   change, which continued scans exist to avoid. The live preview's skip
+   predicate (`fileUnchangedFor( path, preview )`) makes the same checks,
+   so it has the same limit.
    **Line numbers across rescans:** the progress counts the complete lines
    scanned, and a continued scan numbers its lines on from that count, so
    a value found in the appended part has its line in the whole file,
@@ -1116,6 +1133,21 @@ one dialog, calls `reset()` and `open()` (not `exec()`, so tests click
 through it), and on `accepted` appends `entries()` after the existing
 rules and selects the first new one, like the add button, without
 touching other rows.
+
+## Build Flags
+
+The shared Plugin-CI (`plugin-build.yml`) only configures with
+`-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON` and adds no compiler flags,
+so the plugin's `CMakeLists.txt` sets them for the plugin library:
+`-Wall -Wextra`, `-fstack-protector-strong` where the compiler takes it
+(`check_cxx_compiler_flag`), and `_FORTIFY_SOURCE=2` in optimized builds
+(Release, RelWithDebInfo, MinSizeRel), unless the compiler already
+defines it when optimizing, as Ubuntu's GCC does, whose level is kept.
+MSVC gets none of them: it builds with `/GS` by default and has no
+`_FORTIFY_SOURCE`. Warnings are not errors, but the library builds without
+any; keep it so. The test binary compiles the same sources without these
+flags. Catch2 is fetched at the commit of its tag `v2.13.10`, not the tag,
+so a moved tag cannot change what the tests build with.
 
 ## Configuration Storage
 

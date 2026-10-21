@@ -838,6 +838,44 @@ SCENARIO( "The plugin ignores an active-file callback off the UI thread", "[plug
     logsquirl_plugin_shutdown();
 }
 
+SCENARIO( "The plugin ignores a menu action off the UI thread", "[plugin]" )
+{
+    QTemporaryDir configDir;
+    REQUIRE( configDir.isValid() );
+    host() = FakeHost();
+    host().configDir = configDir.path().toUtf8();
+    host().selectedLines = "VIN: WDB1234567";
+    const auto api = fakeApi();
+    int handle = 0;
+    REQUIRE( logsquirl_plugin_init_ex( &api, &handle, sizeof( LogSquirlHostApi ) ) == 0 );
+    REQUIRE( host().menuItems.size() == 2 );
+    const auto item = GENERATE( 0, 1 );
+    const auto menuItem = host().menuItems.at( item );
+
+    GIVEN( "the menu item " + menuItem.label.toStdString() )
+    {
+        WHEN( "the host calls it from a worker thread" )
+        {
+            host().calls.clear();
+            std::thread worker( [ &menuItem ] { menuItem.callback( menuItem.userData ); } );
+            worker.join();
+            QCoreApplication::processEvents();
+
+            THEN( "it is logged as an error and ignored: no editor opens, the host is not asked "
+                  "for the selected line" )
+            {
+                REQUIRE( host().errors
+                         == QStringList{ "Custom Footer: the host called a menu action off the "
+                                         "UI thread; ignored" } );
+                REQUIRE_FALSE( host().calls.contains( "get_selected_log_lines" ) );
+                REQUIRE_FALSE( openEditorWindow() );
+            }
+        }
+    }
+
+    logsquirl_plugin_shutdown();
+}
+
 SCENARIO( "The plugin learns from the host's table which host functions it offers", "[plugin]" )
 {
     QTemporaryDir configDir;

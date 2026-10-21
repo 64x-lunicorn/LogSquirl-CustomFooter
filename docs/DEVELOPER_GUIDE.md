@@ -229,7 +229,8 @@ Labs awaiting an answer is touched there only, without a lock. That the
 host calls back on the UI thread is something the plugin relies on (see
 *What the plugin relies on from the host* in
 [Host functions](#host-functions)); the
-active-file callback checks it and ignores a call from another thread.
+active-file callback and the menu actions check it and ignore a call
+from another thread.
 
 ## Footer Session
 
@@ -449,11 +450,12 @@ with them:
 - *Callbacks on the UI thread.* The menu actions, the active-file
   callback and the Regex Lab's answer are called on the UI thread, where
   the footer widget, the editor and the session's timers live. The
-  active-file callback checks it: called from another thread, it logs an
-  error (`Custom Footer: the host reported the active file off the UI
-  thread; ignored`; `log_message` may be called from any thread) and
-  leaves the session alone. The menu actions and the Regex Lab's answer
-  do not check.
+  active-file callback and the menu actions check it: called from
+  another thread, they log an error (`Custom Footer: the host reported
+  the active file off the UI thread; ignored`, or `… the host called a
+  menu action off the UI thread; ignored`; `log_message` may be called
+  from any thread) and leave the session alone. The Regex Lab's answer
+  does not check.
 - *The host drops the plugin's registrations at shutdown and after a
   failed initialisation.* The API has no way to unregister a menu action
   or the active-file callback, so after `shutdown()`, or an `init_ex()`

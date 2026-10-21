@@ -187,11 +187,28 @@ static void onActiveFileChanged( void* /* userData */, const char* filePath )
     } );
 }
 
+/// Whether a menu action is called on the UI thread, where it opens the
+/// editor; logs an error if not, as onActiveFileChanged() does.
+static bool menuActionOnUiThread()
+{
+    if ( onUiThread() ) {
+        return true;
+    }
+    plugin().host().logMessage( LOGSQUIRL_LOG_ERROR,
+                                QStringLiteral( "Custom Footer: the host called a menu action off "
+                                                "the UI thread; ignored" ) );
+    return false;
+}
+
 /// Called when the user clicks "Custom Footer…" in the Plugins menu, or
 /// "Custom Footer → Edit Rules…" on a host with the selected Log Lines.
+/// Ignored, and logged, off the UI thread.
 static void onEditorMenuAction( void* /* userData */ )
 {
     guarded( plugin().host(), "the rule editor", [] {
+        if ( !menuActionOnUiThread() ) {
+            return;
+        }
         auto& state = plugin();
         if ( state.session ) {
             state.session->openEditor( state.footer ? state.footer->window() : nullptr );
@@ -201,10 +218,13 @@ static void onEditorMenuAction( void* /* userData */ )
 
 /// Called when the user clicks "Custom Footer → Rule from Selected Line…"
 /// in the Plugins menu; registered only where the host offers the
-/// selected Log Lines.
+/// selected Log Lines. Ignored, and logged, off the UI thread.
 static void onRuleFromLineMenuAction( void* /* userData */ )
 {
     guarded( plugin().host(), "making a rule from the selected line", [] {
+        if ( !menuActionOnUiThread() ) {
+            return;
+        }
         auto& state = plugin();
         if ( state.session ) {
             state.session->ruleFromSelectedLine( state.footer ? state.footer->window() : nullptr );

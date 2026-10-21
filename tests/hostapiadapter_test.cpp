@@ -63,6 +63,9 @@ struct FakeTable {
     int selectionResult = LOGSQUIRL_LOG_LINES_OK;
     QByteArray selection;
     size_t selectionLines = 0;
+    int encodingResult = LOGSQUIRL_LOG_LINES_OK;
+    QByteArray encoding = "UTF-8";
+    QList<QByteArray> encodingAskedFor;
 };
 
 FakeTable& table()
@@ -71,8 +74,8 @@ FakeTable& table()
     return instance;
 }
 
-/// A whole 26.11 table: the base functions the adapter uses, and the three
-/// added later.
+/// A whole 26.12 table: the base functions the adapter uses, the three
+/// added in 26.11, and the encoding's two.
 LogSquirlHostApi fullApi()
 {
     LogSquirlHostApi api{};
@@ -107,6 +110,16 @@ LogSquirlHostApi fullApi()
             *lineCount = ok ? table().selectionLines : 0;
         }
         return table().selectionResult;
+    };
+    api.get_log_file_encoding = []( void*, const char* filePath, const char** encoding ) {
+        table().calls.append( "get_log_file_encoding" );
+        table().encodingAskedFor.append( filePath );
+        const bool ok = table().encodingResult >= 0;
+        *encoding = ok ? table().encoding.constData() : nullptr;
+        return table().encodingResult;
+    };
+    api.register_encoding_callback = []( void*, LogSquirlEncodingCallbackFn, void* ) {
+        table().calls.append( "register_encoding_callback" );
     };
     return api;
 }
@@ -156,17 +169,44 @@ SCENARIO( "The host API adapter offers what the table's size reports", "[hostapi
     const auto api = fullApi();
     int handle = 0;
 
-    WHEN( "the host passes a 26.11 table" )
+    WHEN( "the host passes a 26.12 table" )
     {
         HostApiAdapter adapter( &api, &handle, sizeof( LogSquirlHostApi ) );
         const auto& host = adapter.functions();
 
-        THEN( "all three host functions are set, and logging too" )
+        THEN( "all four host functions are set, and logging too" )
         {
             REQUIRE( host.log );
             REQUIRE( host.openRegexLab );
             REQUIRE( host.goToLogLine );
             REQUIRE( host.selectedLogLines );
+            REQUIRE( host.logFileEncoding );
+        }
+    }
+
+    WHEN( "the host passes a 26.11 table" )
+    {
+        HostApiAdapter adapter( &api, &handle,
+                                offsetof( LogSquirlHostApi, get_log_file_encoding ) );
+        const auto& host = adapter.functions();
+
+        THEN( "the three 26.11 functions are set, the encoding not" )
+        {
+            REQUIRE( host.openRegexLab );
+            REQUIRE( host.goToLogLine );
+            REQUIRE( host.selectedLogLines );
+            REQUIRE_FALSE( host.logFileEncoding );
+        }
+    }
+
+    WHEN( "the host passes a table with the encoding, but not its change callback" )
+    {
+        HostApiAdapter adapter( &api, &handle,
+                                offsetof( LogSquirlHostApi, register_encoding_callback ) );
+
+        THEN( "the encoding is not set, as it could not follow a change" )
+        {
+            REQUIRE_FALSE( adapter.functions().logFileEncoding );
         }
     }
 
@@ -190,11 +230,12 @@ SCENARIO( "The host API adapter offers what the table's size reports", "[hostapi
         HostApiAdapter adapter( base.api(), &handle, LOGSQUIRL_HOST_API_BASE_SIZE );
         const auto& host = adapter.functions();
 
-        THEN( "none of the three is set" )
+        THEN( "none of the four is set" )
         {
             REQUIRE_FALSE( host.openRegexLab );
             REQUIRE_FALSE( host.goToLogLine );
             REQUIRE_FALSE( host.selectedLogLines );
+            REQUIRE_FALSE( host.logFileEncoding );
         }
 
         AND_WHEN( "a message is logged" )
@@ -536,6 +577,68 @@ SCENARIO( "The adapter reads the Log Lines selected in the host", "[hostapiadapt
         THEN( "there is nothing" )
         {
             REQUIRE_FALSE( selected );
+        }
+    }
+}
+
+SCENARIO( "The adapter reads the encoding the host reads a Log File in", "[hostapiadapter]" )
+{
+    table() = FakeTable();
+    const auto api = fullApi();
+    int handle = 0;
+    HostApiAdapter adapter( &api, &handle, sizeof( LogSquirlHostApi ) );
+    const auto& host = adapter.functions();
+    const QString path = QStringLiteral( "/logs/f\u00fc\u00dfe.log" );
+
+    WHEN( "the host reads the file in UTF-16LE" )
+    {
+        table().encoding = "UTF-16LE";
+        const auto encoding = host.logFileEncoding( path );
+
+        THEN( "its name comes, for the file asked for by its UTF-8 path" )
+        {
+            REQUIRE( encoding == QByteArray( "UTF-16LE" ) );
+            REQUIRE( table().encodingAskedFor == QList<QByteArray>{ path.toUtf8() } );
+        }
+
+        AND_WHEN( "the host's name changes" )
+        {
+            table().encoding.fill( 'x' );
+
+            THEN( "the copy stays" )
+            {
+                REQUIRE( encoding == QByteArray( "UTF-16LE" ) );
+            }
+        }
+    }
+
+    WHEN( "no tab shows the file" )
+    {
+        table().encodingResult = LOGSQUIRL_LOG_LINES_NO_LOG_FILE;
+
+        THEN( "there is nothing" )
+        {
+            REQUIRE_FALSE( host.logFileEncoding( path ) );
+        }
+    }
+
+    WHEN( "the host names no encoding, against its contract" )
+    {
+        table().encoding = "";
+
+        THEN( "there is nothing" )
+        {
+            REQUIRE_FALSE( host.logFileEncoding( path ) );
+        }
+    }
+
+    WHEN( "it is asked off the UI thread, against the plugin's contract" )
+    {
+        table().encodingResult = LOGSQUIRL_LOG_LINES_NOT_ON_UI_THREAD;
+
+        THEN( "there is nothing" )
+        {
+            REQUIRE_FALSE( host.logFileEncoding( path ) );
         }
     }
 }

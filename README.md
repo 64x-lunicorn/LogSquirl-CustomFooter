@@ -356,14 +356,18 @@ as before, and the button is not shown.
 - A scan stops after `scan/maxLines` lines (default 100000, `0` for no
   limit) and never reads more than 64 MiB; lines longer than 64 KiB are
   matched against their start.
-- **Encodings:** UTF-8 files (with or without a UTF-8 byte order mark) and
-  single-byte files are read as UTF-8. UTF-16 files that start with a byte
-  order mark (UTF-16LE `FF FE` or UTF-16BE `FE FF`) are read as UTF-16, as
-  LogSquirl reads them: values are found, and their Log Lines match
-  LogSquirl's, in the footer and in the editor's preview. UTF-16 files
-  without a byte order mark, and files in an encoding chosen in LogSquirl,
-  are not covered yet: they are read as UTF-8, so rules rarely match and
-  Log Lines can differ from LogSquirl's.
+- **Encodings:** on LogSquirl 26.12 or later, a log file is read in the
+  encoding LogSquirl reads it in: the one chosen in its *Encoding* menu,
+  else the one it detected, also for a UTF-16 file without a byte order
+  mark, or a single-byte encoding such as windows-1252. Values are found
+  and decoded as LogSquirl shows them, and their Log Lines match
+  LogSquirl's, in the footer and in the editor's preview. Choosing another
+  encoding for the tab scans the file again in it. On older LogSquirl
+  versions, UTF-16 files that start with a byte order mark (UTF-16LE
+  `FF FE` or UTF-16BE `FE FF`) are read as UTF-16, and every other file as
+  UTF-8: a UTF-16 file without a byte order mark, or one in an encoding
+  chosen in LogSquirl, then rarely matches, and its Log Lines can differ
+  from LogSquirl's.
 
 ### INI Format (internal)
 

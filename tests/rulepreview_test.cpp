@@ -104,7 +104,7 @@ struct GatedPreview {
     RulePreviewer::PreviewFunction function()
     {
         return [ this ]( const QString&, const QList<FooterEntry>& entries, int index, int,
-                         const std::atomic_bool* cancelled ) {
+                         const std::atomic_bool* cancelled, const QByteArray& ) {
             ++calls;
             if ( entries[ index ].linePattern.startsWith( "slow" ) ) {
                 started.release();
@@ -159,7 +159,8 @@ SCENARIO( "RulePreviewer previews once typing pauses", "[preview][previewer]" )
         RulePreviewer previewer;
         previewer.setPreviewFunction(
             []( const QString&, const QList<FooterEntry>& entries, int index, int,
-                const std::atomic_bool* ) { return previewOfPattern( entries, index ); } );
+                const std::atomic_bool*,
+                const QByteArray& ) { return previewOfPattern( entries, index ); } );
         previewer.setActiveFile( "/some/file.log" );
         Emitted emitted( previewer );
 
@@ -336,7 +337,8 @@ SCENARIO( "RulePreviewer never previews a changed file back to back", "[preview]
         RulePreviewer previewer( nullptr, std::move( test.parts ) );
         previewer.setPreviewFunction(
             []( const QString&, const QList<FooterEntry>& entries, int index, int,
-                const std::atomic_bool* ) { return previewOfPattern( entries, index ); } );
+                const std::atomic_bool*,
+                const QByteArray& ) { return previewOfPattern( entries, index ); } );
         previewer.setActiveFile( "/some/file.log" );
 
         previewer.schedule( { rule( "K", "k" ) }, 0 );
@@ -872,7 +874,8 @@ SCENARIO( "The editor previews the selected rule against the active file",
             std::atomic_int previewedRules{ -1 };
             previewer->setPreviewFunction(
                 [ &previewedRules ]( const QString& file, const QList<FooterEntry>& rules,
-                                     int index, int maxLines, const std::atomic_bool* cancelled ) {
+                                     int index, int maxLines, const std::atomic_bool* cancelled,
+                                     const QByteArray& ) {
                     previewedRules = static_cast<int>( rules.size() );
                     return FooterScanner::preview( file, rules, index, maxLines, cancelled );
                 } );

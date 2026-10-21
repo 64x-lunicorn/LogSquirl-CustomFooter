@@ -48,7 +48,8 @@ namespace custom_footer {
  * Once scanned, a file that only grew is scanned on from where the last
  * scan stopped, and not at all once every key has a value or a limit was
  * reached; nor is a file left as it was (FooterScanner::fileUnchangedFor()).
- * A file that was truncated or replaced is scanned from its start. While
+ * A file that was truncated or replaced is scanned from its start, and so
+ * is the active file once the host reads it in another encoding. While
  * the active file is missing, e.g. after it was rotated away, it is waited
  * for, and scanned and followed again once it is recreated.
  *
@@ -77,10 +78,12 @@ public:
         return configDir_;
     }
 
-    /// Show the values of this file; an empty path clears the footer. For
-    /// the file already active, it is scanned again for changes, as for a
-    /// change on disk.
-    void setActiveFile( const QString& filePath );
+    /// Show the values of this file, read in @p hostEncoding, the name of
+    /// the encoding the host reads it in (empty where the host does not
+    /// say); an empty path clears the footer. For the file already active in
+    /// the same encoding, it is scanned again for changes, as for a change
+    /// on disk; in another encoding, it is scanned afresh.
+    void setActiveFile( const QString& filePath, const QByteArray& hostEncoding = {} );
 
     /// Load the rules again, e.g. after they were saved, and rescan.
     void reloadConfig();
@@ -115,6 +118,7 @@ private:
     const QString configDir_;
     const Warn warn_;
     QString activeFile_;
+    QByteArray activeFileEncoding_;
 
     std::shared_ptr<const FooterScanner> scanner_;
     int maxLines_ = FooterScanner::kDefaultMaxLines;

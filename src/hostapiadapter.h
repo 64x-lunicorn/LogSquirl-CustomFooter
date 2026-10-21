@@ -29,12 +29,14 @@ namespace custom_footer {
 /**
  * The HostFunctions of the host's C function table: the part of the C ABI
  * adapter that turns the table into C++ functions, and the only code that
- * calls the table's log and 26.11 functions.
+ * calls the table's log, 26.11 and 26.12 functions but for the callback
+ * registrations.
  *
  * It keeps the host's pointer and never copies the table. It reads only the
  * members that LOGSQUIRL_HOST_API_HAS( apiSize, … ) reports, so a host that
  * passes a shorter table (LogSquirl 26.10, through logsquirl_plugin_init())
- * gets empty openRegexLab, goToLogLine and selectedLogLines.
+ * gets empty openRegexLab, goToLogLine and selectedLogLines, and one before
+ * LogSquirl 26.12 an empty logFileEncoding.
  *
  * It owns what a Regex Lab's answer needs until the answer comes. The host
  * gets a number as the callback's user_data, never a pointer, so an answer

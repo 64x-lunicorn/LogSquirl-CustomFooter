@@ -27,6 +27,7 @@ add_executable(logsquirl_custom_footer_tests
     footerscanner_linenumber_test.cpp
     footerscanner_preview_test.cpp
     footerscanner_utf16_test.cpp
+    footerscanner_hostencoding_test.cpp
     footerscanner_fifo_test.cpp
     footerconfig_test.cpp
     footerconfig_maxlines_test.cpp

@@ -774,6 +774,18 @@ in a detail panel on the right.
   constructor, so they wait for no real time, and replace the preview
   function (`setPreviewFunction()`) to hold a preview on the worker
   (`tests/rulepreview_test.cpp`).
+- **Text from a rule or a file is never rich text.** A pattern, key,
+  file path or regex error is shown as it is: an imported rule set must
+  not get Qt to render `<img src="file:///…">` or load what it names.
+  Labels and message boxes showing such text are `Qt::PlainText`. Qt has
+  no plain-text tooltip and renders one as HTML as soon as it looks like
+  HTML (`Qt::mightBeRichText()`), so tooltips with such text go through
+  `plainToolTip()` (`plaintooltip.h`): always rich text, the text escaped
+  with its spaces and line breaks kept. The footer's own rich tooltips
+  and key labels escape key, value and raw value with `toHtmlEscaped()`.
+  Tests read a tooltip as Qt shows it, and the resources showing it would
+  load, with `shownAsToolTip()` (`tests/shownastooltip.h`;
+  `tests/plaintext_test.cpp`).
 
 ### Simple mode
 

@@ -27,6 +27,7 @@
 #include "footereditor.h"
 #include "footerscanner.h"
 #include "rulelistmodel.h"
+#include "shownastooltip.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -121,7 +122,8 @@ struct EditorUi {
     /// Whether a field is marked, with the reason next to it.
     static bool marked( const QLineEdit* field, const QLabel* reason )
     {
-        return !field->toolTip().isEmpty() && reason->text() == field->toolTip()
+        return !field->toolTip().isEmpty()
+               && reason->text() == shownAsToolTip( field->toolTip() ).text
                && !reason->isHidden();
     }
     static bool unmarked( const QLineEdit* field, const QLabel* reason )

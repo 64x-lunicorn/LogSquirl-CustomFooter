@@ -58,6 +58,7 @@ add_executable(logsquirl_custom_footer_tests
     latestjob_test.cpp
     rulecheck_test.cpp
     regexlab_test.cpp
+    plaintext_test.cpp
 )
 
 set_target_properties(logsquirl_custom_footer_tests PROPERTIES

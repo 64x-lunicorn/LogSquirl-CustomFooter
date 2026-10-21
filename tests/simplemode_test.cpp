@@ -28,6 +28,7 @@
 #include "footereditor.h"
 #include "footerscanner.h"
 #include "rulelistmodel.h"
+#include "shownastooltip.h"
 #include "simplerule.h"
 
 #include <QApplication>
@@ -128,7 +129,7 @@ struct SimpleUi {
     bool endCharacterMarked() const
     {
         return !endCharacter->toolTip().isEmpty()
-               && endCharacterProblem->text() == endCharacter->toolTip()
+               && endCharacterProblem->text() == shownAsToolTip( endCharacter->toolTip() ).text
                && endCharacterProblem->isVisibleTo( dialog );
     }
 

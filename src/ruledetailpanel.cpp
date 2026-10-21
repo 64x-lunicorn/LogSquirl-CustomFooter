@@ -18,6 +18,7 @@
  */
 
 #include "ruledetailpanel.h"
+#include "plaintooltip.h"
 #include "rulepreviewview.h"
 
 #include <QCheckBox>
@@ -62,10 +63,11 @@ QString problemFieldStyle()
 
 void markField( QLineEdit* field, QLabel* label, const QString& problem )
 {
-    if ( field->toolTip() == problem ) {
+    const auto toolTip = plainToolTip( problem );
+    if ( field->toolTip() == toolTip ) {
         return;
     }
-    field->setToolTip( problem );
+    field->setToolTip( toolTip );
     field->setStyleSheet( problem.isEmpty() ? QString() : problemFieldStyle() );
     label->setText( problem );
     label->setVisible( !problem.isEmpty() );
@@ -529,6 +531,8 @@ QLabel* RuleDetailPanel::newProblemLabel( const QString& objectName )
 {
     auto* problem = new QLabel( this );
     problem->setObjectName( objectName );
+    // Rule text, e.g. a regex error: shown as it is, never as rich text.
+    problem->setTextFormat( Qt::PlainText );
     problem->setStyleSheet( QStringLiteral( "color: %1;" ).arg( css( problemColor() ) ) );
     problem->setWordWrap( true );
     problem->setTextInteractionFlags( Qt::TextSelectableByMouse );

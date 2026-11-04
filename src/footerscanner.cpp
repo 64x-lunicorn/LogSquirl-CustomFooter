@@ -23,6 +23,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStringDecoder>
+#include <QSysInfo>
 
 #include <algorithm>
 #include <utility>
@@ -161,13 +162,94 @@ QByteArray readAt( QFile& file, qint64 offset, qint64 size )
     return file.seek( offset ) ? file.read( size ) : QByteArray();
 }
 
-/// The encoding of a file, told from its first bytes.
-FooterScanner::Encoding encodingOf( QFile& file )
+/// The encoding of a file, from the host's name of it and its first bytes.
+FooterScanner::Encoding encodingOf( QFile& file, const QByteArray& hostEncoding )
 {
     // Enough for a byte order mark.
     constexpr qint64 markBytes = 4; // a UTF-32 mark, to tell it from UTF-16's
-    return FooterScanner::Encoding::detect( readAt( file, 0, markBytes ) );
+    return FooterScanner::Encoding::forHost( hostEncoding, readAt( file, 0, markBytes ) );
 }
+
+/// Whether @p name is windows-1252, by one of its usual names.
+bool isWindows1252( const QByteArray& name )
+{
+    const auto key = name.toUpper().replace( '-', "" ).replace( '_', "" );
+    return key == "WINDOWS1252" || key == "CP1252";
+}
+
+/// windows-1252 bytes as text, where Qt has no decoder for it (one without
+/// ICU): Latin-1 but for 0x80 to 0x9F, as Windows decodes them.
+QString fromWindows1252( const QByteArray& bytes )
+{
+    static const char16_t high[ 32 ] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160,
+        0x2039, 0x0152, 0x008D, 0x017D, 0x008F, 0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022,
+        0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    };
+    QString text( bytes.size(), Qt::Uninitialized );
+    for ( qsizetype at = 0; at < bytes.size(); ++at ) {
+        const auto byte = static_cast<unsigned char>( bytes.at( at ) );
+        text[ at ] = byte >= 0x80 && byte < 0xA0 ? QChar( high[ byte - 0x80 ] ) : QChar( byte );
+    }
+    return text;
+}
+
+/// Decodes the lines of one scan: made once, for the many lines it reads.
+class LineDecoder {
+public:
+    explicit LineDecoder( const Encoding& encoding )
+        : utf8_( encoding.form == Encoding::Form::Utf8 )
+        , decoder_( decoderFor( encoding ) )
+        , windows1252_( encoding.form == Encoding::Form::Named && !decoder_.isValid()
+                        && isWindows1252( encoding.name ) )
+    {
+    }
+
+    QString operator()( const QByteArray& bytes )
+    {
+        if ( utf8_ ) {
+            return QString::fromUtf8( bytes );
+        }
+        if ( windows1252_ ) {
+            return fromWindows1252( bytes );
+        }
+        if ( !decoder_.isValid() ) {
+            // Not one this Qt decodes: its lines are still split right, and
+            // their ASCII is still read right.
+            return QString::fromLatin1( bytes );
+        }
+        return decoder_.decode( bytes );
+    }
+
+private:
+    static QStringDecoder decoderFor( const Encoding& encoding )
+    {
+        // Each line on its own, and a U+FEFF at its start kept: the file's
+        // mark is not in any line, so one there is text.
+        const auto flags
+            = QStringConverter::Flag::Stateless | QStringConverter::Flag::ConvertInitialBom;
+        switch ( encoding.form ) {
+        case Encoding::Form::Utf8:
+            break;
+        case Encoding::Form::Utf16LE:
+            return QStringDecoder( QStringConverter::Utf16LE, flags );
+        case Encoding::Form::Utf16BE:
+            return QStringDecoder( QStringConverter::Utf16BE, flags );
+        case Encoding::Form::Utf32LE:
+            return QStringDecoder( QStringConverter::Utf32LE, flags );
+        case Encoding::Form::Utf32BE:
+            return QStringDecoder( QStringConverter::Utf32BE, flags );
+        case Encoding::Form::Named:
+            // Invalid where this Qt does not know the name.
+            return QStringDecoder( encoding.name.constData(), flags );
+        }
+        return QStringDecoder( QStringConverter::Utf8, flags );
+    }
+
+    bool utf8_;
+    QStringDecoder decoder_;
+    bool windows1252_;
+};
 
 /// A raw value as shown: the display value of the first mapping of exactly
 /// this raw value, or the raw value itself.
@@ -221,6 +303,7 @@ bool forEachLine( QFile& file, const Encoding& encoding, LinePosition& position,
     }
     QByteArray rawLine;
     bool terminated = false;
+    LineDecoder decode( encoding );
     while ( !position.limitReached( maxLines ) ) {
         if ( isCancelled( cancelled ) ) {
             return false;
@@ -240,7 +323,7 @@ bool forEachLine( QFile& file, const Encoding& encoding, LinePosition& position,
         }
 
         const bool readOn
-            = onLine( encoding.decode( rawLine ), kind, static_cast<qint64>( position.lines ) + 1 );
+            = onLine( decode( rawLine ), kind, static_cast<qint64>( position.lines ) + 1 );
         if ( kind == LineKind::Stopped ) {
             // Remember where the scan stopped, so that a rescan knows the
             // file and does not read the line again.
@@ -271,21 +354,93 @@ FooterScanner::Encoding FooterScanner::Encoding::detect( const QByteArray& start
         return {};
     }
     if ( start.startsWith( "\xFF\xFE" ) ) {
-        return { Form::Utf16LE, 2 };
+        return { Form::Utf16LE, 2, {} };
     }
     if ( start.startsWith( "\xFE\xFF" ) ) {
-        return { Form::Utf16BE, 2 };
+        return { Form::Utf16BE, 2, {} };
     }
     return {};
 }
 
-FooterScanner::Encoding FooterScanner::Encoding::ofFile( const QString& filePath )
+FooterScanner::Encoding FooterScanner::Encoding::forHost( const QByteArray& hostName,
+                                                          const QByteArray& start )
+{
+    if ( hostName.isEmpty() ) {
+        return detect( start );
+    }
+
+    // The names Qt gives the Unicode encodings, as LogSquirl passes them on,
+    // in any case and with or without '-'; each with its byte order mark.
+    struct Unicode {
+        QByteArray key;
+        Form form;
+        QByteArray mark;
+    };
+    static const Unicode unicode[] = {
+        { "UTF16LE", Form::Utf16LE, QByteArray( "\xFF\xFE", 2 ) },
+        { "UTF16BE", Form::Utf16BE, QByteArray( "\xFE\xFF", 2 ) },
+        { "UTF32LE", Form::Utf32LE, QByteArray( "\xFF\xFE\x00\x00", 4 ) },
+        { "UTF32BE", Form::Utf32BE, QByteArray( "\x00\x00\xFE\xFF", 4 ) },
+    };
+    const auto find = []( const QByteArray& key ) -> const Unicode* {
+        for ( const auto& encoding : unicode ) {
+            if ( encoding.key == key ) {
+                return &encoding;
+            }
+        }
+        return nullptr;
+    };
+
+    auto key = hostName.toUpper().replace( '-', "" ).replace( '_', "" );
+    // A UTF-16 mark wins over a name of another encoding: until its first
+    // load has detected the encoding, the host names the locale's, and a
+    // file with a UTF-16 mark read in any other encoding is no text anyway.
+    const auto marked = detect( start );
+    if ( marked.form != Form::Utf8 && !key.startsWith( "UTF16" ) && !key.startsWith( "UTF32" ) ) {
+        return marked;
+    }
+    if ( key == "UTF8" ) {
+        // A UTF-8 mark stays in the first line, as it always has.
+        return {};
+    }
+    if ( key == "UTF16" || key == "UTF32" ) {
+        // Of the mark's byte order, else of this machine's, as Qt decodes it.
+        const bool bigEndian = start.startsWith( find( key + "BE" )->mark )
+                               || ( !start.startsWith( find( key + "LE" )->mark )
+                                    && QSysInfo::ByteOrder == QSysInfo::BigEndian );
+        key += bigEndian ? "BE" : "LE";
+    }
+    if ( const auto* found = find( key ) ) {
+        // The mark of this encoding, if the file starts with it, is no text.
+        return { found->form, start.startsWith( found->mark ) ? found->mark.size() : 0, {} };
+    }
+    return { Form::Named, 0, hostName };
+}
+
+FooterScanner::Encoding FooterScanner::Encoding::ofFile( const QString& filePath,
+                                                         const QByteArray& hostName )
 {
     QFile file;
     if ( !openRegularFile( file, filePath ) ) {
-        return {};
+        return forHost( hostName, {} );
     }
-    return encodingOf( file );
+    return encodingOf( file, hostName );
+}
+
+int FooterScanner::Encoding::unitBytes() const
+{
+    switch ( form ) {
+    case Form::Utf16LE:
+    case Form::Utf16BE:
+        return 2;
+    case Form::Utf32LE:
+    case Form::Utf32BE:
+        return 4;
+    case Form::Utf8:
+    case Form::Named:
+        break;
+    }
+    return 1;
 }
 
 bool FooterScanner::Encoding::isUnit( const char* at, char unit ) const
@@ -295,23 +450,15 @@ bool FooterScanner::Encoding::isUnit( const char* at, char unit ) const
         return at[ 0 ] == unit && at[ 1 ] == '\0';
     case Form::Utf16BE:
         return at[ 0 ] == '\0' && at[ 1 ] == unit;
+    case Form::Utf32LE:
+        return at[ 0 ] == unit && at[ 1 ] == '\0' && at[ 2 ] == '\0' && at[ 3 ] == '\0';
+    case Form::Utf32BE:
+        return at[ 0 ] == '\0' && at[ 1 ] == '\0' && at[ 2 ] == '\0' && at[ 3 ] == unit;
     case Form::Utf8:
+    case Form::Named:
         break;
     }
     return at[ 0 ] == unit;
-}
-
-QString FooterScanner::Encoding::decode( const QByteArray& bytes ) const
-{
-    if ( form == Form::Utf8 ) {
-        return QString::fromUtf8( bytes );
-    }
-    // Each line on its own, and a U+FEFF at its start kept: the file's mark
-    // is not in any line, so one there is text.
-    QStringDecoder decoder(
-        form == Form::Utf16LE ? QStringConverter::Utf16LE : QStringConverter::Utf16BE,
-        QStringConverter::Flag::Stateless | QStringConverter::Flag::ConvertInitialBom );
-    return decoder.decode( bytes );
 }
 
 FooterScanner::FooterScanner( const QList<FooterEntry>& entries )
@@ -363,7 +510,8 @@ QMap<QString, QString> FooterScanner::scanFile( const QString& filePath, int max
 }
 
 FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Progress& from,
-                                             int maxLines, const std::atomic_bool* cancelled ) const
+                                             int maxLines, const std::atomic_bool* cancelled,
+                                             const QByteArray& hostEncoding ) const
 {
     Scan scan;
 
@@ -379,7 +527,10 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     scan.fileSize = file.size();
 
     auto& progress = scan.progress;
-    scan.resumed = continues( file, from );
+    // Told from the file's start and the host's name: read in another
+    // encoding than before, the file's lines are others.
+    const auto encoding = encodingOf( file, hostEncoding );
+    scan.resumed = continues( file, from ) && from.encoding == encoding;
     if ( scan.resumed ) {
         progress = from;
         if ( progress.done ) {
@@ -389,9 +540,7 @@ FooterScanner::Scan FooterScanner::scanFrom( const QString& filePath, const Prog
     }
     else {
         progress.birthTime = QFileInfo( file ).birthTime();
-        // Told from the file's start, here only: a continued scan keeps the
-        // progress's, as the start that told it is unchanged.
-        progress.encoding = encodingOf( file );
+        progress.encoding = encoding;
         progress.offset = progress.encoding.textStart;
     }
 
@@ -511,7 +660,8 @@ std::optional<FooterScanner::Match> FooterScanner::matchOf( const Rule& rule, co
 
 FooterScanner::Preview FooterScanner::preview( const QString& filePath,
                                                const QList<FooterEntry>& entries, int rule,
-                                               int maxLines, const std::atomic_bool* cancelled )
+                                               int maxLines, const std::atomic_bool* cancelled,
+                                               const QByteArray& hostEncoding )
 {
     Preview preview;
     preview.filePath = filePath;
@@ -569,7 +719,7 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
     };
 
     auto& read = preview.read;
-    read.encoding = encodingOf( file );
+    read.encoding = encodingOf( file, hostEncoding );
     LinePosition position{ read.encoding.textStart, 0 };
     bool partialLine = false;
     bool stoppedInLine = false;
@@ -628,7 +778,8 @@ FooterScanner::Preview FooterScanner::preview( const QString& filePath,
 
     // Counting a last line that is unterminated, or that the limit stopped in.
     preview.lines = position.lines + ( partialLine ? 1 : 0 );
-    // Half a code unit at the end of a growing UTF-16 file is no more to read.
+    // Part of a code unit at the end of a growing UTF-16 or UTF-32 file is
+    // no more to read.
     const bool more = !atTextEnd( file, read.encoding );
     preview.byteLimitReached = more && ( stoppedInLine || position.offset >= kMaxScanBytes );
     preview.lineLimitReached

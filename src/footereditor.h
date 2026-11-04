@@ -105,8 +105,10 @@ public:
     ~FooterEditor() override;
 
     /// The log file the selected rule is previewed against; empty for none.
-    /// The plugin sets it, and again whenever the active file changes.
-    void setActiveFile( const QString& filePath );
+    /// The plugin sets it, and again whenever the active file, or the
+    /// encoding the host reads it in, changes. @p hostEncoding is the
+    /// encoding's name, empty where the host does not say.
+    void setActiveFile( const QString& filePath, const QByteArray& hostEncoding = {} );
     QString activeFile() const;
 
     /// The footer's line limit, which the preview scans with too.

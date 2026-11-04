@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A log file is read in the encoding LogSquirl reads it in** — on
+  LogSquirl 26.12 or later the footer, the editor's live preview and a
+  rule from a selected Log Line read the active file in the encoding
+  LogSquirl uses for it: the one chosen in LogSquirl's *Encoding* menu,
+  else the one it detected, also a UTF-16 file without a byte order mark,
+  which LogSquirl guesses, and single-byte encodings such as windows-1252
+  or ISO-8859-1. Values are decoded as LogSquirl shows them, and their Log
+  Lines match the Text View's. Choosing another encoding for the tab scans
+  the file again in it. A rule from a selected line of a single-byte file
+  measures the 64 KiB the footer reads in that encoding's bytes, so it
+  offers the whole part the footer reads. On older LogSquirl versions files
+  are read as before: UTF-16 with a byte order mark as UTF-16, everything
+  else as UTF-8.
 - **UTF-16 log files with a byte order mark** — a file starting with a
   UTF-16LE (`FF FE`) or UTF-16BE (`FE FF`) byte order mark is read as
   UTF-16, as LogSquirl reads it: rules find their values, and the Log Line
@@ -18,8 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first 64 KiB (32 768 UTF-16 code units), and shows only that part.
   Before, such files were read as UTF-8, so rules
   practically never matched and line numbers could differ. UTF-8 and
-  single-byte files are read as before. UTF-16 files without a byte order
-  mark, and encodings chosen in LogSquirl, are not covered yet.
+  single-byte files are read as before.
 - **Test a pattern in the Regex Lab** — **Test…** next to a rule's line
   pattern and value pattern opens it in LogSquirl's Regex Lab. Apply in
   the Lab writes the pattern into that rule as if typed, so validation and

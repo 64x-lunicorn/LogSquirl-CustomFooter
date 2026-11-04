@@ -197,9 +197,42 @@ FooterSession::~FooterSession()
 void FooterSession::setActiveFile( const QString& filePath )
 {
     activeFile_ = filePath;
-    controller_->setActiveFile( filePath );
+    // Asked now, on the UI thread, as the host requires; a change later is
+    // told by encodingChanged().
+    activeFileEncoding_ = frontEncoding();
+    pushActiveFile();
+}
+
+QByteArray FooterSession::frontEncoding() const
+{
+    if ( !host_.logFileEncoding || activeFile_.isEmpty() ) {
+        return {};
+    }
+    // The tab in front's, which shows the active file: asked by its path,
+    // the host would answer for the first tab showing it, in any window.
+    return host_.logFileEncoding( QString() ).value_or( QByteArray() );
+}
+
+void FooterSession::encodingChanged( const QString& filePath, const QByteArray& encoding )
+{
+    if ( activeFile_.isEmpty() || filePath != activeFile_ ) {
+        return;
+    }
+    // Asked again for the tab in front: the change may be that of another
+    // window's tab showing the same file.
+    const auto now = host_.logFileEncoding ? frontEncoding() : encoding;
+    if ( now == activeFileEncoding_ ) {
+        return;
+    }
+    activeFileEncoding_ = now;
+    pushActiveFile();
+}
+
+void FooterSession::pushActiveFile()
+{
+    controller_->setActiveFile( activeFile_, activeFileEncoding_ );
     if ( editor_ ) {
-        editor_->setActiveFile( filePath );
+        editor_->setActiveFile( activeFile_, activeFileEncoding_ );
     }
 }
 
@@ -226,7 +259,7 @@ FooterEditor* FooterSession::openEditor( QWidget* over )
     auto* editor = new FooterEditor( FooterConfig::loadEntries( configDir_ ), over );
     editor_ = editor;
     editor->setMaxLines( FooterConfig::loadMaxLines( configDir_ ) );
-    editor->setActiveFile( activeFile_ );
+    editor->setActiveFile( activeFile_, activeFileEncoding_ );
     if ( host_.openRegexLab ) {
         // Test… opens the host's Regex Lab; a failure to open it is logged
         // instead of thrown into the editor's button handler.
@@ -288,7 +321,7 @@ void FooterSession::addRuleFromLine( FooterEditor& editor, const SelectedLogLine
     // Only the first bytes are read, for a byte order mark, as the
     // footer's scan tells the encoding.
     editor.addRuleFromLine( selected.lines.first(), static_cast<int>( selected.lines.size() ),
-                            FooterScanner::Encoding::ofFile( activeFile_ ) );
+                            FooterScanner::Encoding::ofFile( activeFile_, activeFileEncoding_ ) );
 }
 
 std::optional<SelectedLogLines> FooterSession::selectedLinesOrSayWhy( QWidget* messageOver )
@@ -358,6 +391,8 @@ bool FooterSession::has( HostFeature feature ) const noexcept
         return static_cast<bool>( host_.goToLogLine );
     case HostFeature::SelectedLogLines:
         return static_cast<bool>( host_.selectedLogLines );
+    case HostFeature::LogFileEncoding:
+        return static_cast<bool>( host_.logFileEncoding );
     }
     return false;
 }

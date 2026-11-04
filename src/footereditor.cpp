@@ -357,9 +357,9 @@ void FooterEditor::addRuleFromLine( const QString& line, int selectedLines,
     linePicker_->focusLine();
 }
 
-void FooterEditor::setActiveFile( const QString& filePath )
+void FooterEditor::setActiveFile( const QString& filePath, const QByteArray& hostEncoding )
 {
-    previewer_->setActiveFile( filePath );
+    previewer_->setActiveFile( filePath, hostEncoding );
 }
 
 QString FooterEditor::activeFile() const

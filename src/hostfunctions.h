@@ -21,6 +21,7 @@
 
 #include "logsquirl_plugin_api.h"
 
+#include <QByteArray>
 #include <QString>
 #include <QStringList>
 
@@ -62,6 +63,7 @@ enum class HostFeature {
     RegexLab,         ///< HostFunctions::openRegexLab
     GoToLogLine,      ///< HostFunctions::goToLogLine
     SelectedLogLines, ///< HostFunctions::selectedLogLines
+    LogFileEncoding,  ///< HostFunctions::logFileEncoding
 };
 
 /**
@@ -72,8 +74,8 @@ enum class HostFeature {
  * the plugin then goes without it, so an older host is just the default
  * value.
  *
- * openRegexLab, goToLogLine and selectedLogLines must be called on the UI
- * thread only, as the host requires; menu actions, host callbacks and widget
+ * openRegexLab, goToLogLine, selectedLogLines and logFileEncoding must be
+ * called on the UI thread only, as the host requires; menu actions, host callbacks and widget
  * signals all run there. Filled by the C entry points, they are valid until
  * the plugin is shut down.
  */
@@ -113,6 +115,21 @@ struct HostFunctions {
      * Empty when the host does not offer it (before LogSquirl 26.11).
      */
     std::function<std::optional<SelectedLogLines>()> selectedLogLines;
+
+    /**
+     * The name of the text encoding the host reads the open Log File
+     * @p filePath in, such as "UTF-16LE" or "windows-1252": the one the user
+     * chose for its tab, else the one detected, else the locale's. An empty
+     * path asks for the Log File of the tab in front. Nothing when no tab
+     * shows that file.
+     *
+     * Set only where the host also tells of every change of a Log File's
+     * encoding, which the plugin then hands to the session
+     * (FooterSession::encodingChanged()).
+     *
+     * Empty when the host does not offer it (before LogSquirl 26.12).
+     */
+    std::function<std::optional<QByteArray>( const QString& filePath )> logFileEncoding;
 
     /// Log through log(), if set. Never throws.
     void logMessage( int level, const QString& message ) const noexcept

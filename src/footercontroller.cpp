@@ -47,16 +47,18 @@ FooterController::~FooterController()
     follower_.stop();
 }
 
-void FooterController::setActiveFile( const QString& filePath )
+void FooterController::setActiveFile( const QString& filePath, const QByteArray& hostEncoding )
 {
-    if ( filePath == activeFile_ ) {
+    if ( filePath == activeFile_ && hostEncoding == activeFileEncoding_ ) {
         // A change of the file, as one on disk.
         follower_.nudge();
         return;
     }
 
     activeFile_ = filePath;
-    // The previous file's values must not pass for this file's while it is scanned.
+    activeFileEncoding_ = hostEncoding;
+    // The previous file's values, or those read in the previous encoding,
+    // must not pass for this file's while it is scanned.
     show( {} );
     restartScan();
 }
@@ -92,13 +94,13 @@ void FooterController::restartScan()
     // Following anew forgets the previous scan: the file is scanned from its start.
     follower_.follow(
         activeFile_,
-        [ scanner = scanner_, maxLines = maxLines_ ]( const QString& filePath, const Scan* previous,
-                                                      const std::atomic_bool& cancelled ) {
+        [ scanner = scanner_, maxLines = maxLines_, hostEncoding = activeFileEncoding_ ](
+            const QString& filePath, const Scan* previous, const std::atomic_bool& cancelled ) {
             try {
                 // On from where the previous scan stopped, if the file only grew.
                 return scanner->scanFrom( filePath,
                                           previous ? previous->progress : FooterScanner::Progress{},
-                                          maxLines, &cancelled );
+                                          maxLines, &cancelled, hostEncoding );
             } catch ( ... ) {
                 // E.g. out of memory. Caught here rather than by the
                 // follower, which would deliver nothing and leave the last

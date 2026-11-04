@@ -52,6 +52,12 @@ class FooterEditor;
  * session asks the host to go to the line a value was found in; when the
  * host cannot, e.g. as the line is no longer in the open file, a short notice
  * says so at the value. On an older host the values do not offer it.
+ *
+ * Where the host tells the encoding it reads a Log File in, the footer, the
+ * editor's live preview and a rule from a selected line read the active
+ * file in it: asked of the host when the file becomes active, and changed
+ * by encodingChanged(). On an older host the encoding is told from the
+ * file's byte order mark.
  */
 class FooterSession {
 public:
@@ -79,7 +85,17 @@ public:
 
     /// The one active file, for the footer and the editor, also one opened
     /// later. Empty: none. The same path again scans it again for changes.
+    /// Where the host offers it (HostFeature::LogFileEncoding), the
+    /// encoding the host reads the file in is asked for now.
     void setActiveFile( const QString& filePath );
+
+    /// The host reads the Log File @p filePath in the encoding named
+    /// @p encoding now. For the active file, the encoding of the tab in
+    /// front is asked again (@p encoding where the host offers no such
+    /// question), and in another encoding than before, the footer and the
+    /// editor's preview read it afresh in that one; for any other file
+    /// nothing changes.
+    void encodingChanged( const QString& filePath, const QByteArray& encoding );
 
     /**
      * Open the rule editor over @p over, or over the application-modal
@@ -137,9 +153,17 @@ private:
     /// message why over @p messageOver, without a selected Log Line.
     std::optional<SelectedLogLines> selectedLinesOrSayWhy( QWidget* messageOver );
 
+    /// Hand the active file and its encoding to the controller and the
+    /// editor.
+    void pushActiveFile();
+
+    /// The encoding the host reads the tab in front's Log File in, asked
+    /// now; empty without an active file or where the host does not say.
+    QByteArray frontEncoding() const;
+
     /// Make a rule in @p editor from the first of the @p selected Log
-    /// Lines, read as the footer reads the active file: its encoding is
-    /// told from the file's first bytes now, as the host does not say it.
+    /// Lines, read as the footer reads the active file: in the host's
+    /// encoding, or else in the one told from the file's first bytes now.
     void addRuleFromLine( FooterEditor& editor, const SelectedLogLines& selected );
 
     /// Say, over @p over, how to make a rule from a selected line: to open
@@ -151,6 +175,8 @@ private:
     const QString configDir_;
     const HostFunctions host_;
     QString activeFile_;
+    /// The encoding the host reads the active file in; empty where it does not say.
+    QByteArray activeFileEncoding_;
     QPointer<FooterDisplayWidget> footer_;
     /// The footer's requests to go to a Log Line, to goToLine().
     QMetaObject::Connection goToLineConnection_;

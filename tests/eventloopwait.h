@@ -30,12 +30,29 @@
 #include <QEventLoop>
 #include <QThread>
 
+#if defined( __SANITIZE_ADDRESS__ )
+#define CUSTOM_FOOTER_SANITIZED 1
+#elif defined( __has_feature )
+#if __has_feature( address_sanitizer ) || __has_feature( undefined_behavior_sanitizer )
+#define CUSTOM_FOOTER_SANITIZED 1
+#endif
+#endif
+
 namespace custom_footer {
 
-/// Process events until @p done, for at most @p boundMs: a hung worker, or
-/// a file system event that never arrives, fails the test instead of hanging
-/// it. Nothing depends on timing; the bound is only a safety net. Each pass
-/// sleeps 1 ms, so a wait for another thread does not spin.
+/// How many times longer processUntil() waits: a sanitized Debug build reads
+/// a big file many times slower, and its bound must stay a safety net.
+#ifdef CUSTOM_FOOTER_SANITIZED
+inline constexpr int kWaitBoundScale = 10;
+#else
+inline constexpr int kWaitBoundScale = 1;
+#endif
+
+/// Process events until @p done, for at most @p boundMs (times
+/// kWaitBoundScale): a hung worker, or a file system event that never
+/// arrives, fails the test instead of hanging it. Nothing depends on timing;
+/// the bound is only a safety net. Each pass sleeps 1 ms, so a wait for
+/// another thread does not spin.
 /// @return false if the bound passed before @p done held.
 template <typename Predicate>
 bool processUntil( Predicate done, int boundMs = 10000 )
@@ -43,7 +60,7 @@ bool processUntil( Predicate done, int boundMs = 10000 )
     QElapsedTimer timer;
     timer.start();
     while ( !done() ) {
-        if ( timer.elapsed() > boundMs ) {
+        if ( timer.elapsed() > qint64( boundMs ) * kWaitBoundScale ) {
             return false;
         }
         QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );

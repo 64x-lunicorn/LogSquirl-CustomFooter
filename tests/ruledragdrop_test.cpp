@@ -129,9 +129,9 @@ struct DragUi {
         const std::unique_ptr<QMimeData> data(
             model->mimeData( { model->index( from, RuleListModel::KeyColumn ) } ) );
         auto* viewport = list->viewport();
-        QDragEnterEvent enter( QPointF( point ), Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
+        QDragEnterEvent enter( point, Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
         QApplication::sendEvent( viewport, &enter );
-        QDragMoveEvent move( QPointF( point ), Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
+        QDragMoveEvent move( point, Qt::MoveAction, data.get(), Qt::LeftButton, Qt::NoModifier );
         QApplication::sendEvent( viewport, &move );
         if ( !move.isAccepted() ) {
             return false;

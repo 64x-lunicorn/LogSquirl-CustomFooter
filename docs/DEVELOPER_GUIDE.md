@@ -417,7 +417,9 @@ a 26.11-sized table and through `init()` and `init_ex()` with a base table
 in a heap block of exactly `LOGSQUIRL_HOST_API_BASE_SIZE` bytes, so that a
 read past the table is a real out-of-bounds read, which an
 AddressSanitizer build (`-DCMAKE_CXX_FLAGS="-fsanitize=address
--fno-omit-frame-pointer"`) reports.
+-fno-omit-frame-pointer"`) reports. CI runs the tests so in every build, in
+Debug on Linux x64 with UndefinedBehaviorSanitizer too and without leak
+detection (`"sanitizers": true` in `.github/plugin-ci.json`).
 
 **Shutdown postcondition.** The destructor deletes the editor at once,
 open or closed but not yet deleted, with its dialogs, its preview
